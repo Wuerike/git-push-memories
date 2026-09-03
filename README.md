@@ -101,3 +101,7 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 ## Pesquisa
 
 - [Panorama de projetos de memória para IA](docs/ai-memory-projects-overview.md) — análise de projetos relacionados e recomendações para o primeiro ciclo.
+
+## Planejamento
+
+- [Roadmap](docs/roadmap.md) — sequência de resultados, avaliações e decisões que orientará o desenvolvimento.
