@@ -2,7 +2,7 @@
 
 **Data da pesquisa: 2 de setembro de 2026.**
 
-Este documento apresenta projetos relacionados a memória para agentes de IA e compara sua aderência ao contexto do `ai-git-mem`. A pesquisa considerou, principalmente, os seguintes aspectos:
+Este documento apresenta projetos relacionados a memória para agentes de IA e compara sua aderência ao contexto do `git-push-memories`. A pesquisa considerou, principalmente, os seguintes aspectos:
 
 1. memória de **domínio de engenharia**, não apenas memória pessoal ou de conversa;
 2. Markdown e Git como fonte canônica;
@@ -18,7 +18,7 @@ Não foi encontrado um projeto que reúna simultaneamente todos esses aspectos. 
 
 Foram utilizadas duas avaliações independentes:
 
-- **Aderência - 1 a 5:** quanto o projeto se aproxima do problema do `ai-git-mem`.
+- **Aderência - 1 a 5:** quanto o projeto se aproxima do problema do `git-push-memories`.
 - **Maturidade - A a C:** quão confiável ele parece como referência de implementação.
   - **A:** adoção e atividade consolidadas.
   - **B:** implementação substancial e ativa, mas mais recente, menor ou ainda em evolução.

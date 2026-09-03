@@ -1,6 +1,6 @@
-# Roadmap do ai-git-mem
+# Roadmap do git-push-memories
 
-Este roadmap descreve a direção de desenvolvimento do `ai-git-mem`. Ele organiza o trabalho por resultados e decisões, sem antecipar uma arquitetura que ainda precisa ser validada.
+Este roadmap descreve a direção de desenvolvimento do `git-push-memories`. Ele organiza o trabalho por resultados e decisões, sem antecipar uma arquitetura que ainda precisa ser validada.
 
 O roadmap não é um backlog. Cada fase define o resultado esperado, os principais entregáveis e um gate de decisão. As tarefas executáveis devem ser criadas apenas para a fase atual, depois que seu escopo estiver suficientemente claro.
 
