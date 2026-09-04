@@ -1,6 +1,6 @@
 # Licencas dos candidatos da Fase 1
 
-Registro feito a partir dos arquivos presentes nas revisoes locais fixadas em 2026-09-04. Este documento orienta a avaliacao tecnica e nao substitui revisao juridica quando houver incorporacao de codigo ou distribuicao.
+Registro feito a partir dos arquivos presentes nas revisoes locais fixadas em 2026-09-04 e complementado pela triagem estatica de manifestos, subdiretorios, dependencias e ativos. Este documento orienta a avaliacao tecnica e nao substitui revisao juridica quando houver incorporacao de codigo ou distribuicao.
 
 ## Resumo
 
@@ -22,6 +22,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Compatibilidade com a premissa: falha para fork ou componente incorporado a distribuicao Apache-2.0.
 - Uso permitido no plano atual: executar localmente para avaliacao, citar comportamentos e reimplementar ideias sem copiar expressao protegida.
 - Observacao decisiva: `plugins/claude-code/README.md` declara o plugin como MIT, mas o diretorio nao possui arquivo de licenca proprio na revisao avaliada. A origem e a extensao dessa declaracao devem ser esclarecidas antes de reutilizar qualquer arquivo do plugin.
+- Escopo verificado na triagem: os hooks executaveis ficam em `src/basic_memory/cli/commands/hook.py`; nao ha aviso de licenca separado nesse caminho, portanto a afirmacao isolada de `plugins/claude-code/README.md` nao basta para separa-los da AGPL.
 - Disposicao de licenca: referencia; eventual reutilizacao do plugin depende do spike de esclarecimento ja previsto no plano.
 
 ## ai-memory
@@ -29,6 +30,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Evidencia: `~/workspace/ai-memory/LICENSE` contem MIT, copyright 2026 Fabio Akita.
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
+- Dependencias e ativos: `deny.toml:16-42` configura `cargo-deny`, mas a politica nao foi executada nesta etapa; `crates/ai-memory-web/build.rs:20-69` e `crates/ai-memory-web/src/routes/statics.rs:9-14` mostram CSS/logo embutidos, e `companions/ai-memory-importer/Cargo.toml:1-25` nao declara licenca propria.
 - Disposicao de licenca: todas as formas permanecem abertas; arquitetura e custo ainda precisam ser avaliados.
 
 ## Palinode
@@ -36,7 +38,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Evidencia: `~/workspace/palinode/LICENSE` contem MIT, copyright 2026 Paul Kyle.
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
-- Observacao: o subdiretorio `claude-plugin` tambem possui um `LICENSE`; qualquer componente escolhido deve ter seu escopo confirmado no relatorio.
+- Observacao: `claude-plugin/LICENSE` e `claude-plugin/.claude-plugin/plugin.json` confirmam MIT nesse subdiretorio. Dependencias Python/TypeScript, vetores identificados como CC BY 4.0 em `tests/test_amr_conformance.py:1-6` e avisos de codigo adaptado ainda devem ser inventariados antes de copia.
 - Disposicao de licenca: todas as formas permanecem abertas; isolamento do componente ainda precisa ser demonstrado.
 
 ## claude-mem
@@ -44,6 +46,8 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Evidencia: `~/workspace/claude-mem/LICENSE` contem Apache-2.0 e `~/workspace/claude-mem/NOTICE` identifica Claude-Mem, copyright 2026 Alex Newman.
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacoes para redistribuicao: fornecer copia da Apache-2.0, marcar arquivos modificados, preservar avisos aplicaveis e reproduzir as atribuicoes aplicaveis do `NOTICE`.
+- Excecao de escopo: `.claude-plugin/marketplace.json:9-21` inclui `claude-mem-cowork`, cujo `cowork/.claude-plugin/plugin.json:1-17` declara PolyForm-Noncommercial-1.0.0. Esse componente nao esta aprovado para incorporacao ao produto Apache-2.0.
+- Ativos e dependencias: o clone nao possui inventario agregado para logos, fontes, slides, GIFs e bundle; `docs/license.md:26-29` tambem registra que Apache-2.0 nao concede direitos de marca.
 - Disposicao de licenca: todas as formas permanecem abertas; privacidade, worker e persistencia de sessoes ainda precisam ser avaliados.
 
 ## claude-bedrock
@@ -51,6 +55,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Evidencia: `~/workspace/claude-bedrock/LICENSE` contem MIT, copyright 2026 Iury Krieger.
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
+- Dependencias e ativos: `skills/setup/SKILL.md:116-191` instala graphify e docling sem pin ou inventario de licencas. Nao foi encontrada proveniencia individual para `docs/banner.png` ou `site/public/videos/`; esses ativos ficam fora de reutilizacao ate auditoria.
 - Disposicao de licenca: todas as formas permanecem abertas; a avaliacao determinara se ha um componente isolado ou apenas referencia.
 
 ## agent-memory
@@ -58,6 +63,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Evidencia: `~/workspace/agent-memory/LICENSE` contem Apache-2.0, copyright 2026 Teterichev Anton.
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacoes para redistribuicao: fornecer copia da Apache-2.0, marcar arquivos modificados e preservar avisos aplicaveis. Nenhum `NOTICE` raiz foi encontrado na revisao registrada.
+- Dependencias e empacotamento: `go.mod:5-12` lista as dependencias diretas, mas o clone nao contem SBOM nem agregacao de notices. `npm/package.json:6-11` publica somente `bin/`, sem demonstrar que a licenca acompanha o tarball.
 - Disposicao de licenca: todas as formas permanecem abertas; a separacao entre repositorio de codigo e memoria e o principal risco tecnico.
 
 ## twiceshy
@@ -65,6 +71,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Evidencia: `~/workspace/twiceshy/LICENSE` contem o texto AGPL-3.0 e `README.md` identifica a escolha como `AGPL-3.0-only`.
 - Compatibilidade com a premissa: falha para fork ou componente incorporado a distribuicao Apache-2.0.
 - Uso permitido no plano atual: executar localmente para avaliacao, citar comportamentos e reimplementar ideias sem copiar expressao protegida.
+- Escopo adicional: `README.md:20-24` informa que o corpus canonico e mantido em repositorio separado; ele nao estava no clone, portanto licenca e ativos nao foram auditados nem sao candidatos a reutilizacao nesta fase.
 - Disposicao de licenca: referencia para quarentena, validacao, promocao e governanca.
 
 ## Gate para reutilizacao
