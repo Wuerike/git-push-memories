@@ -37,48 +37,19 @@ Tecnologias como bancos vetoriais, grafos, ontologias e serviços externos não 
 
 | Fase | Resultado esperado | Decisão principal |
 |---|---|---|
-| 1. Casos de uso e critérios | Cenários reais e uma forma comum de avaliar soluções | O que precisa ser provado? |
-| 2. Avaliação de projetos | Escolha fundamentada entre fork, reutilização e implementação própria | Sobre qual base construir? |
-| 3. Fluxo vertical mínimo | Conhecimento publicado em uma sessão é recuperado em outra | O fluxo produz valor? |
-| 4. Confiança e governança | Propostas são consolidadas e publicadas com segurança | O fluxo é confiável? |
-| 5. Captura automática | Hooks geram propostas úteis sem persistir sessões | A automação mantém qualidade e privacidade? |
-| 6. Recuperação e escala | A busca continua relevante com o crescimento da memória | É necessário um índice mais sofisticado? |
+| 1. Avaliação de projetos | Referências concretas e escolha fundamentada entre fork, reutilização e implementação própria | Quais conceitos adotar e sobre qual base construir? |
+| 2. Fluxo vertical mínimo | Conhecimento publicado em uma sessão é recuperado em outra | O fluxo produz valor? |
+| 3. Confiança e governança | Propostas são consolidadas e publicadas com segurança | O fluxo é confiável? |
+| 4. Captura automática | Hooks geram propostas úteis sem persistir sessões | A automação mantém qualidade e privacidade? |
+| 5. Recuperação e escala | A busca continua relevante com o crescimento da memória | É necessário um índice mais sofisticado? |
 
 As fases representam dependências de decisão, não necessariamente versões ou intervalos de tempo. Atividades preparatórias podem ocorrer em paralelo, mas nenhum gate deve ser considerado concluído sem evidência.
 
-## Fase 1: Casos de uso e critérios
+## Fase 1: Avaliação de projetos
 
 ### Resultado esperado
 
-Um conjunto pequeno de cenários reais capaz de orientar decisões de produto, comparar projetos existentes e avaliar o primeiro fluxo implementado.
-
-Os cenários devem cobrir pelo menos:
-
-- recuperação de uma regra de negócio relevante para uma tarefa;
-- recuperação de uma decisão técnica ainda válida;
-- atualização de conhecimento existente;
-- identificação de informação duplicada;
-- tratamento de informações contraditórias;
-- rejeição de conteúdo sensível ou específico de uma sessão;
-- ausência de memória relevante para a tarefa atual.
-
-### Entregáveis
-
-- casos de uso prioritários descritos com entradas e resultados esperados;
-- corpus inicial de memória Markdown, pequeno e representativo;
-- tarefas de avaliação que possam ser executadas com e sem memória;
-- critérios para relevância, correção, privacidade e esforço de manutenção;
-- forma inicial de registrar resultados e observações.
-
-### Gate de decisão
-
-A fase termina quando projetos e protótipos puderem ser comparados usando os mesmos cenários e critérios.
-
-## Fase 2: Avaliação de projetos
-
-### Resultado esperado
-
-Uma decisão documentada sobre a base de implementação. O resultado pode ser fazer fork de um projeto, reutilizar componentes isolados ou construir uma implementação própria inspirada nas referências estudadas.
+Uma decisão documentada sobre a base de implementação, fundamentada na observação de soluções existentes. O resultado pode ser fazer fork de um projeto, reutilizar componentes isolados ou construir uma implementação própria inspirada nas referências estudadas.
 
 ### Candidatos iniciais
 
@@ -99,7 +70,7 @@ A lista é inicial. Um projeto pode ser removido cedo se sua licença, arquitetu
 
 1. Registrar versão, atividade, licença e obrigações de redistribuição de cada candidato.
 2. Executar seus fluxos principais e rastrear onde os dados são capturados, persistidos, consolidados e recuperados.
-3. Avaliar os candidatos com os cenários e critérios definidos na fase anterior.
+3. Identificar, nos fluxos observados, abordagens úteis para relevância, correção, privacidade, consolidação e manutenção.
 4. Criar spikes apenas para dúvidas que não possam ser respondidas pela documentação ou pelo código.
 5. Comparar custo de adaptação, dependências operacionais, testabilidade e compatibilidade com as restrições do primeiro ciclo.
 6. Registrar a decisão em um ADR antes de incorporar código ao produto.
@@ -127,7 +98,7 @@ Todo código reutilizado deve ter origem, versão e licença registradas. Inspir
 
 A fase termina quando existir uma base escolhida ou uma justificativa explícita para implementação própria, sem dúvidas críticas pendentes sobre licença ou compatibilidade arquitetural.
 
-## Fase 3: Fluxo vertical mínimo
+## Fase 2: Fluxo vertical mínimo
 
 ### Resultado esperado
 
@@ -154,13 +125,13 @@ A proposta deve preferir alterar a explicação do estado atual a simplesmente a
 - consolidação de uma proposta como alteração Markdown;
 - publicação usando o fluxo Git existente;
 - recuperação com orçamento de contexto limitado;
-- demonstração reproduzível usando os cenários da fase 1.
+- demonstração reproduzível aplicando os conceitos e critérios selecionados na fase 1.
 
 ### Gate de decisão
 
 A fase termina quando ao menos um cenário real mostrar que a memória publicada melhora a execução posterior sem exigir acesso à sessão original.
 
-## Fase 4: Confiança e governança
+## Fase 3: Confiança e governança
 
 ### Resultado esperado
 
@@ -189,7 +160,7 @@ Tornar o fluxo mínimo seguro o suficiente para produzir memória compartilhada 
 
 A fase termina quando uma proposta incorreta, contraditória ou sensível for interrompida ou encaminhada para revisão, e uma proposta válida puder ser publicada com histórico auditável.
 
-## Fase 5: Captura automática
+## Fase 4: Captura automática
 
 ### Resultado esperado
 
@@ -216,7 +187,7 @@ Reduzir a dependência de comandos manuais sem transformar sessões completas em
 
 A fase termina quando a captura automática gerar propostas aproveitáveis com baixo custo de revisão e sem violar a política de privacidade.
 
-## Fase 6: Recuperação e escala
+## Fase 5: Recuperação e escala
 
 ### Resultado esperado
 
@@ -256,7 +227,7 @@ O avanço não deve ser medido apenas por funcionalidades entregues. Cada fase d
 - violações ou quase violações da fronteira de privacidade;
 - volume de contexto fornecido ao agente.
 
-Os valores aceitáveis serão definidos depois que a fase 1 produzir uma linha de base. Métricas sem uma decisão associada não devem orientar complexidade adicional.
+Os valores aceitáveis serão definidos a partir das evidências produzidas ao longo das fases. Métricas sem uma decisão associada não devem orientar complexidade adicional.
 
 ## Do roadmap para tarefas
 
@@ -270,7 +241,7 @@ Somente a fase ativa deve ser decomposta em tarefas detalhadas. Cada tarefa deve
 
 Por exemplo, "analisar o Basic Memory" não é uma tarefa suficientemente definida. Uma tarefa executável seria:
 
-> Executar um spike do modelo Markdown com índice SQLite do Basic Memory nos cenários de recuperação definidos na fase 1, registrando qualidade dos resultados, dependências e esforço de adaptação.
+> Executar o fluxo de recuperação do Basic Memory, registrando como o projeto organiza o Markdown e o índice SQLite, a qualidade dos resultados, as dependências e o esforço de adaptação às restrições do produto.
 
 ## Documentos de apoio
 
