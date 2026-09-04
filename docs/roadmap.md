@@ -90,6 +90,7 @@ A pesquisa em [Panorama de projetos de memória para IA](ai-memory-projects-over
 | akitaonrails/ai-memory | Fluxo integrado, fronteira de privacidade e consolidação |
 | Palinode | Evidência, estados epistêmicos e operações estruturadas |
 | claude-mem | Hooks do Claude Code e recuperação progressiva |
+| claude-bedrock | Vault Markdown/Git, propostas de mudança e curadoria assistida por agentes |
 | Projetos Git-first menores | Propostas, validação, promoção e revisão por Git |
 
 A lista é inicial. Um projeto pode ser removido cedo se sua licença, arquitetura ou modelo de dados for incompatível com as restrições do produto.
