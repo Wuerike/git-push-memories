@@ -51,18 +51,21 @@ As fases representam dependências de decisão, não necessariamente versões ou
 
 Uma decisão documentada sobre a base de implementação, fundamentada na observação de soluções existentes. O resultado pode ser fazer fork de um projeto, reutilizar componentes isolados ou construir uma implementação própria inspirada nas referências estudadas.
 
-### Candidatos iniciais
+### Projetos selecionados para avaliação
 
 A pesquisa em [Panorama de projetos de memória para IA](ai-memory-projects-overview.md) sugere avaliar os projetos por suas especialidades:
 
-| Projeto ou grupo | Aspecto a avaliar |
-|---|---|
-| Basic Memory | Markdown canônico e índice SQLite derivado |
-| akitaonrails/ai-memory | Fluxo integrado, fronteira de privacidade e consolidação |
-| Palinode | Evidência, estados epistêmicos e operações estruturadas |
-| claude-mem | Hooks do Claude Code e recuperação progressiva |
-| claude-bedrock | Vault Markdown/Git, propostas de mudança e curadoria assistida por agentes |
-| Projetos Git-first menores | Propostas, validação, promoção e revisão por Git |
+Os seguintes repositórios foram clonados em `~/workspace` para a avaliação da fase:
+
+| Projeto | Repositório | Clone local | Aspecto a avaliar |
+|---|---|---|---|
+| Basic Memory | [basicmachines-co/basic-memory](https://github.com/basicmachines-co/basic-memory) | `~/workspace/basic-memory` | Markdown canônico e índice SQLite derivado |
+| ai-memory | [akitaonrails/ai-memory](https://github.com/akitaonrails/ai-memory) | `~/workspace/ai-memory` | Fluxo integrado, fronteira de privacidade e consolidação |
+| Palinode | [phasespace-labs/palinode](https://github.com/phasespace-labs/palinode) | `~/workspace/palinode` | Evidência, estados epistêmicos e operações estruturadas |
+| claude-mem | [thedotmack/claude-mem](https://github.com/thedotmack/claude-mem) | `~/workspace/claude-mem` | Hooks do Claude Code e recuperação progressiva |
+| claude-bedrock | [iurykrieger/claude-bedrock](https://github.com/iurykrieger/claude-bedrock) | `~/workspace/claude-bedrock` | Vault Markdown/Git, propostas de mudança e curadoria assistida por agentes |
+| agent-memory | [xChuCx/agent-memory](https://github.com/xChuCx/agent-memory) | `~/workspace/agent-memory` | Diff, aplicação explícita, scan de segredos e revisão por Git |
+| twiceshy | [dotts-h/twiceshy](https://github.com/dotts-h/twiceshy) | `~/workspace/twiceshy` | Quarentena, validação, promoção e revisão por pull request |
 
 A lista é inicial. Um projeto pode ser removido cedo se sua licença, arquitetura ou modelo de dados for incompatível com as restrições do produto.
 
