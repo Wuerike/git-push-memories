@@ -106,3 +106,9 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 ## Planejamento
 
 - [Roadmap](docs/roadmap.md) — sequência de resultados, avaliações e decisões que orientará o desenvolvimento.
+
+## Licença
+
+O software deste repositório é disponibilizado sob a [Apache License 2.0](LICENSE).
+Essa licença não se estende automaticamente ao conteúdo dos repositórios de memória
+criados ou mantidos pelos usuários.
