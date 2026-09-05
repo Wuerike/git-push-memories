@@ -31,17 +31,17 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
 - Dependencias e ativos: `deny.toml:16-42` configura `cargo-deny`, mas a politica nao foi executada nesta etapa; `crates/ai-memory-web/build.rs:20-69` e `crates/ai-memory-web/src/routes/statics.rs:9-14` mostram CSS/logo embutidos, e `companions/ai-memory-importer/Cargo.toml:1-25` nao declara licenca propria.
-- Disposicao de licenca: reimplementacao conceitual; nenhum crate ou ativo entrou na shortlist de copia. O sanitizador so deve ser auditado se Rust for escolhido no ADR.
+- Disposicao de licenca: reimplementacao conceitual; nenhum crate ou ativo entrou na lista de copia e a escolha de Go encerrou a auditoria adicional neste ciclo.
 
 ## Palinode
 
 - Evidencia: `~/workspace/palinode/LICENSE` contem MIT, copyright 2026 Paul Kyle.
-- Compatibilidade com a premissa: parcial para o produto completo; a fatia exata da Etapa 7 e permissiva e foi delimitada para decisao no ADR.
+- Compatibilidade com a premissa: parcial para o produto completo; a fatia exata da Etapa 7 e permissiva, mas foi rejeitada pela ADR 0001.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
 - Observacao: `claude-plugin/LICENSE` e `claude-plugin/.claude-plugin/plugin.json` confirmam MIT nesse subdiretorio. Dependencias Python/TypeScript, vetores identificados como CC BY 4.0 em `tests/test_amr_conformance.py:1-6` e avisos de codigo adaptado ainda devem ser inventariados antes de copia.
 - Escopo verificado na Etapa 7: a fatia offline de parser, executor, hashing, quotes, claims e typed links foi extraida de arquivos cobertos pela MIT raiz. O runtime minimo usou `python-frontmatter==1.1.0` e `PyYAML==6.0.2`, ambos inventariados como MIT; seus textos e metadados estao na evidencia do spike.
 - Exclusoes da fatia: plugin, prompts, vetores CC BY 4.0, modelos, ativos, API, store, indice, sessoes e integracoes nao foram aprovados para copia.
-- Disposicao de licenca: fatia offline candidata a adaptacao somente se Python for o runtime principal, mediante preservacao dos tres avisos MIT; o ADR deve aprovar qualquer incorporacao.
+- Disposicao de licenca: referencia e reimplementacao conceitual. A ADR 0001 escolheu Go e nenhum fonte ou dependencia Palinode sera incorporado.
 
 ## claude-mem
 
@@ -63,10 +63,10 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 ## agent-memory
 
 - Evidencia: `~/workspace/agent-memory/LICENSE` contem Apache-2.0, copyright 2026 Teterichev Anton.
-- Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas a lista final depende do runtime e do ADR.
+- Compatibilidade com a premissa: passa para os tres arquivos escolhidos; a licenca raiz Apache-2.0, os blobs, a unica dependencia externa e suas obrigacoes estao delimitados abaixo.
 - Obrigacoes para redistribuicao: fornecer copia da Apache-2.0, marcar arquivos modificados e preservar avisos aplicaveis. Nenhum `NOTICE` raiz foi encontrado na revisao registrada.
 - Dependencias e empacotamento: `go.mod:5-12` lista as dependencias diretas, mas o clone nao contem SBOM nem agregacao de notices. `npm/package.json:6-11` publica somente `bin/`, sem demonstrar que a licenca acompanha o tarball.
-- Disposicao de licenca: adaptacao seletiva candidata se Go for escolhido. A Etapa 7 resolveu a viabilidade de roots, mas os pacotes `internal`, dependencias e correcoes do prototipo impedem uso direto.
+- Disposicao de licenca: a ADR 0001 aprovou a adaptacao de `parse.go`, `splice.go` e `section_id.go`. A Etapa 7 resolveu a viabilidade de roots, mas os demais pacotes `internal`, dependencias e correcoes do prototipo continuam fora da incorporacao.
 
 ## twiceshy
 
@@ -76,9 +76,9 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Escopo adicional: `README.md:20-24` informa que o corpus canonico e mantido em repositorio separado; ele nao estava no clone, portanto licenca e ativos nao foram auditados nem sao candidatos a reutilizacao nesta fase.
 - Disposicao de licenca: referencia para quarentena, validacao, promocao e governanca.
 
-## Shortlist condicional da Etapa 8
+## Shortlist da Etapa 8 e decisao da Etapa 9
 
-Nenhuma linha abaixo autoriza incorporacao. A shortlist registra somente as fontes que ainda podem ser escolhidas pelo ADR; qualquer outro arquivo, teste, fixture, prompt, plugin ou ativo continua fora do escopo.
+A [ADR 0001](../adr/0001-implementation-base.md) aprovou somente tres arquivos do agent-memory. Qualquer outro arquivo, teste, fixture, prompt, plugin ou ativo continua fora do escopo.
 
 ### agent-memory Markdown
 
@@ -92,7 +92,7 @@ Origem: `xChuCx/agent-memory@51dac9bf6e72c67f6314ee3abb00515986a3fa4a`, Apache-2
 | `internal/markdown/validate.go` | `ad50e61fa055b7c286b5d829a9c496d66ffbdd22` |
 | `internal/markdown/merge.go` | `861d92bb230aab894c6ca2aacd424325f47432c4` |
 
-Esses arquivos formam o menor pacote candidato de parsing e edicao byte-preserving. A dependencia direta relevante e `github.com/yuin/goldmark@v1.7.4`, MIT. Como o pacote esta sob `internal/`, outro modulo Go nao pode importa-lo: reutilizacao exige copiar/renomear fonte ou manter fork com interface publica. Em ambos os casos, fornecer Apache-2.0, preservar avisos e marcar arquivos modificados.
+`parse.go`, `splice.go` e `section_id.go` formam o conjunto aprovado de parsing e edicao byte-preserving. `parse.go` importa Goldmark; os outros dois usam somente a biblioteca padrao e simbolos definidos nesse conjunto. Goldmark 1.7.4 nao declara dependencias de modulo em seu `go.mod`. Assim, a closure externa de producao dessa fatia e somente `github.com/yuin/goldmark@v1.7.4`, MIT, copyright 2019 Yusuke Inuzuka. `validate.go` foi rejeitado porque nao valida o schema do produto; `merge.go` foi rejeitado porque merge entre branches esta fora da Fase 2 e sua politica nao foi adotada. Como o pacote esta sob `internal/`, a incorporacao copiara e renomeara a fonte, fornecera Apache-2.0, preservara avisos e marcara arquivos modificados.
 
 `internal/memory`, staging, apply, scanner, Git, adapters e indice nao estao aprovados para copia. Sao referencias porque compartilham tipos internos, e a revisao fixa nao contem as correcoes de cold start, staging ID e drift demonstradas na Etapa 7. Os arquivos do prototipo foram produzidos durante a avaliacao e nao herdam automaticamente autoria ou licenca do upstream.
 
@@ -121,23 +121,20 @@ palinode/consolidation/executor.py
 
 Os Git blobs e SHA-256 de cada arquivo estao preservados no [spike](spikes/palinode-offline-extraction.md) e em seu artefato. O runtime testado usou `python-frontmatter==1.1.0` e `PyYAML==6.0.2`, ambos MIT e sem outras dependencias instaladas. Distribuicao exige os avisos MIT independentes de Palinode, python-frontmatter e PyYAML.
 
-A fatia nao e pacote publicado nem interface estavel. `executor.py` precisou de adapter para substituir `git_tools`; `typed_links.py` conserva import lazy para indexer; `json_repair` foi excluido; writes historicos nao sao transacao; `UPDATE` nao transporta evidencia. A recomendacao da Etapa 8 e reimplementar os conceitos de evidencia se Go for escolhido. Source adaptation da fatia so permanece aberta se Python for a unica base.
+A fatia nao e pacote publicado nem interface estavel. `executor.py` precisou de adapter para substituir `git_tools`; `typed_links.py` conserva import lazy para indexer; `json_repair` foi excluido; writes historicos nao sao transacao; `UPDATE` nao transporta evidencia. A ADR 0001 escolheu reimplementar os conceitos de evidencia em Go; a fatia nao sera incorporada.
 
 ### Registro esperado
 
-| Item, se escolhido | Licenca | Material de distribuicao |
+| Item escolhido | Licenca | Material de distribuicao |
 |---|---|---|
-| fonte agent-memory selecionada | Apache-2.0 | texto Apache, avisos preservados, arquivos modificados marcados |
+| tres fontes agent-memory selecionadas | Apache-2.0 | texto Apache, avisos preservados, arquivos modificados marcados |
 | Goldmark 1.7.4 | MIT | copyright e texto MIT |
-| fonte Palinode selecionada | MIT | copyright Paul Kyle e texto MIT |
-| python-frontmatter 1.1.0 | MIT | copyright Chris Amico e texto MIT |
-| PyYAML 6.0.2 | MIT | copyrights aplicaveis e texto de permissao |
 
-O artefato Python preservou versoes e licencas, mas nao o hash da distribuicao instalada. Se Python for escolhido, o lock do produto deve registrar hashes e resolver a divergencia entre PyYAML 6.0.2 testado no spike e 6.0.3 presente no lock completo do Palinode.
+Palinode, python-frontmatter e PyYAML nao geram obrigacoes de distribuicao porque nenhuma fonte ou dependencia sera incorporada. Seus registros permanecem como evidencia da alternativa rejeitada.
 
-## Gate para reutilizacao
+## Precondicoes para incorporacao
 
-Antes de incorporar qualquer componente, registrar no ADR e no inventario de terceiros:
+O gate decisorio da Fase 1 esta fechado. Na mesma mudanca que incorporar o componente aprovado, registrar no inventario de terceiros e no material de distribuicao:
 
 1. arquivo ou pacote exato e revisao de origem;
 2. licenca aplicavel ao caminho, incluindo excecoes ou licencas de subdiretorios;

@@ -2,9 +2,7 @@
 
 ## Status da sintese
 
-Este mapa consolida a Etapa 8 e prepara alternativas para a decisao da Etapa 9. Ele nao escolhe a base arquitetural nem autoriza incorporar codigo de terceiros.
-
-A hipotese preferida para o ADR e uma **arquitetura propria**, com um unico contrato de Markdown, proposta e aplicacao. Permanecem abertas tres alternativas: base Go com adaptacao seletiva do Markdown do agent-memory, base Python com adaptacao seletiva de primitivas Palinode, ou implementacao limpa informada por ambos. Fork integral e runtime misto foram eliminados pelas evidencias.
+Este mapa consolida a Etapa 8. A [decisao da Etapa 9](../adr/0001-implementation-base.md) escolheu uma **arquitetura propria em Go**, com um unico contrato de Markdown, proposta e aplicacao e adaptacao de tres arquivos do motor Markdown do agent-memory. Fork integral, runtime misto e copia de fonte Palinode foram eliminados pelas evidencias.
 
 O fluxo usado para comparar essas alternativas e:
 
@@ -30,13 +28,13 @@ Markdown e Git sao a unica autoridade duravel. Propostas sao artefatos temporari
 | `referenciar` | usar somente como evidencia e fonte de decisoes |
 | `rejeitar` | excluir deliberadamente do primeiro ciclo |
 
-Qualquer `adaptar` permanece condicionado ao inventario exato e ao ADR. Nenhum fork ou modulo de terceiro foi adotado nesta fase.
+`Adaptar` exige cumprir as precondicoes de incorporacao da [analise de licencas](licenses.md#precondicoes-para-incorporacao). Nenhum fork foi adotado; somente tres arquivos do agent-memory foram aprovados para adaptacao.
 
 ## Mapa principal
 
 | Capacidade | Disposicao | Fonte determinante | Decisao para o produto |
 |---|---|---|---|
-| Formato e organizacao do Markdown | `adaptar` | agent-memory; Basic Memory como referencia | Usar paginas legiveis, IDs estaveis de secao e edicao byte-preserving. A disposicao so se materializa se Go e copia de fonte forem aprovados no ADR. |
+| Formato e organizacao do Markdown | `adaptar` | agent-memory; Basic Memory como referencia | Adaptar `parse.go`, `splice.go` e `section_id.go` para paginas legiveis, IDs estaveis de secao e edicao byte-preserving. |
 | Indice local e reconstrucao | `referenciar` | Basic Memory e agent-memory | A Fase 2 comeca com arquivos e busca textual simples. FTS5 so entra depois de falha medida; qualquer implementacao futura deve ser read-only contra Markdown. |
 | Contrato de proposta | `reimplementar` | agent-memory e ai-memory | Criar proposta imutavel com operacoes, hashes completos de baseline/post-state, diff, referencias de evidencia, revisao e status; nao usar staging mutavel nem DB-authoritative. |
 | Consolidacao de estado atual | `reimplementar` | operacoes por secao do agent-memory; supersessao do ai-memory | Criar politica propria de substituicao deterministica do estado autoritativo. Append nao pode representar fato atual por padrao. |
@@ -46,11 +44,10 @@ Qualquer `adaptar` permanece condicionado ao inventario exato e ao ADR. Nenhum f
 | Integracao com Claude Code | `reimplementar` | claude-mem e agent-memory | Na Fase 2, criar captura explicita e recuperacao por MCP sob interfaces do produto. Hooks automaticos usam a mesma interface apenas na Fase 4. |
 | Recuperacao progressiva | `reimplementar` | claude-mem; FTS do agent-memory como referencia | Retornar resumo e paths dentro do orcamento; carregar paginas integrais somente sob demanda. Nao expor sessoes ou schema SQLite. |
 | Proveniencia e evidencia | `reimplementar` | Palinode | Usar source path, hash de quote, claims e relacoes `backed_by`/`contradicts` em contrato proprio. Evidencia deve acompanhar o fato atual, nao apenas proposta arquivada. |
-| Primitivas de evidencia em base Python | `adaptar` | fatia offline do Palinode | Alternativa condicional: se Python for escolhido, adaptar hashing, quotes, claims e typed links da fatia inventariada; nao adotar seu executor como segunda seam. |
 
-## Modulos candidatos
+## Modulos escolhidos
 
-Os nomes e interfaces abaixo sao sketches independentes de runtime para comparar as tres alternativas no ADR. Eles nao fixam tipos, persistencia, protocolo ou empacotamento de producao.
+Os nomes e interfaces abaixo definem as seams escolhidas. Eles orientam o tracer bullet sem fixar nomes de tipos Go, protocolo externo ou empacotamento de producao.
 
 ### Intake Guard
 
@@ -169,10 +166,10 @@ Regra de ownership: **agent-memory informa como o Markdown muda; Palinode inform
 | Alternativa | Custo inicial | Dependencias | Risco de manutencao | Conclusao |
 |---|---|---|---|---|
 | fork agent-memory | medio; alto apos hardening | Go, Goldmark, flock, YAML, modernc SQLite, MCP/Cobra | alto; herda arquitetura rejeitada | rejeitar |
-| base propria Go com Markdown agent-memory adaptado | medio | Go e Goldmark inicialmente; Git externo | medio; fonte copiada precisa tracking | recomendacao se Go for escolhido |
-| base propria Python com primitivas Palinode | medio | Python, python-frontmatter, PyYAML e Git | medio-alto; interfaces beta e adapter necessario | alternativa se Python for escolhido |
+| base propria Go com Markdown agent-memory adaptado | medio | Go e Goldmark inicialmente; Git externo | medio; fonte copiada precisa tracking | **escolhida** |
+| base propria Python com primitivas Palinode | medio | Python, python-frontmatter, PyYAML e Git | medio-alto; interfaces beta e adapter necessario | rejeitar; conceitos permanecem referencia |
 | Go mais runtime Palinode Python | alto | duas toolchains e dois modelos | muito alto | rejeitar |
-| implementacao limpa informada pelos dois | medio-alto | somente dependencias escolhidas pelo produto | menor acoplamento externo | alternativa forte ao source adaptation |
+| implementacao limpa informada pelos dois | medio-alto | somente dependencias escolhidas pelo produto | menor acoplamento externo | regra para capacidades fora do motor Markdown |
 
 O indice `modernc.org/sqlite` deve ser adiado: sua closure e grande e o roadmap so pede FTS apos falha medida. Busca textual por arquivos e metadados basta para o primeiro tracer bullet.
 
@@ -180,29 +177,17 @@ O indice `modernc.org/sqlite` deve ser adiado: sua closure e grande e o roadmap 
 
 | Candidato | Papel final da Fase 1 |
 |---|---|
-| Basic Memory | referencia para Markdown, reconciliacao arquivo-indice, CAS e busca local; AGPL impede copia |
+| Basic Memory | referencia para Markdown, reconciliacao arquivo-indice, CAS e busca local; AGPL impede reutilizacao direta mantendo Apache-2.0 sem relicenciamento explicito |
 | ai-memory | reimplementacao conceitual de supersessao, baseline/drift, wiki separada e sanitizacao tipada |
-| Palinode | referencia principal para evidencia; source adaptation apenas se Python for a base unica |
+| Palinode | reimplementacao conceitual de evidencia; nenhum fonte sera copiado |
 | claude-mem | referencia para hooks, IO compacto, fail-open e recuperacao progressiva |
 | claude-bedrock | referencia para multiplos vaults, proveniencia e estrategias Git; nenhum modulo deterministico escolhido |
-| agent-memory | candidato a adaptacao seletiva do Markdown; restante informa operacoes, diff, lock e FTS |
-| twiceshy | referencia para quarantine, estados de confianca, counter-evidence e recuperacao precision-first; AGPL impede copia |
+| agent-memory | fonte aprovada para adaptacao dos tres arquivos Markdown; restante informa operacoes, diff, lock e FTS |
+| twiceshy | referencia para quarantine, estados de confianca, counter-evidence e recuperacao precision-first; AGPL impede reutilizacao direta mantendo Apache-2.0 sem relicenciamento explicito |
 
-## Gates para o ADR
+## Decisoes do ADR
 
-A Etapa 9 deve decidir:
-
-1. runtime principal: Go, Python ou implementacao limpa em outro runtime;
-2. source adaptation versus reimplementacao independente;
-3. lista exata de arquivos copiados e politica de tracking upstream;
-4. um unico modelo de IDs e schema Markdown;
-5. schema e serializacao da proposta;
-6. persistencia temporaria das propostas sanitizadas;
-7. semantica de atomicidade e recuperacao multi-arquivo;
-8. modo padrao de publicacao Git;
-9. forma de empacotar licencas, notices e marcacoes de modificacao.
-
-Esses pontos nao exigem novos testes nos candidatos. Sao escolhas da arquitetura do produto a serem registradas no ADR.
+A Etapa 9 escolheu Go, adaptacao dos tres arquivos Markdown, IDs por path e anchor, propostas JSON sanitizadas e temporarias, apply limitado a um arquivo na Fase 2 e commit path-scoped com indice Git isolado. A [ADR 0001](../adr/0001-implementation-base.md#contratos-iniciais) registra schema, atomicidade, publicacao, licencas e tracking upstream.
 
 ## Entrada para a Fase 2
 

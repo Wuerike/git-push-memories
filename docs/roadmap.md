@@ -101,6 +101,8 @@ Todo código reutilizado deve ter origem, versão e licença registradas. Inspir
 
 A fase termina quando existir uma base escolhida ou uma justificativa explícita para implementação própria, sem dúvidas críticas pendentes sobre licença ou compatibilidade arquitetural.
 
+**Estado em 2026-09-05:** fase concluida pela [ADR 0001](adr/0001-implementation-base.md), que escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory.
+
 ## Fase 2: Fluxo vertical mínimo
 
 ### Resultado esperado

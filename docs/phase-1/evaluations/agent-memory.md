@@ -260,19 +260,21 @@ O prototipo precisou corrigir tres defeitos delimitados: `SQLITE_BUSY` no cold s
 | Repositorio de memoria separado | parcial | [Etapa 7](#etapa-7-roots-separados) | A revisao fixa une roots; prototipo delimitado separou memoria e dois consumidores. |
 | Integracao com Claude Code | parcial | [Etapa 6](#etapa-6-integracao-com-claude-code) | Skill e MCP carregaram e o ciclo funcional passou, mas nao ha hooks e a ativacao depende do modelo seguir a skill. |
 | Testabilidade | parcial | [Etapa 5](#testes-executados) | Suite passa, mas omite quatro falhas criticas demonstradas pelo harness. |
-| Licenca compativel | parcial | [Licencas](../licenses.md#agent-memory) | Apache-2.0; transitivas/notices e npm requerem auditoria. |
+| Licenca compativel | passa | [Licencas](../licenses.md#agent-memory) | A fatia final possui tres arquivos Apache-2.0 e Goldmark MIT como unica dependencia externa; npm e restante do produto foram excluidos. |
 | Custo de adaptacao | passa | [Etapa 7](#etapa-7-roots-separados) | Seam de roots e tres correcoes concorrentes foram demonstradas e delimitadas. |
 
 ## Riscos, custo e duvidas
 
 O spike demonstrou a separacao na composicao de CLI/MCP, o namespacing minimo e as mutacoes Git confinadas a memoria, mas uma interface de producao ainda deve cobrir doctor, instalacao e configuracao persistida. O hotfix 0.5.1 corrige roteamento cruzado anterior (`CHANGELOG.md:8-23`), e a Etapa 7 encontrou riscos adicionais em cold start e staging concorrente. A Etapa 5 mantem a necessidade de tornar staging imutavel ou verificavel, revalidar scan/schema no apply, proteger o arquivo integral contra drift e isolar commits do indice preexistente.
 
-Fluxos restantes limitados:
+Limites da orquestracao que nao sera incorporada:
 
-1. Endurecer staging, revalidacao de scan/schema, drift e isolamento de commit antes de reutilizacao.
-2. Delimitar configuracao publica, doctor, instalacao e colisao de consumer IDs.
-3. Resposta autenticada do modelo, apenas se a obediencia espontanea a skill puder alterar a decisao.
+1. Staging, scan/schema, drift e isolamento de commit serao reimplementados, nao endurecidos no candidato.
+2. Configuracao publica, doctor, instalacao e consumer IDs pertencerao aos contratos do produto.
+3. A resposta autenticada do modelo nao reabre a decisao; a integracao da Fase 2 comeca por captura explicita.
 
-## Recomendacao preliminar
+## Disposicao final
 
-**Adaptacao seletiva condicionada ao ADR.** Se Go for escolhido, os cinco arquivos do pacote Markdown byte-preserving formam a principal shortlist de fonte. Operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia permanecem referencias, mas apply, privacidade, sessoes, drift e commit devem ser substituidos ou endurecidos sob interfaces do produto. O spike de roots passou; a revisao original nao sustenta fork ou base end-to-end. Veja o [mapa de capacidades](../capability-map.md#agent-memory-versus-palinode).
+**Adaptacao seletiva de tres arquivos aprovada pela ADR 0001.** A analise estatica de `parse.go`, `splice.go` e `section_id.go` mostra uma closure interna fechada: parsing define secoes e offsets, splice aplica substituicoes byte-preserving e section ID depende somente dessas duas primitivas. Apenas `parse.go` importa uma dependencia externa, Goldmark 1.7.4, cujo `go.mod` nao declara outros modulos. Os blobs exatos e as licencas estao no [inventario](../licenses.md#agent-memory).
+
+`validate.go` ficou fora porque apenas invoca o parser permissivo do Goldmark e nao valida o schema do produto. `merge.go` ficou fora porque nao e referenciado pelos tres arquivos, pertence a uma fase posterior e conserva exclusoes unilaterais por uma politica que o produto nao adotou. Operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia permanecem referencias, mas apply, privacidade, sessoes, drift e commit serao implementados sob interfaces do produto. O spike de roots passou; a revisao original nao sustenta fork ou base end-to-end. Veja o [mapa de capacidades](../capability-map.md#agent-memory-versus-palinode).

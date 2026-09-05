@@ -210,7 +210,7 @@ Cada spike terá timebox de um dia útil e deverá produzir:
 4. Comparar custo de adaptação, dependências operacionais e riscos das alternativas restantes.
 5. Registrar dúvidas remanescentes e encerrar as que não alteram a decisão.
 
-**Estado em 2026-09-05:** etapa concluida. A matriz nao possui classificacoes `pendente`; capacidades comportamentais nao executadas e fora do papel final foram encerradas como `não se aplica`, sem inferir sucesso. O [mapa de capacidades](capability-map.md) elimina fork integral e runtime misto, resolve owners sobrepostos e apresenta tres alternativas ao ADR: base Go com adaptacao seletiva do Markdown do agent-memory, base Python com adaptacao seletiva de primitivas Palinode ou implementacao limpa informada por ambos. A shortlist e as obrigacoes condicionais estao em [licencas](licenses.md#shortlist-condicional-da-etapa-8). Runtime, source adaptation, schema e publicacao permanecem decisoes da Etapa 9; nenhuma exige novo teste de candidato.
+**Estado em 2026-09-05:** etapa concluida. A matriz nao possui classificacoes `pendente`; capacidades comportamentais nao executadas e fora do papel final foram encerradas como `não se aplica`, sem inferir sucesso. O [mapa de capacidades](capability-map.md) eliminou fork integral e runtime misto, resolveu owners sobrepostos e apresentou tres alternativas ao ADR: base Go com adaptacao seletiva do Markdown do agent-memory, base Python com adaptacao seletiva de primitivas Palinode ou implementacao limpa informada por ambos. A shortlist e as obrigacoes condicionais foram registradas em [licencas](licenses.md#shortlist-da-etapa-8-e-decisao-da-etapa-9). Ao termino da Etapa 8, runtime, source adaptation, schema e publicacao permaneciam decisoes da Etapa 9; nenhuma exigia novo teste de candidato.
 
 O mapa deve incluir, no mínimo:
 
@@ -240,6 +240,8 @@ Criar `docs/adr/0001-implementation-base.md` contendo:
 - implicações para o fluxo vertical da Fase 2.
 
 A hipótese inicial é uma implementação própria com conceitos e, quando apropriado, componentes isolados. Ela não deve ser tratada como decisão antes da conclusão das avaliações.
+
+**Estado em 2026-09-05:** etapa concluida pela [ADR 0001](../adr/0001-implementation-base.md). A base escolhida e uma implementacao propria em Go, com adaptacao de `parse.go`, `splice.go` e `section_id.go` do agent-memory. As demais capacidades serao reimplementadas sob contratos proprios; nenhum fonte Palinode sera copiado. A ADR tambem fixou identidade Markdown, proposta temporaria, drift, recuperacao, atomicidade de um arquivo, publicacao Git isolada e obrigacoes de licenca. Todos os gates decisorios da Fase 1 estao encerrados; o inventario de terceiros e criterio de aceite da futura mudanca que incorporar a fonte aprovada.
 
 ## Ordem e paralelismo
 

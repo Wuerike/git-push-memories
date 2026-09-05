@@ -16,21 +16,21 @@ Esta matriz e o indice das classificacoes. O significado dos valores e as condic
 | Repositorio de memoria separado | [passa](evaluations/basic-memory.md#criterios) | [passa](evaluations/ai-memory.md#criterios) | [passa](evaluations/palinode.md#criterios) | [parcial](evaluations/claude-mem.md#criterios) | [passa](evaluations/claude-bedrock.md#criterios) | [parcial](evaluations/agent-memory.md#etapa-7-roots-separados) | [passa](evaluations/twiceshy.md#criterios) |
 | Integracao com Claude Code | [não se aplica](evaluations/basic-memory.md#criterios) | [parcial](evaluations/ai-memory.md#etapa-6-integracao-com-claude-code) | [não se aplica](evaluations/palinode.md#criterios) | [parcial](evaluations/claude-mem.md#etapa-6-integracao-com-claude-code) | [não se aplica](evaluations/claude-bedrock.md#criterios) | [parcial](evaluations/agent-memory.md#etapa-6-integracao-com-claude-code) | [não se aplica](evaluations/twiceshy.md#criterios) |
 | Testabilidade | [não se aplica](evaluations/basic-memory.md#criterios) | [passa](evaluations/ai-memory.md#etapa-4-consolidacao-do-estado-atual) | [passa](evaluations/palinode.md#etapa-4-consolidacao-do-estado-atual) | [não se aplica](evaluations/claude-mem.md#criterios) | [falha](evaluations/claude-bedrock.md#criterios) | [parcial](evaluations/agent-memory.md#testes-executados) | [não se aplica](evaluations/twiceshy.md#criterios) |
-| Licenca compativel | [falha](licenses.md#basic-memory) | [parcial](licenses.md#ai-memory) | [parcial](licenses.md#palinode) | [parcial](licenses.md#claude-mem) | [parcial](licenses.md#claude-bedrock) | [parcial](licenses.md#agent-memory) | [falha](licenses.md#twiceshy) |
+| Licenca compativel | [falha](licenses.md#basic-memory) | [parcial](licenses.md#ai-memory) | [parcial](licenses.md#palinode) | [parcial](licenses.md#claude-mem) | [parcial](licenses.md#claude-bedrock) | [passa](licenses.md#agent-memory) | [falha](licenses.md#twiceshy) |
 | Custo de adaptacao | [passa](evaluations/basic-memory.md#criterios) | [passa](evaluations/ai-memory.md#criterios) | [passa](evaluations/palinode.md#criterios) | [passa](evaluations/claude-mem.md#criterios) | [passa](evaluations/claude-bedrock.md#criterios) | [passa](evaluations/agent-memory.md#criterios) | [passa](evaluations/twiceshy.md#criterios) |
 
-## Disposicao
+## Disposicao final
 
-| Projeto | Disposicao inicial | Disposicao preliminar | Relatorio |
+| Projeto | Disposicao inicial | Disposicao final | Relatorio |
 |---|---|---|---|
-| Basic Memory | referencia | [referencia preliminar](evaluations/basic-memory.md#recomendacao-preliminar) | `evaluations/basic-memory.md` |
-| ai-memory | comparador end-to-end | [reimplementacao conceitual preliminar](evaluations/ai-memory.md#recomendacao-preliminar) | `evaluations/ai-memory.md` |
-| Palinode | componente ou referencia | [reimplementacao conceitual; fonte condicional a Python](evaluations/palinode.md#recomendacao-preliminar) | `evaluations/palinode.md` |
-| claude-mem | referencia | [referencia preliminar](evaluations/claude-mem.md#recomendacao-preliminar) | `evaluations/claude-mem.md` |
-| claude-bedrock | referencia ou componente | [reimplementacao conceitual preliminar](evaluations/claude-bedrock.md#recomendacao-preliminar) | `evaluations/claude-bedrock.md` |
-| agent-memory | componente | [adaptacao seletiva condicional a Go](evaluations/agent-memory.md#recomendacao-preliminar) | `evaluations/agent-memory.md` |
-| twiceshy | referencia | [referencia preliminar](evaluations/twiceshy.md#recomendacao-preliminar) | `evaluations/twiceshy.md` |
+| Basic Memory | referencia | referencia para Markdown, CAS e indice reconstruivel | `evaluations/basic-memory.md` |
+| ai-memory | comparador end-to-end | reimplementacao conceitual de supersessao, drift e sanitizacao tipada | `evaluations/ai-memory.md` |
+| Palinode | componente ou referencia | reimplementacao conceitual de proveniencia e evidencia; nenhuma copia | `evaluations/palinode.md` |
+| claude-mem | referencia | referencia para integracao Claude e recuperacao progressiva | `evaluations/claude-mem.md` |
+| claude-bedrock | referencia ou componente | referencia para vaults e estrategias Git; nenhuma copia | `evaluations/claude-bedrock.md` |
+| agent-memory | componente | adaptacao de tres arquivos do motor Markdown; restante como referencia | `evaluations/agent-memory.md` |
+| twiceshy | referencia | referencia para quarentena, confianca e counter-evidence | `evaluations/twiceshy.md` |
 
-`parcial` na linha de licenca significa que a raiz e permissiva, mas a forma final de incorporacao ou sua closure ainda depende do ADR. A shortlist Markdown do agent-memory e a fatia Palinode estao delimitadas em [licencas](licenses.md#shortlist-condicional-da-etapa-8), sem aprovacao para copia. Para Basic Memory e twiceshy, a falha se aplica a fork e reutilizacao direta sob a premissa de manter o produto Apache-2.0; ambos continuam validos como referencias conceituais.
+`parcial` na linha de licenca registra a avaliacao do projeto completo quando seus ativos ou sua closure ampla nao foram auditados; esses projetos nao terao fonte copiada. Para a forma escolhida, a fatia de tres arquivos do agent-memory e Goldmark passaram na auditoria delimitada em [licencas](licenses.md#shortlist-da-etapa-8-e-decisao-da-etapa-9). Para Basic Memory e twiceshy, a falha se aplica a fork e reutilizacao direta sob a premissa de manter o produto Apache-2.0; ambos continuam validos como referencias conceituais.
 
-As disposicoes acima permanecem preliminares ate o ADR. A Etapa 8 encerrou todos os valores `pendente`: execucoes incompletas permaneceram `parcial`, enquanto capacidades comportamentais nao executadas e fora do papel final foram marcadas `não se aplica`, sem inferir sucesso. Os spikes de roots do agent-memory e extracao offline do Palinode passaram, mas nao autorizam incorporacao. O [mapa de capacidades](capability-map.md) define os owners recomendados e separa adaptacao, reimplementacao, referencia e rejeicao.
+As disposicoes foram encerradas pela [ADR 0001](../adr/0001-implementation-base.md). A Etapa 8 encerrou todos os valores `pendente`: execucoes incompletas permaneceram `parcial`, enquanto capacidades comportamentais nao executadas e fora do papel final foram marcadas `não se aplica`, sem inferir sucesso. O [mapa de capacidades](capability-map.md) define os owners e separa adaptacao, reimplementacao, referencia e rejeicao.
