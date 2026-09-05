@@ -1,4 +1,4 @@
-# Avaliacao estatica de claude-bedrock
+# Avaliacao de claude-bedrock
 
 ## Identificacao
 
@@ -11,10 +11,10 @@
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
 | Data | 2026-09-04 |
-| Avaliacao | triagem estatica, sem execucao do plugin ou dos testes |
+| Avaliacao | triagem estatica e gate da etapa 4; fluxo do plugin e testes nao executados |
 | Avaliador | OpenCode |
-| Run ID | nao se aplica; nenhuma execucao comportamental |
-| Commit inicial da memoria | nao se aplica; repositorios descartaveis nao foram criados |
+| Run ID | `20260904T234627Z-claude-bedrock-stage4-gate` |
+| Commit inicial da memoria | `890333384450fd3ee77346a01d9cdec8a449ccf1`; nenhuma mutacao ocorreu |
 
 ## Hipotese
 
@@ -22,7 +22,7 @@ claude-bedrock pode informar proposta, revisao e publicacao Git, mas suas garant
 
 ## Escopo e metodo
 
-Foram inspecionados manifestos, skills, hook Python, scripts, site e testes. Nao foram executados Claude Code, graphify, docling, Git remoto ou testes.
+Foram inspecionados manifestos, skills, hook Python, scripts, site e testes. Na etapa 4, a entrada `/bedrock:preserve` foi tentada com Claude Code isolado, sem rede ou credenciais, apenas para confirmar o gate operacional. O fluxo do plugin, graphify, docling, Git remoto e testes nao foram executados.
 
 ```bash
 git rev-parse HEAD
@@ -37,7 +37,7 @@ git shortlog -sne HEAD
 
 Os comandos retornaram `0`; a duracao nao foi medida. O produto e principalmente um plugin declarativo em Markdown/YAML, com hook Python e extratores JavaScript; o site usa Next/React (`.claude-plugin/plugin.json:1-23`; `hooks/error_reporter.py:1-525`; `site/package.json:1-31`). O historico local tem 61 commits, nenhum desde 2026-08-05 e autoria concentrada no mantenedor e no bot de release; a revisao e de 2026-05-05, versao 1.6.0.
 
-Ambiente usado na triagem: Linux x86_64 e Git 2.54.0, conforme [`evaluation-protocol.md`](../evaluation-protocol.md#ambiente-de-referencia). Somente Git e leitura estatica de arquivos foram usados.
+Ambiente usado na triagem: Linux x86_64 e Git 2.54.0, conforme [`evaluation-protocol.md`](../evaluation-protocol.md#ambiente-de-referencia). O gate comportamental usou Bubblewrap 0.6.1 e Claude Code 2.1.260 com `HOME` e `CLAUDE_CONFIG_DIR` descartaveis, sem rede, credenciais ou persistencia de sessao.
 
 ## Fluxo estatico
 
@@ -69,6 +69,23 @@ A proposta permite ajuste textual, mas nao contem unified diff, bytes completos,
 
 O fluxo Git adiciona diretorios inteiros, nao apenas arquivos da proposta, e nao mostra o diff staged. `concepts/` e omitido. Na ausencia de `gh`, o modo PR pode regredir para push direto em `main` (`skills/preserve/SKILL.md:943-1000`). O setup nao inicializa Git (`skills/setup/SKILL.md:1288-1296`). Essas sao instrucoes ao LLM, nao invariantes executaveis.
 
+## Etapa 4: consolidacao do estado atual
+
+O gate bruto esta em `/tmp/git-push-memories-phase-1/20260904T234627Z-claude-bedrock-stage4-gate-evidence`; o script completo esta em `harness/`. Para repetir, copie-o para `/tmp/opencode/` e execute `bash /tmp/opencode/run-claude-bedrock-stage4-gate.sh`. Repositorios descartaveis receberam o corpus comum; a copia do candidato permaneceu destacada na revisao fixa. O comando executado foi:
+
+```bash
+claude --bare --plugin-dir /workspace/candidate \
+  --print --output-format json --no-session-persistence \
+  --permission-mode dontAsk --permission-prompts none \
+  '/bedrock:preserve --vault /workspace/memory checkout-api usa timeout de tres segundos e agora pertence ao team-b'
+```
+
+O namespace nao tinha rede, variaveis de autenticacao, keychain ou configuracao real. Em 0,32 s, o Claude Code retornou codigo `1`, `terminal_reason: api_error` e `Not logged in`; stderr ficou vazio e stdout teve 1.156 bytes. Nao houve chamada de modelo, turno util, proposta ou mutacao. Os repositorios de memoria, codigo e candidato terminaram limpos.
+
+O resultado nao e tratado como falha semantica do plugin: ele confirma que nao existe caminho executavel sem o runtime e a autenticacao de Claude Code. A revisao tambem nao fornece provider local/mock, CLI propria, `dry-run`, arquivo/ID de proposta ou comando `apply`. Sob a regra do protocolo, o fluxo exato foi registrado como `nao suportado`, em vez de simular decisoes do LLM por edicao manual.
+
+Mesmo com acesso a um modelo, `/bedrock:preserve` oferece apenas resumo conversacional `yes/no/adjust`; nao preserva operacao reaplicavel, diff ou baseline. `/bedrock:sync` repete essa limitacao e delega novamente ao preserve. Para actors, o prompt permite substituir corpo e atividade recente; frontmatter, links e outras entidades permanecem merge/append-only. Assim, o mecanismo pode corrigir parte do estado, mas nao garante remover ownership antigo em todas as representacoes nem repetir a operacao de forma deterministica.
+
 ## Claude Code e testes
 
 O plugin expoe oito skills e um hook Stop. Captura e recuperacao sao comandos explicitos `/bedrock:preserve` e `/bedrock:ask`; o hook serve ao reporter, nao a memoria. A integracao precisa de execucao isolada.
@@ -77,7 +94,7 @@ Existem testes `unittest` apenas para o reporter, incluindo redacao e issues (`h
 
 ## Criterios
 
-| Criterio | Classificacao | Evidencia | Justificativa estatica |
+| Criterio | Classificacao | Evidencia | Justificativa |
 |---|---|---|---|
 | Markdown e Git canonicos | parcial | [Armazenamento](#armazenamento-e-dependencias) | Graph-only e setup sem Git criam split-brain. |
 | Operacao local | falha | [Dependencias](#armazenamento-e-dependencias) | O nucleo depende de Claude Code/LLM remoto. |
@@ -85,9 +102,9 @@ Existem testes `unittest` apenas para o reporter, incluindo redacao e issues (`h
 | Indice reconstruivel | falha | [Armazenamento](#armazenamento-e-dependencias) | Nao ha rebuild de `graph.json` apenas do Markdown. |
 | Privacidade antes da persistencia | falha | [Privacidade](#privacidade-sessoes-e-estado-atual) | Temp e graph recebem conteudo antes de filtro determinista. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-sessoes-e-estado-atual) | Reporter guarda referencia/cache de sessao. |
-| Estado atual | pendente | [Estado atual](#privacidade-sessoes-e-estado-atual) | Regras append-only podem manter ownership antigo; requer corpus. |
-| Consolidacao antes da publicacao | parcial | [Revisao](#revisao-e-publicacao) | Graph muda antes da proposta e nao ha artefato aplicavel. |
-| Revisao explicita | parcial | [Revisao](#revisao-e-publicacao) | Ha yes/no/adjust, sem diff/baseline e com caminhos autonomos. |
+| Estado atual | pendente | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | O gate impediu observar o corpus; as regras indicam substituicao parcial, mas nao bastam para classificar o comportamento. |
+| Consolidacao antes da publicacao | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Ha proposta conversacional, mas graph pode mudar antes e nao existe artefato aplicavel. |
+| Revisao explicita | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Ha yes/no/adjust, sem diff, baseline, ID ou aplicacao posterior da mesma proposta. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | Vaults independem do cwd e cobrem varios repositorios. |
 | Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | Plugin e skills existem; falta ciclo isolado. |
 | Testabilidade | falha | [Testes](#claude-code-e-testes) | O nucleo declarativo nao possui contratos automatizados. |
@@ -100,10 +117,9 @@ Como base, seria necessario transformar prompts em contratos deterministas, filt
 
 Fluxos restantes limitados:
 
-1. Etapas 4/5: rejeitar, ajustar, aceitar e repetir a mudanca do corpus, inspecionando backlinks.
+1. Etapa 5: graph alterado antes da confirmacao, drift e mudancas nao relacionadas/staged; exige autorizacao explicita para um backend real se ainda puder alterar a decisao.
 2. Passagem de privacidade: `/preserve` e `/learn` desde a primeira exposicao.
-3. Etapa 5: graph alterado antes da confirmacao, drift e mudancas nao relacionadas/staged.
-4. Etapa 5: commit-only e PR, inclusive ausencia/falha de `gh`.
+3. Etapa 5: commit-only e PR, inclusive ausencia/falha de `gh`.
 
 ## Recomendacao preliminar
 

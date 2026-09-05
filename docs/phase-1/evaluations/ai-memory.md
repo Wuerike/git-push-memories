@@ -11,10 +11,10 @@
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
 | Data | 2026-09-04 |
-| Avaliacao | triagem estatica e etapa 3 comportamental; hooks, LLM e testes nao executados |
+| Avaliacao | triagem estatica e etapas 3 e 4 comportamentais; hooks do Claude Code, privacidade e suite completa nao executados |
 | Avaliador | OpenCode |
-| Run ID | `20260904T212935Z-ai-memory-stage3` |
-| Commit inicial da memoria | `29645b91101fbf98d524c8766d83cd4ae1ca3367` |
+| Run IDs | `20260904T212935Z-ai-memory-stage3`; `20260904T233117Z-ai-memory-stage4` |
+| Commits iniciais da memoria | `29645b91101fbf98d524c8766d83cd4ae1ca3367` (etapa 3); `22d740759c5d8bf0218e3452a3562f1477845978` (etapa 4) |
 
 ## Hipotese
 
@@ -22,7 +22,7 @@ ai-memory e o comparador end-to-end mais proximo, mas daemon, spool anterior a s
 
 ## Escopo e metodo
 
-Foram lidos manifestos, migracoes, CLI, hooks, store, wiki, consolidacao, MCP e testes. Na etapa 3, o binario foi compilado e o daemon foi executado com o corpus comum para avaliar FTS, edicao externa e rebuild. Hooks, LLM e testes permaneceram excluidos.
+Foram lidos manifestos, migracoes, CLI, hooks, store, wiki, consolidacao, MCP e testes. Na etapa 3, o binario foi compilado e o daemon foi executado com o corpus comum para avaliar FTS, edicao externa e rebuild. Na etapa 4, o fluxo de auto-improvement foi exercitado com captura sintetica, provider deterministico em loopback, aprovacao manual e testes focados. Hooks reais do Claude Code, privacidade e a suite completa permaneceram excluidos.
 
 ```bash
 git rev-parse HEAD
@@ -37,7 +37,7 @@ git shortlog -sne HEAD
 
 Os comandos de ponto fixo retornaram `0`; a duracao nao foi medida. O projeto e um workspace Rust 2024 com toolchain 1.95, Tokio, Axum/MCP, SQLite/FTS5, libgit2, watcher e clientes LLM (`Cargo.toml:1-37,97-138`; `rust-toolchain.toml:1-4`). O historico local tem 1.480 commits, 309 desde 2026-08-05 e multiplos contribuidores; a revisao e de 2026-09-01.
 
-Ambiente usado na triagem: Linux x86_64 e Git 2.54.0, conforme [`evaluation-protocol.md`](../evaluation-protocol.md#ambiente-de-referencia). O run comportamental usou Bubblewrap 0.6.1, Rust/Cargo 1.95.0 e ai-memory 1.39.0. Dependencias foram provisionadas com rede e o trust bundle do sistema montado somente para leitura; o build de 405,44 s e todo o fluxo avaliado ocorreram sem rede e sem variaveis de proxy.
+Ambiente usado na triagem: Linux x86_64 e Git 2.54.0, conforme [`evaluation-protocol.md`](../evaluation-protocol.md#ambiente-de-referencia). Os runs comportamentais usaram Bubblewrap 0.6.1, Rust/Cargo 1.95.0 e ai-memory 1.39.0. Dependencias foram provisionadas com rede e o trust bundle do sistema montado somente para leitura; os builds de 405,44 s (etapa 3) e 395,64 s (etapa 4), os testes e todos os fluxos avaliados ocorreram sem rede externa e sem variaveis de proxy.
 
 ## Fluxo estatico
 
@@ -163,6 +163,97 @@ O inventario final registrou `config.toml` de 13.464 bytes em cada data dir, log
 
 As latencias de consulta medem apenas o cliente contra um daemon ja residente; o RSS do servidor nao foi isolado. Elas demonstram operacao offline, mas nao podem ser comparadas diretamente com os processos frios do Basic Memory.
 
+## Etapa 4: consolidacao do estado atual
+
+O run bruto esta em `/tmp/git-push-memories-phase-1/20260904T233117Z-ai-memory-stage4-evidence`; os scripts completos de preparacao, mock, fluxo e testes estao no subdiretorio `harness/`. Para repetir, copie esses quatro arquivos para `/tmp/opencode/` e execute `bash /tmp/opencode/run-ai-memory-stage4.sh`. A copia executavel permaneceu destacada na revisao fixa e limpa. O fluxo inteiro executou em um namespace de rede sem acesso externo; apenas o daemon do produto e um provider OpenAI-compatible deterministico em `127.0.0.1:49375` compartilharam o loopback. O provider nao avalia qualidade de modelo: ele torna reproduzivel o contrato de proposta e devolve uma redacao ambigua antes da rejeicao e uma correcao depois dela. Para testar idempotencia do executor, ele volta a emitir a mesma operacao quando o alvo ja esta atualizado.
+
+A pagina comum foi adaptada apenas de `services/checkout-api.md` para `procedures/checkout-api.md`, pois a revisao so oferece patch de paginas existentes em `procedures/` e `_rules/`. O corpo inicial permaneceu igual ao fixture. Configuracao efetiva relevante:
+
+```text
+AI_MEMORY_LLM_PROVIDER=openai-compat
+AI_MEMORY_LLM_MODEL=phase1-mock
+AI_MEMORY_LLM_BASE_URL=http://127.0.0.1:49375/v1
+AI_MEMORY_LLM_COMPAT_STRICT=true
+AI_MEMORY_CONSOLIDATE_ON_SESSION_END=false
+AI_MEMORY_AUTO_IMPROVE__REQUIRE_APPROVAL=true
+AI_MEMORY_AUTO_IMPROVE__SCHEDULER__ENABLED=false
+AI_MEMORY_MAINTENANCE__ENABLED=false
+```
+
+O fluxo principal foi:
+
+```bash
+ai-memory --data-dir "$DATA" write-page \
+  --workspace phase1 --project checkoutapi \
+  --path procedures/checkout-api.md --kind procedure --tier procedural \
+  --body "$(< /fixtures/memory-initial/services/checkout-api.md)"
+curl -fsS -H 'content-type: application/json' \
+  --data-binary @hook-batch-input.json http://127.0.0.1:49374/hook/batch
+ai-memory --data-dir "$DATA" auto-improve \
+  --workspace phase1 --project checkoutapi --session-id "$SESSION_ID" \
+  --min-observations 1 --min-session-duration-secs 0 --max-proposals 1 --json
+ai-memory --data-dir "$DATA" pending-writes show "$P1" --workspace phase1 --project checkoutapi --json
+ai-memory --data-dir "$DATA" pending-writes diff "$P1" --workspace phase1 --project checkoutapi --json
+# repetir enquanto P1 esta pendente testa deduplicacao por alvo
+ai-memory --data-dir "$DATA" auto-improve \
+  --workspace phase1 --project checkoutapi --session-id "$SESSION_ID" \
+  --min-observations 1 --min-session-duration-secs 0 --max-proposals 1 --json
+ai-memory --data-dir "$DATA" pending-writes reject "$P1" \
+  --workspace phase1 --project checkoutapi \
+  --reason 'remova a referencia ao estado antigo e use afirmacoes diretas' --json
+ai-memory --data-dir "$DATA" auto-improve \
+  --workspace phase1 --project checkoutapi --session-id "$SESSION_ID" \
+  --min-observations 1 --min-session-duration-secs 0 --max-proposals 1 --json
+ai-memory --data-dir "$DATA" pending-writes show "$P2" --workspace phase1 --project checkoutapi --json
+ai-memory --data-dir "$DATA" pending-writes diff "$P2" --workspace phase1 --project checkoutapi --json
+ai-memory --data-dir "$DATA" pending-writes approve "$P2" --workspace phase1 --project checkoutapi --json
+ai-memory --data-dir "$DATA" read-page \
+  --path procedures/checkout-api.md --workspace phase1 --project checkoutapi --json
+ai-memory --data-dir "$DATA" search \
+  'team-a OR "cinco segundos"' --workspace phase1 --project checkoutapi --json
+# repetir a mesma operacao e aprova-la, para idempotencia
+ai-memory --data-dir "$DATA" auto-improve \
+  --workspace phase1 --project checkoutapi --session-id "$SESSION_ID" \
+  --min-observations 1 --min-session-duration-secs 0 --max-proposals 1 --json
+ai-memory --data-dir "$DATA" pending-writes diff "$P3" --workspace phase1 --project checkoutapi --json
+ai-memory --data-dir "$DATA" pending-writes approve "$P3" --workspace phase1 --project checkoutapi --json
+```
+
+`hook-batch-input.json` continha apenas `session-start`, a descoberta sintetica da etapa e `session-end`, com um UUID fixo. O mock validou `response_format=json_schema`, copiou o hash de `## Operacao` fornecido pelo proprio reviewer e anexou como evidencia a pagina sintetica da sessao. Os quatro requests sanitizados estao em `mock-requests.jsonl`.
+
+| Rotulo de evidencia | Codigo | Duracao | stdout | stderr |
+|---|---:|---:|---|---|
+| `seed-page` | 0 | 0,02 s | 6 palavras/81 bytes | log informativo |
+| `read-initial` / `query-initial` | 0 | 0,00 s cada | 481/344 bytes | log informativo |
+| `submit-discovery` | 0 | 0,02 s | 14 bytes | vazio |
+| `proposal-first` | 0 | 0,01 s | 1 proposta pendente; 628 bytes | log informativo |
+| `pending-list-first` / `proposal-first-show` / `proposal-first-diff` | 0 | 0,01/0,01/0,00 s | 254/769/369 bytes | log informativo |
+| `read-after-first-proposal` | 0 | 0,00 s | estado inicial; 481 bytes | log informativo |
+| `proposal-duplicate-while-pending` | 0 | 0,00 s | proposta ignorada pelo alvo pendente; 452 bytes | log informativo |
+| `reject-first` | 0 | 0,00 s | status rejeitado; 27 bytes | log informativo |
+| `proposal-first-after-reject` | 0 | 0,00 s | evento e motivo; 1.078 bytes | log informativo |
+| `proposal-second` | 0 | 0,01 s | nova proposta pendente; 628 bytes | log informativo |
+| `proposal-second-show` / `proposal-second-diff` | 0 | 0,01/0,00 s | 751/351 bytes | log informativo |
+| `approve-second` | 0 | 0,01 s | status aprovado; 80 bytes | log informativo |
+| `read-after-approve` | 0 | 0,01 s | tres segundos/`team-b`; 469 bytes | log informativo |
+| `query-after-approve` / estado novo | 0 | 0,00/0,01 s | 847/780 bytes | log informativo |
+| `old-state-after-approve` | 0 | 0,01 s | `[]` | log informativo |
+| `proposal-repeat` / show / diff / approve | 0 | 0,01/0,00/0,00/0,01 s | 628/751/352/80 bytes | log informativo |
+| `read-after-repeat` | 0 | 0,00 s | estado novo inalterado semanticamente; 469 bytes | log informativo |
+| `focused-tests` | 0 | 230,06 s | 9 testes passaram | compilacao e progresso Cargo |
+
+Todos os comandos do fluxo, o servidor e o script agregado retornaram `0`; o mock terminou com `143` pelo `SIGTERM` esperado. `stage4-assertions.json` registra treze verificacoes, incluindo a falha de estabilidade de bytes. A primeira proposta continha a referencia antiga `team-a`; `reject` e a tentativa duplicada enquanto pendente mantiveram o hash canonico `4ff2caae068d5b1541b05533a0827a8b2d4f086e`. A segunda proposta apresentou exatamente tres segundos e `team-b`; somente `approve` mudou o hash para `10f6d3304796d89d2e243f424888b470a5ecad29`.
+
+O inventario SQLite registrou quatro runs, tres propostas (`rejected`, `approved`, `approved`), seis eventos e uma rejeicao. A tentativa enquanto havia proposta pendente foi descartada com `a proposal is already pending review for this path`. Depois do primeiro aceite, a pagina inicial ficou `is_latest=0`, a pagina nova ficou atual e a busca pelo estado antigo retornou `[]`.
+
+A repeticao emitiu e aprovou exatamente o mesmo corpo esperado. O conteudo semantico permaneceu correto, mas o produto criou uma terceira versao, atualizou IDs de proposta/run no frontmatter e mudou o hash para `34bdbe32fee4f692dc1fcb5580175fdf837c4f7b`. Logo, a aplicacao de proposta equivalente nao e idempotente em bytes nem em versoes, embora nao reintroduza contradicao no corpo. O teste unitario de rewrite identico passa no store generico, mas nao cobre o frontmatter adicionado pelo caminho de auto-improvement.
+
+A unicidade parcial e garantida por alvo enquanto existe uma proposta pendente, mas nao depois do aceite. Nao foi criado um objeto tipado de contradicao: a primeira redacao ainda mencionava `team-a` e foi rejeitada pela pessoa, enquanto `rejected_candidates_count` permaneceu zero. A proveniencia das tres propostas aponta para a pagina sintetica da sessao e sua quote; a rationale menciona `service.yaml`, mas o arquivo de codigo nao esta ligado diretamente a proposta. Portanto duplicidade, contradicao e evidencia foram inspecionadas, mas as duas ultimas continuam dependentes do reviewer e de revisao humana.
+
+A proposta existe simultaneamente como estado autoritativo no SQLite e sidecar Markdown nao indexado. A rejeicao nao atualiza o `status: pending` renderizado no sidecar antigo; `pending-writes show` e o banco registram o estado real. Nao ha comando para ajustar uma proposta pendente: o fluxo suportado e rejeitar, regenerar, inspecionar e aprovar. A aprovacao alterou a pagina e adicionou IDs de proposta/run ao frontmatter, mas nao fez commit; os tres sidecars ficaram nao rastreados e a pagina modificada. A sessao e o log mensal haviam sido commitados antes, reforcando que proposta, aplicacao canonica e publicacao Git sao fronteiras distintas.
+
+Os nove testes focados cobriram reviewer sem escrita, contexto de rejeicao, patches, aprovacao manual, show/diff/reject, supersessao, rollback por conflito, hash de baseline e rewrite identico. Todos passaram offline; a suite completa nao foi executada.
+
 ## Privacidade e sessoes
 
 O teste `crates/ai-memory-cli/tests/hook_payload.rs:80-101` exige que um payload ordinario chegue byte a byte ao spool. Assim, o sanitizador do servidor, embora tipado, nao protege a primeira persistencia. O spool pode reter entradas e bearer por varias tentativas (`crates/ai-memory-cli/src/commands/hook_spool.rs:33-44,71-89`).
@@ -179,24 +270,24 @@ Auto-improve grava proposta `pending`, sidecar nao indexado e baseline para drif
 
 Ha instalador MCP, bridge por `CLAUDE_CODE_SESSION_ID` e nove hooks (`crates/ai-memory-cli/src/commands/install_mcp.rs:350-367,626-653`; `mcp_bridge.rs:19-87,118-158`; `render_shared.rs:29-49`). `SessionStart` drena o spool e injeta handoff (`hook.rs:678-715`). O ciclo nao foi executado.
 
-Foram encontrados testes de sanitizacao (`crates/ai-memory-core/src/sanitize.rs:348-627`), spool, rebuild (`crates/ai-memory-wiki/src/wiki.rs:4217-4307`), concorrencia/supersessao (`crates/ai-memory-store/tests/multi_session.rs:132-219`), proposta/drift (`crates/ai-memory-wiki/src/wiki.rs:2913-3098`) e relacoes contraditorias (`crates/ai-memory-consolidate/tests/typed_edges.rs:45-182`). A CI declara test, clippy, deny, audit e gitleaks (`.github/workflows/ci.yml:20-61,195-236`), mas esses testes nao foram executados na triagem nem no run comportamental.
+Foram encontrados testes de sanitizacao (`crates/ai-memory-core/src/sanitize.rs:348-627`), spool, rebuild (`crates/ai-memory-wiki/src/wiki.rs:4217-4307`), concorrencia/supersessao (`crates/ai-memory-store/tests/multi_session.rs:132-219`), proposta/drift (`crates/ai-memory-wiki/src/wiki.rs:2913-3098`) e relacoes contraditorias (`crates/ai-memory-consolidate/tests/typed_edges.rs:45-182`). A CI declara test, clippy, deny, audit e gitleaks (`.github/workflows/ci.yml:20-61,195-236`). Nove testes diretamente ligados a proposta, rejeicao, conflito, supersessao e idempotencia foram executados na etapa 4; os demais e a suite completa nao foram executados.
 
 ## Criterios
 
 | Criterio | Classificacao | Evidencia | Justificativa |
 |---|---|---|---|
 | Markdown e Git canonicos | parcial | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | A pagina foi reconstruida, mas observacoes nao sao e o restart refez migracao, commits e arquivos canonicos. |
-| Operacao local | pendente | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | Recuperacao concluiu sem rede e sem LLM; captura e consolidacao do fluxo principal ainda nao foram executadas. |
+| Operacao local | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Captura, proposta, rejeicao, aprovacao e recuperacao concluiram sem rede externa, usando apenas providers locais. |
 | Ausencia de backend obrigatorio | falha | [Dependencias](#armazenamento-e-dependencias) | Hooks e MCP integrado exigem `ai-memory serve`. |
 | Indice reconstruivel | passa | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | SQLite removido e refeito da wiki preservou busca normalizada e corpo integral da pagina. |
 | Privacidade antes da persistencia | falha | [Privacidade](#privacidade-e-sessoes) | O payload chega ao spool antes da sanitizacao geral. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-e-sessoes) | Prompts, observacoes, handoffs e transcripts sao duraveis. |
-| Estado atual | parcial | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | Edicao externa removeu o estado antigo e rebuild reteve so a versao atual, sem garantir reconciliacao entre conceitos. |
-| Consolidacao antes da publicacao | parcial | [Revisao](#estado-atual-revisao-e-publicacao) | Auto-improve propoe; outros fluxos escrevem direto. |
-| Revisao explicita | parcial | [Revisao](#estado-atual-revisao-e-publicacao) | Diff, rejeicao e aceite existem; ajuste nao e autoaprovacao e padrao. |
+| Estado atual | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | UPDATE substituiu o corpo e removeu o estado antigo da busca; a repeticao criou versao redundante, mas manteve apenas o estado novo autoritativo. |
+| Consolidacao antes da publicacao | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Auto-improve manteve proposta observavel antes da pagina, mas outros fluxos escrevem direto e aprovacao manual nao e padrao. |
+| Revisao explicita | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Show, diff, rejeicao e aceite funcionam; ajuste direto nao existe e requer rejeitar/regenerar. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | A wiki Git e separada e contem varios projetos. |
 | Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | Hooks e bridge existem; falta o ciclo isolado. |
-| Testabilidade | pendente | [Testes](#claude-code-e-testes) | Ha contratos fortes e CI, ainda nao executados. |
+| Testabilidade | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Nove contratos deterministas de proposta, hash, conflito, supersessao e idempotencia passaram offline. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#ai-memory) | MIT e permissiva; dependencias e ativos requerem inventario. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Mudancas estao delimitadas; custo alto a muito alto. |
 
@@ -206,7 +297,7 @@ Um fork exigiria retirar spool bruto, sessoes, handoffs e transcripts; eliminar 
 
 Fluxos restantes limitados:
 
-1. Etapa 4: `require_approval=true`, update/reject/approve/idempotencia e drift no corpus comum.
+1. Etapa 5: drift, ajuste ausente e fronteiras de commit/publicacao.
 2. Etapa 6: hooks reais em configuracao isolada, medindo handoff e inventariando sessoes.
 3. Passagem de privacidade: confirmar sob trace o spool anterior ao sanitizador.
 
