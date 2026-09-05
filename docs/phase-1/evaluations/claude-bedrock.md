@@ -10,7 +10,7 @@
 | Revisao | `7cac16ceb6064b7fbb4ec45c3ad4be31b9d9c9f0` |
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
-| Data | 2026-09-04 |
+| Data | 2026-09-04 (triagem e Etapa 4); 2026-09-05 (decisao da Etapa 5) |
 | Avaliacao | triagem estatica e gate da etapa 4; fluxo do plugin e testes nao executados |
 | Avaliador | OpenCode |
 | Run ID | `20260904T234627Z-claude-bedrock-stage4-gate` |
@@ -86,6 +86,10 @@ O resultado nao e tratado como falha semantica do plugin: ele confirma que nao e
 
 Mesmo com acesso a um modelo, `/bedrock:preserve` oferece apenas resumo conversacional `yes/no/adjust`; nao preserva operacao reaplicavel, diff ou baseline. `/bedrock:sync` repete essa limitacao e delega novamente ao preserve. Para actors, o prompt permite substituir corpo e atividade recente; frontmatter, links e outras entidades permanecem merge/append-only. Assim, o mecanismo pode corrigir parte do estado, mas nao garante remover ownership antigo em todas as representacoes nem repetir a operacao de forma deterministica.
 
+## Etapa 5: governanca dispensada nesta fase
+
+Em 2026-09-05, o fluxo comportamental de governanca foi dispensado nesta fase por decisao explicita do projeto, depois que a Etapa 4 demonstrou a dependencia de uma sessao autenticada do Claude Code. Nenhuma credencial foi introduzida e nenhuma capacidade foi simulada por edicao manual. As conclusoes estaticas sobre proposta conversacional, ausencia de diff/baseline, drift, staging amplo e Git/PR permanecem, sem nova classificacao comportamental. O fluxo so sera reaberto por uma nova decisao explicita caso ainda possa alterar a disposicao.
+
 ## Claude Code e testes
 
 O plugin expoe oito skills e um hook Stop. Captura e recuperacao sao comandos explicitos `/bedrock:preserve` e `/bedrock:ask`; o hook serve ao reporter, nao a memoria. A integracao precisa de execucao isolada.
@@ -115,11 +119,12 @@ Existem testes `unittest` apenas para o reporter, incluindo redacao e issues (`h
 
 Como base, seria necessario transformar prompts em contratos deterministas, filtrar antes de temp, criar proposta com diff/hash, detectar drift, reconstruir indice, resolver relacoes antigas, isolar staging e testar todo o fluxo. graphify, docling e ativos tambem exigem pin e auditoria.
 
-Fluxos restantes limitados:
+Fluxos comportamentais dispensados nesta fase:
 
-1. Etapa 5: graph alterado antes da confirmacao, drift e mudancas nao relacionadas/staged; exige autorizacao explicita para um backend real se ainda puder alterar a decisao.
+1. Etapa 5: graph alterado antes da confirmacao, drift, staged alheio, commit-only e PR.
 2. Passagem de privacidade: `/preserve` e `/learn` desde a primeira exposicao.
-3. Etapa 5: commit-only e PR, inclusive ausencia/falha de `gh`.
+
+Reabrir esses fluxos exigiria decisao explicita de usar backend real e demonstracao de que a evidencia ainda pode alterar a disposicao atual.
 
 ## Recomendacao preliminar
 

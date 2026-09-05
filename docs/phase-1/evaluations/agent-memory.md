@@ -1,4 +1,4 @@
-# Avaliacao estatica de agent-memory
+# Avaliacao de agent-memory
 
 ## Identificacao
 
@@ -10,11 +10,11 @@
 | Revisao | `51dac9bf6e72c67f6314ee3abb00515986a3fa4a` |
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
-| Data | 2026-09-04 |
-| Avaliacao | triagem estatica, sem execucao do produto ou dos testes |
+| Data | 2026-09-04 (triagem estatica); 2026-09-05 (Etapa 5) |
+| Avaliacao | triagem estatica e governanca comportamental offline |
 | Avaliador | OpenCode |
-| Run ID | nao se aplica; nenhuma execucao comportamental |
-| Commit inicial da memoria | nao se aplica; repositorios descartaveis nao foram criados |
+| Run ID | `20260905T024115Z-agent-memory-stage5` |
+| Commit inicial da memoria | lifecycle `ba3db8ff96dd79f334108e12b7206655c4dc3bd6`; demais fixtures em `*-baseline-commit.txt` e `privacy-*/prep/baseline-commit.txt` |
 
 ## Hipotese
 
@@ -22,7 +22,7 @@ agent-memory pode fornecer o nucleo de operacoes, diff e aplicacao explicita, de
 
 ## Escopo e metodo
 
-Foram inspecionados CLI, MCP, schema, update/staging, scanner, indice, Git, adaptador Claude e testes. Nao foram executados build, comandos ou testes.
+Na triagem estatica foram inspecionados CLI, MCP, schema, update/staging, scanner, indice, Git, adaptador Claude e testes. A Etapa 5 executou os fluxos de governanca descritos abaixo sem alterar o clone original.
 
 ```bash
 git rev-parse HEAD
@@ -79,38 +79,152 @@ Git add usa caminhos explicitos, mas commit inclui qualquer alteracao previament
 
 O adaptador instala skill e `.mcp.json`; a skill instrui fetch no inicio e propose no fim (`internal/adapters/claude/SKILL.md:23-69`; `internal/adapters/claude/claude.go:71-181`). Nao ha hooks; o modelo precisa seguir a instrucao. O ciclo real nao foi executado.
 
-Foram encontrados 83 arquivos de teste. A CI declara build/vet/test em tres sistemas, race, E2E e lint (`.github/workflows/ci.yml:8-86`). O E2E percorre init, MCP, propose, review, apply, fetch, segredo e archive (`internal/e2e/release01_smoke_test.go:30-68,103-621`). Ha testes de rebuild e drift (`internal/cli/rebuild_index_test.go:32-151`; `internal/memory/rebase_test.go:213-315`), mas nao cobrem roots separados, tampering, drift fora da secao ou staged alheio. Nada foi executado nesta etapa.
+Foram encontrados 83 arquivos de teste. A CI declara build/vet/test em tres sistemas, race, E2E e lint (`.github/workflows/ci.yml:8-86`). O E2E percorre init, MCP, propose, review, apply, fetch, segredo e archive (`internal/e2e/release01_smoke_test.go:30-68,103-621`). Ha testes de rebuild e drift (`internal/cli/rebuild_index_test.go:32-151`; `internal/memory/rebase_test.go:213-315`), mas nao cobrem roots separados, tampering, drift fora da secao ou staged alheio. A execucao da suite esta registrada na Etapa 5.
+
+## Etapa 5: governanca
+
+### Ambiente e reproducao
+
+A evidencia valida esta em `/tmp/git-push-memories-phase-1/20260905T024115Z-agent-memory-stage5-evidence`. O harness completo esta em `harness/`; para repetir, copie seus seis arquivos para `/tmp/opencode/` e execute `bash /tmp/opencode/run-agent-memory-stage5.sh`. A localizacao externa e intencional conforme o protocolo: artefatos brutos e scripts executaveis ficam no `EVIDENCE_ROOT`, enquanto comandos e conclusoes classificatorias sao transcritos neste relatorio. Os caminhos absolutos do runner correspondem aos clones fixos registrados no protocolo. O runner criou um clone descartavel destacado na revisao fixa, provisionou Go 1.25.12 com rede e depois compilou e executou todos os fluxos sem rede ou credenciais. O binario reportou `v0.5.1`; o build demorou 15,23 s e terminou com codigo zero. Clones original e descartavel permaneceram limpos.
+
+Como `--root` une codigo e memoria, cada fixture usou o repositorio de codigo como root e adaptou o corpus comum para `.agent-memory/modules/checkout-api.md`, acrescentando apenas os IDs exigidos pelo schema. O baseline canonico continha cinco segundos e `team-a`; `services/checkout-api/service.yaml` forneceu a proveniencia para a operacao estruturada:
+
+Os commits baseline foram: lifecycle `ba3db8ff96dd79f334108e12b7206655c4dc3bd6`; tamper e drift interno `39ed52dbdbd16354908f318cc3291232a0d3375f`; drift externo `fee99340820c8a5dc1104219bae19dcc39f49776`; Git default `ec7c0c03b18c9a8d9f5d75dfa798cf3483bc73c3`, stage `de0c7f5ed3ee877bcf80a7b2fce96b0626877fb6` e commit `270c268aa6dbe78a226acae2a2c664a8a4021854`; privacidade de corpo `85150acc1d7ce1fd442090add0303422123e3b81`, metadados `71c5148f9bd48e1c794d9988b2d1b63194c4fb80` e controle `66e94db5bcb05b6f7730a8f1da97426e3a985858`.
+
+```bash
+/home/phase-1/bin/agent-memory propose \
+  --root /workspace/cases/lifecycle \
+  --from-json /home/phase-1/tmp/main-artifacts/lifecycle-rejected-request.json --json
+/home/phase-1/bin/agent-memory review \
+  --root /workspace/cases/lifecycle \
+  20260905T024248-refresh-module-stage5-reject-first-propo --show --diff --json
+/home/phase-1/bin/agent-memory reject \
+  --root /workspace/cases/lifecycle \
+  20260905T024248-refresh-module-stage5-reject-first-propo --json
+/home/phase-1/bin/agent-memory propose \
+  --root /workspace/cases/lifecycle \
+  --from-json /home/phase-1/tmp/main-artifacts/lifecycle-applied-request.json --json
+/home/phase-1/bin/agent-memory apply \
+  --root /workspace/cases/lifecycle \
+  20260905T024250-refresh-module-stage5-regenerated-valid --json
+```
+
+O request usou `refresh_module` e `replace_section_content` na secao `checkout-api-operacao`, trocando o corpo por tres segundos e `team-b`. `propose` levou 0,04 s, `review` e `reject` menos de 0,01 s, a proposta regenerada 0,03 s e `apply` 0,02 s. Todos terminaram com codigo zero.
+
+Tentativas anteriores nao sustentam classificacao: `20260905T021803Z-agent-memory-stage5` parou porque o harness esperava codigo nao zero de uma rejeicao JSON; `20260905T022042Z-agent-memory-stage5` falhou no download do toolchain por timeout TLS; `20260905T022208Z-agent-memory-stage5` e `20260905T022726Z-agent-memory-stage5` completaram, mas foram substituidas para acrescentar duracao, consulta, inventarios e scans completos das passagens de privacidade.
+
+`Operacao local` abaixo se refere ao fluxo principal de governanca executado nesta etapa, que concluiu integralmente offline. Rebuild comparativo, recuperacao em processo novo e idempotencia pertencem as Etapas 3/4 ainda abertas para este candidato e continuam explicitamente listados como trabalho restante; o sucesso local nao os classifica por inferencia.
+
+### Proposta, revisao e aplicacao
+
+A proposta criou `proposal.json`, `target-checksums.json` e uma copia integral do post-state sob `staging/<id>/files/`. O hash da pagina canonica e HEAD permaneceram no baseline. `review --show --diff` exibiu o post-state completo, um unified diff com as quatro linhas de estado e a precondicao `require_section_content_match` com hash da secao.
+
+`reject` retornou `rejected_by_user`, removeu o staging e nao alterou o canônico. Ele criou `meta/rejection-log.jsonl`, que o scaffold nao ignora e apareceu como untracked. Uma proposta nova foi revisada e aplicada explicitamente; a pagina final continha somente tres segundos e `team-b`, o staging foi removido, e Git continuou sem staging ou commit automatico na configuracao padrao. O indice Markdown gerado tambem mudou no worktree.
+
+Nao existe comando de ajuste. O caminho seguro disponivel e rejeitar e gerar outro staging. `propose --apply` tambem permite contornar o comando separado de revisao. Portanto proposta, diff, rejeicao e aceite sao operacionais, mas o criterio completo de ajuste nao e atendido.
+
+### Integridade e drift
+
+Em uma fixture separada, uma proposta limpa passou pelo scan e depois teve o arquivo staged adulterado com um segredo sintetico reconhecido pelo scanner. `review --diff` mostrou o conteudo adulterado, mas `apply` terminou em 0,02 s com `status=applied`: nao houve hash do post-state, nova validacao de schema ou novo scan. O marcador foi encontrado na pagina canonica e duas vezes no SQLite. Assim, o staging e observavel, mas nao e um artefato integro ou seguro para edicao manual.
+
+Uma mudanca concorrente dentro de `checkout-api-operacao` foi detectada pela divergencia do hash: `apply` retornou `status=rejected` e `reason=target_drift`, preservando o staging. `rebase` sem `--force` retornou `force_required`; com `--force`, recalculou proposta e checksum, ainda exigindo um segundo `apply` explicito. Entretanto, tanto `apply --json` quanto `rebase --json` encerraram com codigo zero nos resultados rejeitados, porque o renderer JSON retorna antes da verificacao de status (`internal/cli/apply.go:47-60`; `internal/cli/rebase.go:60-73`).
+
+```bash
+/home/phase-1/bin/agent-memory apply --root /workspace/cases/drift-inside \
+  20260905T024250-refresh-module-stage5-drift-inside --json
+/home/phase-1/bin/agent-memory rebase --root /workspace/cases/drift-inside \
+  20260905T024250-refresh-module-stage5-drift-inside --json
+/home/phase-1/bin/agent-memory rebase --root /workspace/cases/drift-inside \
+  20260905T024250-refresh-module-stage5-drift-inside --force --json
+```
+
+Outra fixture acrescentou uma secao concorrente valida fora da secao protegida. O hash alvo continuou igual, `apply` retornou `applied` em 0,02 s e a copia integral staged removeu silenciosamente a nova secao. A precondicao por secao, portanto, nao protege o restante do mesmo arquivo contra overwrite.
+
+### Privacidade
+
+Tres fixtures novas foram preparadas, indexadas e consultadas antes da exposicao. A consulta literal `agent-memory fetch --root /workspace/case 'checkout-api timeout ownership'` levou 0,02 s, produziu 248 bytes e recuperou cinco segundos e `team-a`. Antes do indice havia 12 arquivos; depois da preparacao havia 14, incluindo `meta/index.sqlite` de 40.960 bytes e `meta/lock.info`. O SQLite tinha oito tabelas, cinco documentos e seis secoes. Cada passagem foi iniciada imediatamente apos a copia do fixture permitido e coberta por `strace -ff`; os relatorios preservam apenas nomes e contagens dos marcadores.
+
+| Passagem | Duracao | Resultado | Persistencia observada |
+|---|---:|---|---|
+| marcadores fixos no corpo | 6,31 s | proposta staged | ambos em `proposal.json` e na copia integral staged |
+| marcadores fixos em metadados | 6,24 s | proposta staged | ambos em `proposal.json`; segredo tambem em `meta/lock.info` |
+| segredo reconhecido, controle positivo | 0,39 s | `secret_detected` | nenhuma ocorrencia no estado da fixture |
+
+O controle positivo confirma que o scanner rejeita um formato conhecido antes do staging e redige a saida. Para os marcadores fixos, a busca cobriu fixture, clone do candidato, tool home e os bancos de objetos Git; os unicos hits alem do arquivo fonte permitido foram os artefatos do proprio candidato descritos na tabela. A passagem de corpo terminou com 18 arquivos, tres deles sob staging; SQLite continuou com as mesmas oito tabelas e contagens porque a proposta nao foi aplicada. Os marcadores comuns demonstram que a politica default nao cobre o segredo sintetico nem email, e que rationale, sources e owner ficam fora do scan. A adulteracao descrita acima demonstra uma segunda fronteira sem scan no `apply`. A classificacao de privacidade permanece `falha`.
+
+Nao apareceram arquivos de sessao, caches ou logs adicionais gerenciados pelo candidato nesses fixtures. O tool home continha apenas binario, toolchain, modulos e caches de build Go, todos inventariados separadamente em `final-files.txt`.
+
+### Git, branch e PR
+
+Foram exercitadas tres configuracoes com um arquivo alheio previamente staged e outro modificado sem staging:
+
+| Configuracao | Resultado observado |
+|---|---|
+| default | HEAD e indice nao foram tocados; pagina e `index.md` ficaram unstaged; os dois arquivos alheios mantiveram seus estados |
+| `auto_stage_changes=true` | somente pagina e `index.md` foram adicionados pelo candidato; o staged anterior foi preservado e o unstaged continuou fora do indice |
+| `auto_commit=true` | o commit incluiu pagina, `index.md` e tambem o arquivo alheio que ja estava staged; o arquivo unstaged permaneceu fora |
+
+Cada apply levou entre 0,02 s e 0,05 s. `git add` e path-scoped, mas `git commit` consome todo o indice, apesar de a mensagem listar somente os dois caminhos do candidato. Nao ha comandos nativos de branch, push ou PR; simular esses recursos com `git`/`gh` externo nao classificaria agent-memory e foi registrado como `nao suportado`.
+
+Os tres applies Git usaram, respectivamente, os roots `/workspace/cases/git-default`, `/workspace/cases/git-stage` e `/workspace/cases/git-commit`, com os IDs `20260905T024251-refresh-module-stage5-git-default`, `20260905T024251-refresh-module-stage5-git-stage` e `20260905T024252-refresh-module-stage5-git-commit`.
+
+### Testes executados
+
+Todos os testes rodaram offline com os modulos ja provisionados:
+
+```bash
+go test ./internal/cli -count=1 -run \
+  '^(TestRunPropose_FlagRecordDecisionStages|TestRunPropose_ApplyForcesStagedToLand|TestReviewDiff_ShowsStagedChange|TestRunApply_HappyPath|TestRunReject_RemovesDir|TestRunRebase_SoftDriftNoForceRejected)$'
+go test ./internal/memory -count=1 -run \
+  '^(TestProposeUpdate_RejectsSecretDetected|TestProposeUpdate_RejectsPII_SSN|TestProposeUpdate_LogsNeverLeakSecretBytes|TestApplyStaged_HappyPath|TestApplyStaged_DriftDetected|TestRebaseStaged_SoftDriftRequiresForce|TestRebaseStaged_SoftDriftForceRebases|TestRebaseStaged_SectionDisappearedIsHardBlock|TestRebaseStaged_NewBaseWithSecretIsRejected|TestMaybeAutoStage_StagesAndCommits|TestMaybeAutoStage_AutoCommitOffStagesButNoCommit|TestApplyStaged_AutoStagesOnApply)$'
+go test ./internal/git -count=1 -run \
+  '^(TestAddPaths_StagesProvidedFiles|TestCommit_CreatesCommit|TestCommit_NothingStagedIsNoop)$'
+go test ./... -count=1
+AGENT_MEMORY_BIN=/home/phase-1/bin/agent-memory \
+  go test -tags=e2e ./internal/e2e -count=1 -run '^TestRelease01_EndToEnd$' -v
+```
+
+Os tres filtros literais completos estao em `harness/agent-memory-stage5-tests.sh`; os nomes e resultados tambem estao preservados em `tests/`.
+
+| Suite | Resultado | Duracao |
+|---|---|---:|
+| 6 testes focados de CLI | passa | 20,40 s |
+| 12 testes focados de memory | passa | 1,09 s |
+| 3 testes focados de Git | passa | 0,28 s |
+| `go test ./... -count=1` | 20 pacotes passam; 2 sem testes | 8,47 s |
+| E2E `TestRelease01_EndToEnd` | 14 subtestes passam | 0,75 s |
+
+A suite e ampla e reproduzivel, mas nao detecta os quatro comportamentos criticos observados no harness: adulteracao do staging, perda de drift fora da secao, marcadores em metadados e commit de staged alheio. Por isso `Testabilidade` avanca de `pendente` para `parcial`, nao para `passa`.
 
 ## Criterios
 
-| Criterio | Classificacao | Evidencia | Justificativa estatica |
+| Criterio | Classificacao | Evidencia | Justificativa |
 |---|---|---|---|
 | Markdown e Git canonicos | passa | [Armazenamento](#armazenamento-e-roots) | Markdown e duravel; SQLite/cache sao derivados. |
-| Operacao local | pendente | [Armazenamento](#armazenamento-e-roots) | A arquitetura e local, mas falta executar o fluxo offline. |
+| Operacao local | passa | [Etapa 5](#ambiente-e-reproducao) | O fluxo principal de governanca concluiu offline; os demais criterios seguem independentes. |
 | Ausencia de backend obrigatorio | passa | [Armazenamento](#armazenamento-e-roots) | MCP stdio e transitorio; nao ha daemon. |
 | Indice reconstruivel | pendente | [Fluxo](#fluxo-estatico) | Implementacao existe; corpus/rebuild limpo nao foram executados. |
-| Privacidade antes da persistencia | falha | [Privacidade](#privacidade-sessoes-e-drift) | Marcadores e metadados escapam do scan. |
+| Privacidade antes da persistencia | falha | [Etapa 5](#privacidade) | Marcadores persistiram no staging/lock; apply aceitou segredo adulterado. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-sessoes-e-drift) | Sessions, IDs e metadados sao persistidos localmente. |
-| Estado atual | pendente | [Estado atual](#estado-atual-governanca-e-publicacao) | Replace existe; consolidacao requer execucao. |
-| Consolidacao antes da publicacao | parcial | [Governanca](#estado-atual-governanca-e-publicacao) | Ha staging, mas auto-apply e `--apply` permitem mutacao direta. |
-| Revisao explicita | parcial | [Governanca](#estado-atual-governanca-e-publicacao) | Diff/reject/apply existem; falta ajuste seguro. |
+| Estado atual | passa | [Etapa 5](#proposta-revisao-e-aplicacao) | Aplicacao explicita deixou somente tres segundos e `team-b`. |
+| Consolidacao antes da publicacao | parcial | [Etapa 5](#integridade-e-drift) | Ha staging observavel, mas mutavel, sem revalidacao e contornavel por `--apply`. |
+| Revisao explicita | parcial | [Etapa 5](#proposta-revisao-e-aplicacao) | Diff/reject/apply funcionam; nao ha ajuste seguro da mesma proposta. |
 | Repositorio de memoria separado | falha | [Roots](#armazenamento-e-roots) | Memoria e fixa em `<code_root>/.agent-memory`. |
 | Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | Skill/MCP existem, sem ciclo real demonstrado. |
-| Testabilidade | pendente | [Testes](#claude-code-e-testes) | Suite ampla nao executada e faltam casos criticos. |
+| Testabilidade | parcial | [Etapa 5](#testes-executados) | Suite passa, mas omite quatro falhas criticas demonstradas pelo harness. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#agent-memory) | Apache-2.0; transitivas/notices e npm requerem auditoria. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Separar roots tem custo e risco altos delimitados. |
 
 ## Riscos, custo e duvidas
 
-Separar roots exige propagar `CodeRoot`, `MemoryRoot` e repositorio Git, namespear por repositorio consumidor, adaptar MCP/doctor/proveniencia e testar dois code repos concorrentes. O hotfix 0.5.1 corrige roteamento cruzado anterior (`CHANGELOG.md:8-23`), o que aumenta o risco dessa mudanca.
+Separar roots exige propagar `CodeRoot`, `MemoryRoot` e repositorio Git, namespear por repositorio consumidor, adaptar MCP/doctor/proveniencia e testar dois code repos concorrentes. O hotfix 0.5.1 corrige roteamento cruzado anterior (`CHANGELOG.md:8-23`), o que aumenta o risco dessa mudanca. A Etapa 5 acrescenta a necessidade de tornar staging imutavel ou verificavel, revalidar scan/schema no apply, proteger o arquivo integral contra drift e isolar commits do indice preexistente.
 
 Fluxos restantes limitados:
 
-1. Passagem de privacidade em conteudo e metadados, seguida de adulteracao do staging.
-2. Spike de um dia: `CODE_ROOT != MEMORY_ROOT`, dois repositorios consumidores e Git somente na memoria.
-3. Etapa 5: politicas de drift e commit com indice previamente staged.
-4. Etapa 3/4: rebuild, processo novo, edicao externa, replace e idempotencia.
+1. Spike de um dia: `CODE_ROOT != MEMORY_ROOT`, dois repositorios consumidores e Git somente na memoria.
+2. Etapa 3/4: rebuild, processo novo, edicao externa, replace e idempotencia.
+3. Etapa 6: ciclo real da integracao com Claude Code, se agent-memory continuar o candidato integrado mais promissor.
 
 ## Recomendacao preliminar
 
-**Componente, condicionado ao spike de roots e ao endurecimento de privacidade/apply.** Continuam relevantes o motor Markdown byte-preserving, operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia.
+**Componente, condicionado ao spike de roots e a substituicao/endurecimento das fronteiras de apply, privacidade, drift e commit.** Continuam relevantes o motor Markdown byte-preserving, operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia. A governanca desta revisao nao deve ser adotada como esta; o spike so se justifica porque ainda pode determinar se o nucleo isolado compensa essas substituicoes.
