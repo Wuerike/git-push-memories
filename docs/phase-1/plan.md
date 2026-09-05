@@ -162,7 +162,7 @@ Executar principalmente em agent-memory e claude-bedrock:
 
 ### Etapa 6: avaliar integração com Claude Code
 
-Executar em claude-mem e no candidato integrado mais promissor:
+Executar em claude-mem, agent-memory e ai-memory:
 
 1. Instalar a integração em configuração isolada do Claude Code.
 2. Observar eventos de hooks e dados enviados por cada evento.
@@ -174,6 +174,8 @@ Executar em claude-mem e no candidato integrado mais promissor:
 8. Repetir com o processo auxiliar indisponível para observar o comportamento de falha.
 
 **Conclusão observável:** estão demonstrados a utilidade dos hooks, o custo de contexto, a degradação em caso de falha e os riscos de privacidade.
+
+**Estado em 2026-09-05:** etapa encerrada como `parcial` nos tres candidatos previstos. claude-mem demonstrou hooks, injecao compacta e recuperacao progressiva em harness; ai-memory entregou handoff, mas nao teve resposta autenticada nem recuperacao MCP completa; agent-memory carregou skill/MCP e completou o ciclo funcional, mas nao possui hooks e depende de obediencia do modelo. Nenhuma passagem usou o sandbox Bubblewrap integral, e os eventos posteriores a falha de autenticacao foram dirigidos por harnesses deterministas. Os relatorios registram essas limitacoes, degradacao e persistencia observadas.
 
 ### Etapa 7: executar spikes condicionais
 

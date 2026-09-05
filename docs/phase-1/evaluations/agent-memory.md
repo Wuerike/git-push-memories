@@ -10,10 +10,10 @@
 | Revisao | `51dac9bf6e72c67f6314ee3abb00515986a3fa4a` |
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
-| Data | 2026-09-04 (triagem estatica); 2026-09-05 (Etapa 5) |
-| Avaliacao | triagem estatica e governanca comportamental offline |
+| Data | 2026-09-04 (triagem estatica); 2026-09-05 (Etapas 5 e 6) |
+| Avaliacao | triagem estatica, governanca offline e integracao com Claude Code |
 | Avaliador | OpenCode |
-| Run ID | `20260905T024115Z-agent-memory-stage5` |
+| Run IDs | `20260905T024115Z-agent-memory-stage5`; `stage6-agent-memory-run` |
 | Commit inicial da memoria | lifecycle `ba3db8ff96dd79f334108e12b7206655c4dc3bd6`; demais fixtures em `*-baseline-commit.txt` e `privacy-*/prep/baseline-commit.txt` |
 
 ## Hipotese
@@ -22,7 +22,7 @@ agent-memory pode fornecer o nucleo de operacoes, diff e aplicacao explicita, de
 
 ## Escopo e metodo
 
-Na triagem estatica foram inspecionados CLI, MCP, schema, update/staging, scanner, indice, Git, adaptador Claude e testes. A Etapa 5 executou os fluxos de governanca descritos abaixo sem alterar o clone original.
+Na triagem estatica foram inspecionados CLI, MCP, schema, update/staging, scanner, indice, Git, adaptador Claude e testes. A Etapa 5 executou os fluxos de governanca descritos abaixo sem alterar o clone original. A Etapa 6 carregou a skill e o servidor MCP em Claude Code e exercitou proposta e recuperacao por processos MCP novos.
 
 ```bash
 git rev-parse HEAD
@@ -77,7 +77,7 @@ Git add usa caminhos explicitos, mas commit inclui qualquer alteracao previament
 
 ## Claude Code e testes
 
-O adaptador instala skill e `.mcp.json`; a skill instrui fetch no inicio e propose no fim (`internal/adapters/claude/SKILL.md:23-69`; `internal/adapters/claude/claude.go:71-181`). Nao ha hooks; o modelo precisa seguir a instrucao. O ciclo real nao foi executado.
+O adaptador instala skill e `.mcp.json`; a skill instrui fetch no inicio e propose no fim (`internal/adapters/claude/SKILL.md:23-69`; `internal/adapters/claude/claude.go:71-181`). Nao ha hooks; o modelo precisa seguir a instrucao. A Etapa 6 confirmou que Claude Code carrega ambos, mas a ausencia deliberada de credencial impediu observar o modelo chamando as ferramentas.
 
 Foram encontrados 83 arquivos de teste. A CI declara build/vet/test em tres sistemas, race, E2E e lint (`.github/workflows/ci.yml:8-86`). O E2E percorre init, MCP, propose, review, apply, fetch, segredo e archive (`internal/e2e/release01_smoke_test.go:30-68,103-621`). Ha testes de rebuild e drift (`internal/cli/rebuild_index_test.go:32-151`; `internal/memory/rebase_test.go:213-315`), mas nao cobrem roots separados, tampering, drift fora da secao ou staged alheio. A execucao da suite esta registrada na Etapa 5.
 
@@ -196,6 +196,46 @@ Os tres filtros literais completos estao em `harness/agent-memory-stage5-tests.s
 
 A suite e ampla e reproduzivel, mas nao detecta os quatro comportamentos criticos observados no harness: adulteracao do staging, perda de drift fora da secao, marcadores em metadados e commit de staged alheio. Por isso `Testabilidade` avanca de `pendente` para `parcial`, nao para `passa`.
 
+## Etapa 6: integracao com Claude Code
+
+A evidencia esta em `/tmp/stage6-agent-memory-run/evidence`. O run usou a revisao fixa limpa, Claude Code 2.1.261, um `HOME` descartavel e nenhum token ou credencial. O fluxo inicial foi compilado offline com Go 1.25.0; a verificacao final recompilou com o Go 1.25.12 exigido pelo protocolo, repetiu a recuperacao MCP e executou o E2E oficial. `agent-memory init` criou o store em um repositorio descartavel e `agent-memory install claude` escreveu somente `.claude/skills/agent-memory/SKILL.md` e `.mcp.json`. O baseline foi commitado antes do fluxo. A passagem usou `env -i`, mas nao Bubblewrap nem duracao por comando, e portanto nao sustenta `passa` sob o protocolo.
+
+Os comandos principais, executados de `/tmp/stage6-agent-memory-run` com o ambiente vazio descrito acima, foram:
+
+```bash
+agent-memory init --root /tmp/stage6-agent-memory-run/project --name stage6-agent-memory
+agent-memory install claude --root /tmp/stage6-agent-memory-run/project --json
+claude -p --session-id 55555555-5555-4555-8555-555555555555 \
+  --no-session-persistence --setting-sources project --strict-mcp-config \
+  --mcp-config /tmp/stage6-agent-memory-run/project/.mcp.json \
+  --output-format stream-json --verbose \
+  "Call memory.fetch_context, then report its project name."
+python3 evidence/mcp-cycle.py bin/agent-memory project
+agent-memory review --root project "$STAGING_ID" --show --diff --json
+agent-memory apply --root project "$STAGING_ID" --json
+python3 evidence/mcp-retrieve.py bin/agent-memory-go1.25.12 project
+GOPROXY=off GOTOOLCHAIN=go1.25.12 AGENT_MEMORY_BIN=bin/agent-memory-go1.25.12 \
+  go test -tags=e2e ./internal/e2e -count=1 -run '^TestRelease01_EndToEnd$' -v
+```
+
+| Passagem | Codigo | Duracao | Evidencia |
+|---|---:|---:|---|
+| reinstalacao idempotente | 0 | 0,00 s | `reinstall.json`, `reinstall.time` |
+| Claude Code com MCP disponivel | falha de autenticacao esperada | 0,058 s | `claude-session.stream.jsonl` |
+| recuperacao em MCP novo, Go 1.25.12 | 0 | 0,05 s | `mcp-retrieve-go1.25.12.json` |
+| Claude Code sem binario MCP | falha de autenticacao esperada | 0,055 s | `claude-mcp-unavailable.stream.jsonl` |
+| E2E oficial, 14 subtestes | 0 | 0,343 s | stdout preservado na execucao |
+
+Antes do ciclo, o projeto continha os nove arquivos Markdown/scaffold da memoria, a skill, `.mcp.json` e nenhum SQLite. Ao final, `decisions.md` e `index.md` estavam modificados e haviam sido criados `meta/index.sqlite` e `meta/lock.info`; `staging/` estava vazio depois do aceite. stdout e stderr dos dois launches Claude foram preservados separadamente. O fluxo original de proposta/review/apply nao teve cronometro por comando, outra razao para manter `parcial`.
+
+Uma sessao real `claude -p`, com configuracao MCP explicita e `--no-session-persistence`, listou a skill `agent-memory`, os tres tools `memory.fetch_context`, `memory.propose_update` e `memory.status`, e o servidor como `connected`. `apiKeySource=none` fez a chamada do modelo terminar com `authentication_failed`; portanto o run nao atribui ao produto uma chamada que o modelo nao executou.
+
+O mesmo servidor stdio carregado pelo Claude Code foi exercitado por um cliente MCP deterministico. Um primeiro processo chamou `memory.fetch_context` sem query e recebeu 719 caracteres de `conventions.md` e `index.md`. Em seguida, `memory.propose_update` recebeu uma decisao com o marcador `AGENT_MEMORY_STAGE6_OMEGA` e retornou `status=staged`, `human_approval_required=true` e um `staging_id`. A pagina canonica permaneceu intacta ate `review --show --diff` e `apply` serem executados pela CLI; o aceite retornou `status=applied`.
+
+Um segundo processo MCP, sem contexto do primeiro, chamou `memory.fetch_context` com o marcador e recuperou `decisions.md` e o conteudo integral aplicado. O E2E oficial `TestRelease01_EndToEnd` tambem passou em 0,34 s e cobriu instalacao do adaptador, transporte stdio, proposta, revisao, aceite, consulta, rejeicao de segredo e archive. Nao houve arquivo de sessao criado nesse fluxo; ficaram o Markdown canonico, o indice derivado `meta/index.sqlite` e `meta/lock.info`.
+
+Nao existe processo auxiliar permanente a derrubar: cada conexao inicia `agent-memory mcp`. Para observar a falha, uma segunda sessao Claude Code foi iniciada sem o binario no `PATH`. A skill continuou listada, mas o servidor apareceu como `failed`, os tres tools desapareceram e Claude Code continuou ate a falha de autenticacao do modelo. Nao ha spool, retry ou recuperacao automatica. A integracao e funcional e local, mas captura e recuperacao dependem de o modelo obedecer a skill; sem hooks, nao participam garantidamente de todo ciclo de vida.
+
 ## Criterios
 
 | Criterio | Classificacao | Evidencia | Justificativa |
@@ -210,7 +250,7 @@ A suite e ampla e reproduzivel, mas nao detecta os quatro comportamentos critico
 | Consolidacao antes da publicacao | parcial | [Etapa 5](#integridade-e-drift) | Ha staging observavel, mas mutavel, sem revalidacao e contornavel por `--apply`. |
 | Revisao explicita | parcial | [Etapa 5](#proposta-revisao-e-aplicacao) | Diff/reject/apply funcionam; nao ha ajuste seguro da mesma proposta. |
 | Repositorio de memoria separado | falha | [Roots](#armazenamento-e-roots) | Memoria e fixa em `<code_root>/.agent-memory`. |
-| Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | Skill/MCP existem, sem ciclo real demonstrado. |
+| Integracao com Claude Code | parcial | [Etapa 6](#etapa-6-integracao-com-claude-code) | Skill e MCP carregaram e o ciclo funcional passou, mas nao ha hooks e a ativacao depende do modelo seguir a skill. |
 | Testabilidade | parcial | [Etapa 5](#testes-executados) | Suite passa, mas omite quatro falhas criticas demonstradas pelo harness. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#agent-memory) | Apache-2.0; transitivas/notices e npm requerem auditoria. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Separar roots tem custo e risco altos delimitados. |
@@ -223,7 +263,7 @@ Fluxos restantes limitados:
 
 1. Spike de um dia: `CODE_ROOT != MEMORY_ROOT`, dois repositorios consumidores e Git somente na memoria.
 2. Etapa 3/4: rebuild, processo novo, edicao externa, replace e idempotencia.
-3. Etapa 6: ciclo real da integracao com Claude Code, se agent-memory continuar o candidato integrado mais promissor.
+3. Resposta autenticada do modelo, apenas se a obediencia espontanea a skill puder alterar a decisao.
 
 ## Recomendacao preliminar
 

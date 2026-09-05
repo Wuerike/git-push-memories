@@ -10,10 +10,10 @@
 | Revisao | `3bd35154c845d5c2ab510e2c2ecae3c1d2059b19` |
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
-| Data | 2026-09-04 |
-| Avaliacao | triagem estatica e etapas 3 e 4 comportamentais; hooks do Claude Code, privacidade e suite completa nao executados |
+| Data | 2026-09-04 (triagem e etapas 3/4); 2026-09-05 (Etapa 6) |
+| Avaliacao | triagem estatica e etapas 3, 4 e 6 comportamentais; privacidade sob trace e suite completa nao executadas |
 | Avaliador | OpenCode |
-| Run IDs | `20260904T212935Z-ai-memory-stage3`; `20260904T233117Z-ai-memory-stage4` |
+| Run IDs | `20260904T212935Z-ai-memory-stage3`; `20260904T233117Z-ai-memory-stage4`; `stage6-ai-memory-run` |
 | Commits iniciais da memoria | `29645b91101fbf98d524c8766d83cd4ae1ca3367` (etapa 3); `22d740759c5d8bf0218e3452a3562f1477845978` (etapa 4) |
 
 ## Hipotese
@@ -22,7 +22,7 @@ ai-memory e o comparador end-to-end mais proximo, mas daemon, spool anterior a s
 
 ## Escopo e metodo
 
-Foram lidos manifestos, migracoes, CLI, hooks, store, wiki, consolidacao, MCP e testes. Na etapa 3, o binario foi compilado e o daemon foi executado com o corpus comum para avaliar FTS, edicao externa e rebuild. Na etapa 4, o fluxo de auto-improvement foi exercitado com captura sintetica, provider deterministico em loopback, aprovacao manual e testes focados. Hooks reais do Claude Code, privacidade e a suite completa permaneceram excluidos.
+Foram lidos manifestos, migracoes, CLI, hooks, store, wiki, consolidacao, MCP e testes. Na etapa 3, o binario foi compilado e o daemon foi executado com o corpus comum para avaliar FTS, edicao externa e rebuild. Na etapa 4, o fluxo de auto-improvement foi exercitado com captura sintetica, provider deterministico em loopback, aprovacao manual e testes focados. Na etapa 6, hooks reais e o bridge MCP foram carregados por Claude Code em configuracao descartavel, sem credenciais. Privacidade sob trace e a suite completa permaneceram excluidas.
 
 ```bash
 git rev-parse HEAD
@@ -254,6 +254,43 @@ A proposta existe simultaneamente como estado autoritativo no SQLite e sidecar M
 
 Os nove testes focados cobriram reviewer sem escrita, contexto de rejeicao, patches, aprovacao manual, show/diff/reject, supersessao, rollback por conflito, hash de baseline e rewrite identico. Todos passaram offline; a suite completa nao foi executada.
 
+## Etapa 6: integracao com Claude Code
+
+A evidencia complementar esta em `/tmp/stage6-ai-memory-run/evidence-stage6-rerun`. O run usou Claude Code 2.1.261, ai-memory 1.39.0, `HOME` e `CLAUDE_CONFIG_DIR` descartaveis, ambiente criado por `env -i`, IDs de sessao sinteticos e nenhum token ou credencial. O daemon ficou em loopback, com maintenance e scheduler de auto-improvement desabilitados. Esta passagem nao usou Bubblewrap, reutilizou um banco acumulado e nao registrou duracao por comando; por isso somente sustenta classificacao `parcial` sob o protocolo. `apiKeySource=none` fez cada chamada terminar imediatamente com `authentication_failed`. Ela demonstra os contratos dos hooks, MCP, handoff e falha do daemon sem expor uma sessao real.
+
+As duas sessoes principais foram iniciadas no mesmo repositorio descartavel com `--no-session-persistence`, `--setting-sources user`, configuracoes explicitas de hooks/MCP e `--include-hook-events`:
+
+```bash
+claude -p --session-id 11111111-1111-4111-8111-111111111111 \
+  --no-session-persistence --setting-sources user \
+  --settings /tmp/stage6-ai-memory-home/.claude/settings.json \
+  --strict-mcp-config --mcp-config /tmp/stage6-ai-memory-home/.claude.json \
+  --output-format stream-json --include-hook-events --verbose \
+  "Remember this synthetic discovery for the next session: PHASE6-CLEAN-OMEGA. Respond only OK."
+
+claude -p --session-id 22222222-2222-4222-8222-222222222222 \
+  --no-session-persistence --setting-sources user \
+  --settings /tmp/stage6-ai-memory-home/.claude/settings.json \
+  --strict-mcp-config --mcp-config /tmp/stage6-ai-memory-home/.claude.json \
+  --output-format stream-json --include-hook-events --verbose \
+  "Report the pending handoff discovery exactly, if present."
+```
+
+| Passagem | Resultado | Duracao | stdout/stderr |
+|---|---|---:|---|
+| sessao A, captura | hooks/MCP conectados; autenticacao ausente | 0,064 s | `session-a.stream.jsonl`, `session-a.stderr` |
+| sessao B, handoff | marcador injetado; autenticacao ausente | 0,062 s | `session-b.stream.jsonl`, `session-b.stderr` |
+| sessao com daemon parado | hook fail-open; MCP `failed` | 0,073 s | `session-offline.stream.jsonl`, `session-offline.stderr` |
+| sessao depois do restart | spool drenado; MCP conectado | 0,060 s | `session-recovery.stream.jsonl`, `session-recovery.stderr` |
+
+Nao foi coletado inventario imediatamente antes da passagem, pois o run reutilizou estado das tentativas exploratorias; essa omissao impede atribuir as contagens acumuladas somente a estas quatro sessoes. Depois da passagem, `database-final.txt` registrou 12 sessoes, 47 observacoes, 11 handoffs, 11 paginas, 32 eventos de auditoria e 47 ingest keys. Os quatro IDs sinteticos estavam encerrados; os handoffs A e offline estavam aceitos pelas sessoes B e recovery. O spool, que tinha tres JSON durante a falha, terminou somente com `.drain.lock`. Os arquivos stream e stderr foram preservados separadamente, e `context-metrics.txt` registra o volume injetado.
+
+Na sessao A, `SessionStart` e `UserPromptSubmit` terminaram com codigo zero, o MCP `ai-memory` apareceu como `connected` e o encerramento criou a pagina `sessions/11111111-1111-4111-8111-111111111111.md` e um handoff aberto. No `SessionStart` da sessao B, o hook injetou o handoff com `PHASE6-CLEAN-OMEGA` integralmente no `additionalContext`. A injecao teve 1.232 bytes e 162 palavras. O banco registrou o handoff da sessao A como `accepted`, com `accepted_by_session` igual ao ID da sessao B, demonstrando entrega single-use entre sessoes. Como nao havia autenticacao do Claude, o modelo nao produziu a resposta solicitada; classificar a qualidade da resposta por inferencia seria indevido.
+
+Mesmo com `--no-session-persistence` no Claude Code, ai-memory persistiu as duas sessoes. A inspecao por Python `sqlite3`, necessaria porque o CLI `sqlite3` nao esta instalado, encontrou dez sessoes, 41 observacoes, nove handoffs, nove paginas e 26 eventos de auditoria no banco acumulado de 688.128 bytes. As paginas sinteticas incluem IDs, prompts, timestamps e contagens de ferramentas; portanto a passagem confirma diretamente a falha do criterio de nao persistir sessoes.
+
+Para testar degradacao, o daemon foi encerrado e uma terceira sessao foi iniciada. O `SessionStart` retornou codigo zero e um aviso de que o handoff nao foi injetado; Claude Code continuou com o MCP marcado como `failed`. Os hooks gravaram tres envelopes no spool, contendo ID de sessao, caminho do transcript, cwd e o prompt em claro. Depois do restart, o proximo `SessionStart` drenou os tres arquivos, recriou a pagina e o handoff da sessao offline e injetou `Offline degradation probe.`; o spool voltou a conter apenas `.drain.lock`. Assim, a falha e fail-open para Claude Code e recuperavel para captura, mas a recuperacao depende do daemon voltar e amplia a primeira persistencia sensivel anterior ao sanitizador do servidor.
+
 ## Privacidade e sessoes
 
 O teste `crates/ai-memory-cli/tests/hook_payload.rs:80-101` exige que um payload ordinario chegue byte a byte ao spool. Assim, o sanitizador do servidor, embora tipado, nao protege a primeira persistencia. O spool pode reter entradas e bearer por varias tentativas (`crates/ai-memory-cli/src/commands/hook_spool.rs:33-44,71-89`).
@@ -268,7 +305,7 @@ Auto-improve grava proposta `pending`, sidecar nao indexado e baseline para drif
 
 ## Claude Code e testes
 
-Ha instalador MCP, bridge por `CLAUDE_CODE_SESSION_ID` e nove hooks (`crates/ai-memory-cli/src/commands/install_mcp.rs:350-367,626-653`; `mcp_bridge.rs:19-87,118-158`; `render_shared.rs:29-49`). `SessionStart` drena o spool e injeta handoff (`hook.rs:678-715`). O ciclo nao foi executado.
+Ha instalador MCP, bridge por `CLAUDE_CODE_SESSION_ID` e nove hooks (`crates/ai-memory-cli/src/commands/install_mcp.rs:350-367,626-653`; `mcp_bridge.rs:19-87,118-158`; `render_shared.rs:29-49`). `SessionStart` drena o spool e injeta handoff (`hook.rs:678-715`). A Etapa 6 confirmou carregamento do bridge, captura de lifecycle, entrega single-use do handoff e replay do spool; ferramentas MCP e resposta autenticada do modelo nao foram exercitadas.
 
 Foram encontrados testes de sanitizacao (`crates/ai-memory-core/src/sanitize.rs:348-627`), spool, rebuild (`crates/ai-memory-wiki/src/wiki.rs:4217-4307`), concorrencia/supersessao (`crates/ai-memory-store/tests/multi_session.rs:132-219`), proposta/drift (`crates/ai-memory-wiki/src/wiki.rs:2913-3098`) e relacoes contraditorias (`crates/ai-memory-consolidate/tests/typed_edges.rs:45-182`). A CI declara test, clippy, deny, audit e gitleaks (`.github/workflows/ci.yml:20-61,195-236`). Nove testes diretamente ligados a proposta, rejeicao, conflito, supersessao e idempotencia foram executados na etapa 4; os demais e a suite completa nao foram executados.
 
@@ -286,7 +323,7 @@ Foram encontrados testes de sanitizacao (`crates/ai-memory-core/src/sanitize.rs:
 | Consolidacao antes da publicacao | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Auto-improve manteve proposta observavel antes da pagina, mas outros fluxos escrevem direto e aprovacao manual nao e padrao. |
 | Revisao explicita | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Show, diff, rejeicao e aceite funcionam; ajuste direto nao existe e requer rejeitar/regenerar. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | A wiki Git e separada e contem varios projetos. |
-| Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | Hooks e bridge existem; falta o ciclo isolado. |
+| Integracao com Claude Code | parcial | [Etapa 6](#etapa-6-integracao-com-claude-code) | Hooks e bridge carregaram, e o handoff foi entregue; faltaram sandbox do protocolo, resposta autenticada e recuperacao completa pelas ferramentas MCP. |
 | Testabilidade | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Nove contratos deterministas de proposta, hash, conflito, supersessao e idempotencia passaram offline. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#ai-memory) | MIT e permissiva; dependencias e ativos requerem inventario. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Mudancas estao delimitadas; custo alto a muito alto. |
@@ -298,7 +335,7 @@ Um fork exigiria retirar spool bruto, sessoes, handoffs e transcripts; eliminar 
 Fluxos restantes limitados:
 
 1. Etapa 5: drift, ajuste ausente e fronteiras de commit/publicacao.
-2. Etapa 6: hooks reais em configuracao isolada, medindo handoff e inventariando sessoes.
+2. Etapa 6 complementar, apenas se alterar a decisao: resposta autenticada e recuperacao progressiva pelas ferramentas MCP.
 3. Passagem de privacidade: confirmar sob trace o spool anterior ao sanitizador.
 
 ## Recomendacao preliminar
