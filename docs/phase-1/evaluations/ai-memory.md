@@ -60,7 +60,7 @@ O fluxo de hooks e MCP HTTP requer `ai-memory serve`, que abre banco, watcher e 
 
 ## Etapa 3: armazenamento e recuperacao
 
-O run bruto esta em `/tmp/git-push-memories-phase-1/20260904T212935Z-ai-memory-stage3-evidence`. A copia executavel permaneceu destacada na revisao fixa e terminou limpa; o repositorio de codigo sintetico tambem terminou limpo. Como a CLI fixa a wiki em `<data-dir>/wiki`, esse diretorio foi o repositorio de memoria e permaneceu separado de `/workspace/code`. Providers LLM/embedding, maintenance e auto-improve foram desabilitados.
+O run bruto foi preservado em `.artifacts/phase-1/20260904T212935Z-ai-memory-stage3-evidence`, conforme o [manifesto de evidencias](../evidence-manifest.md). A copia executavel permaneceu destacada na revisao fixa e terminou limpa; o repositorio de codigo sintetico tambem terminou limpo. Como a CLI fixa a wiki em `<data-dir>/wiki`, esse diretorio foi o repositorio de memoria e permaneceu separado de `/workspace/code`. Providers LLM/embedding, maintenance e auto-improve foram desabilitados.
 
 Configuracao efetiva relevante; o `token_pepper` sintetico gerado por `init` foi omitido:
 
@@ -165,7 +165,7 @@ As latencias de consulta medem apenas o cliente contra um daemon ja residente; o
 
 ## Etapa 4: consolidacao do estado atual
 
-O run bruto esta em `/tmp/git-push-memories-phase-1/20260904T233117Z-ai-memory-stage4-evidence`; os scripts completos de preparacao, mock, fluxo e testes estao no subdiretorio `harness/`. Para repetir, copie esses quatro arquivos para `/tmp/opencode/` e execute `bash /tmp/opencode/run-ai-memory-stage4.sh`. A copia executavel permaneceu destacada na revisao fixa e limpa. O fluxo inteiro executou em um namespace de rede sem acesso externo; apenas o daemon do produto e um provider OpenAI-compatible deterministico em `127.0.0.1:49375` compartilharam o loopback. O provider nao avalia qualidade de modelo: ele torna reproduzivel o contrato de proposta e devolve uma redacao ambigua antes da rejeicao e uma correcao depois dela. Para testar idempotencia do executor, ele volta a emitir a mesma operacao quando o alvo ja esta atualizado.
+O run bruto foi preservado em `.artifacts/phase-1/20260904T233117Z-ai-memory-stage4-evidence`; os scripts completos de preparacao, mock, fluxo e testes estao no subdiretorio `harness/` e constam no [manifesto de evidencias](../evidence-manifest.md). Para repetir, copie esses quatro arquivos para `/tmp/opencode/` e execute `bash /tmp/opencode/run-ai-memory-stage4.sh`. A copia executavel permaneceu destacada na revisao fixa e limpa. O fluxo inteiro executou em um namespace de rede sem acesso externo; apenas o daemon do produto e um provider OpenAI-compatible deterministico em `127.0.0.1:49375` compartilharam o loopback. O provider nao avalia qualidade de modelo: ele torna reproduzivel o contrato de proposta e devolve uma redacao ambigua antes da rejeicao e uma correcao depois dela. Para testar idempotencia do executor, ele volta a emitir a mesma operacao quando o alvo ja esta atualizado.
 
 A pagina comum foi adaptada apenas de `services/checkout-api.md` para `procedures/checkout-api.md`, pois a revisao so oferece patch de paginas existentes em `procedures/` e `_rules/`. O corpo inicial permaneceu igual ao fixture. Configuracao efetiva relevante:
 
@@ -256,7 +256,7 @@ Os nove testes focados cobriram reviewer sem escrita, contexto de rejeicao, patc
 
 ## Etapa 6: integracao com Claude Code
 
-A evidencia complementar esta em `/tmp/stage6-ai-memory-run/evidence-stage6-rerun`. O run usou Claude Code 2.1.261, ai-memory 1.39.0, `HOME` e `CLAUDE_CONFIG_DIR` descartaveis, ambiente criado por `env -i`, IDs de sessao sinteticos e nenhum token ou credencial. O daemon ficou em loopback, com maintenance e scheduler de auto-improvement desabilitados. Esta passagem nao usou Bubblewrap, reutilizou um banco acumulado e nao registrou duracao por comando; por isso somente sustenta classificacao `parcial` sob o protocolo. `apiKeySource=none` fez cada chamada terminar imediatamente com `authentication_failed`. Ela demonstra os contratos dos hooks, MCP, handoff e falha do daemon sem expor uma sessao real.
+A evidencia complementar foi preservada em `.artifacts/phase-1/stage6-ai-memory`, conforme o [manifesto de evidencias](../evidence-manifest.md). O run usou Claude Code 2.1.261, ai-memory 1.39.0, `HOME` e `CLAUDE_CONFIG_DIR` descartaveis, ambiente criado por `env -i`, IDs de sessao sinteticos e nenhum token ou credencial. O daemon ficou em loopback, com maintenance e scheduler de auto-improvement desabilitados. Esta passagem nao usou Bubblewrap, reutilizou um banco acumulado e nao registrou duracao por comando; por isso somente sustenta classificacao `parcial` sob o protocolo. `apiKeySource=none` fez cada chamada terminar imediatamente com `authentication_failed`. Ela demonstra os contratos dos hooks, MCP, handoff e falha do daemon sem expor uma sessao real.
 
 As duas sessoes principais foram iniciadas no mesmo repositorio descartavel com `--no-session-persistence`, `--setting-sources user`, configuracoes explicitas de hooks/MCP e `--include-hook-events`:
 

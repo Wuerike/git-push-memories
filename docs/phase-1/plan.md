@@ -24,6 +24,7 @@ docs/phase-1/
 ├── comparison-matrix.md
 ├── licenses.md
 ├── capability-map.md
+├── evidence-manifest.md
 ├── evaluations/
 │   └── <project>.md
 └── spikes/
@@ -31,6 +32,8 @@ docs/phase-1/
 
 docs/adr/
 └── 0001-implementation-base.md
+
+.artifacts/phase-1/              # evidencias brutas locais, ignoradas pelo Git
 ```
 
 Cada relatório de avaliação deve registrar:

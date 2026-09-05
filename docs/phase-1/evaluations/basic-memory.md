@@ -61,7 +61,7 @@ O fluxo local minimo pode usar SQLite e transporte MCP stdio sem Postgres, Redis
 
 ## Etapa 3: armazenamento e recuperacao
 
-O run bruto esta em `/tmp/git-push-memories-phase-1/20260904T211353Z-basic-memory-stage3-evidence`. A copia executavel permaneceu destacada na revisao fixa e terminou limpa; o repositorio de codigo sintetico tambem terminou limpo. O projeto `main` apontou para `/workspace/memory`, separado de `/workspace/code`. Busca semantica, watcher, auto-update, promocoes, telemetria e reescrita de frontmatter foram desabilitados explicitamente.
+O run bruto foi preservado em `.artifacts/phase-1/20260904T211353Z-basic-memory-stage3-evidence`, conforme o [manifesto de evidencias](../evidence-manifest.md). A copia executavel permaneceu destacada na revisao fixa e terminou limpa; o repositorio de codigo sintetico tambem terminou limpo. O projeto `main` apontou para `/workspace/memory`, separado de `/workspace/code`. Busca semantica, watcher, auto-update, promocoes, telemetria e reescrita de frontmatter foram desabilitados explicitamente.
 
 Configuracao efetiva relevante, aplicada a todos os comandos do produto:
 

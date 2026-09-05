@@ -271,6 +271,8 @@ Se uma interface nao suportar um passo, registrar `nao suportado` em vez de simu
 
 Cada projeto tera um relatorio em `docs/phase-1/evaluations/<project>.md`. Comandos, saidas pequenas e extratos sanitizados ficam no relatorio. Artefatos brutos ficam em `EVIDENCE_ROOT`, fora de `RUN_ROOT`, para nao serem confundidos com persistencia do candidato. Antes de remover o ambiente, transcrever para o relatorio toda evidencia necessaria para reproduzir a classificacao.
 
+Depois que um run for declarado valido, copiar somente seu `EVIDENCE_ROOT` sanitizado para `.artifacts/phase-1/` e registrar tamanho e checksum em [`evidence-manifest.md`](evidence-manifest.md). Para runs que nao seguiram o layout comum, preservar tambem apenas bancos, logs, configuracoes sanitizadas e harnesses citados pelo relatorio. `.artifacts/` e local e ignorado pelo Git; antes de apagar o workspace ou trocar de maquina, ele deve ser exportado para armazenamento duravel. Nao arquivar clones descartaveis, toolchains, caches, `RUN_ROOT`s completos nem tentativas substituidas.
+
 Preservar no minimo:
 
 - data, hipotese, escopo e exclusoes;

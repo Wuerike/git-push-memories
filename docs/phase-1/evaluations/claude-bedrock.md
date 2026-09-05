@@ -71,7 +71,7 @@ O fluxo Git adiciona diretorios inteiros, nao apenas arquivos da proposta, e nao
 
 ## Etapa 4: consolidacao do estado atual
 
-O gate bruto esta em `/tmp/git-push-memories-phase-1/20260904T234627Z-claude-bedrock-stage4-gate-evidence`; o script completo esta em `harness/`. Para repetir, copie-o para `/tmp/opencode/` e execute `bash /tmp/opencode/run-claude-bedrock-stage4-gate.sh`. Repositorios descartaveis receberam o corpus comum; a copia do candidato permaneceu destacada na revisao fixa. O comando executado foi:
+O gate bruto foi preservado em `.artifacts/phase-1/20260904T234627Z-claude-bedrock-stage4-gate-evidence`, conforme o [manifesto de evidencias](../evidence-manifest.md); o script completo esta em `harness/`. Para repetir, copie-o para `/tmp/opencode/` e execute `bash /tmp/opencode/run-claude-bedrock-stage4-gate.sh`. Repositorios descartaveis receberam o corpus comum; a copia do candidato permaneceu destacada na revisao fixa. O comando executado foi:
 
 ```bash
 claude --bare --plugin-dir /workspace/candidate \
