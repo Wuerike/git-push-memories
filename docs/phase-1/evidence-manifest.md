@@ -17,14 +17,21 @@ Os diretorios completos de execucao, clones descartaveis, toolchains, caches e t
 | `stage6-agent-memory` | 134.117 | 42 | `301c553a68e549fe6e7957735248854e176ca5241c217f07ad27efbe8bde1a97` |
 | `stage6-ai-memory` | 1.443.142 | 240 | `e6e4e14c1d1a21b6596d54e9b7684a050dc7c127c0304354604f11cb07237769` |
 | `stage6-claude-mem` | 773.577 | 52 | `ff17d197b21f970630d3958992702735213525f918b327aeaa418f1d4f980c0e` |
+| `20260905T170000Z-agent-memory-stage7-evidence` | 2.760.505 | 184 | `d5b21ad4178495903cffa3325baef9bbcec7378d273f96a1efb32cc2249f50fa` |
+| `20260905T200005Z-palinode-stage7-evidence` | 320.254 | 111 | `723af55593db8ed3b35b2dd9361a49f77cbcfa9115ad70c46731e11c0e7509a4` |
 
-Total preservado: 87.569.708 bytes.
+Total preservado: 90.650.467 bytes.
 
 ## Conteudo da Etapa 6
 
 - `stage6-ai-memory`: streams e metricas, SQLite, logs, wiki e configuracoes isoladas de hooks/MCP; o `config.toml` bruto com material de autenticacao gerado nao foi copiado.
 - `stage6-agent-memory`: clientes e respostas MCP, streams Claude, tempos, diff/review/apply e estado final `.agent-memory` com skill e `.mcp.json`.
 - `stage6-claude-mem`: harness, provider local, payloads, streams, tempos, SQLite, logs, configuracoes sanitizadas e inventarios.
+
+## Conteudo da Etapa 7
+
+- `20260905T170000Z-agent-memory-stage7-evidence`: patch completo do prototipo, arquivos novos, testes red/green, suites final/race/E2E, cold-start stress, comportamento CLI/MCP, rebuild, integridade SQLite, Git e traces. `review-notes.md` registra a disposicao arquitetural revisada.
+- `20260905T200005Z-palinode-stage7-evidence`: fatia exata, facade e testes, paridade upstream/extracao, replay, probes de isolamento, traces sanitizados, dependencias e licencas.
 
 ## Verificacao
 

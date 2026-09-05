@@ -10,10 +10,10 @@
 | Revisao | `9832d58663077645e93093bac9208a084b1d7492` |
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
-| Data | 2026-09-04 |
-| Avaliacao | triagem estatica e etapa 4 comportamental; hooks, privacidade e rebuild nao executados |
+| Data | 2026-09-04 (triagem e Etapa 4); 2026-09-05 (Etapa 7) |
+| Avaliacao | triagem estatica, consolidacao comportamental e spike de extracao offline; hooks, privacidade e rebuild nao executados |
 | Avaliador | OpenCode |
-| Run ID | `20260904T234427Z-palinode-stage4` |
+| Run IDs | `20260904T234427Z-palinode-stage4`; `20260905T200005Z-palinode-stage7b` |
 | Commit inicial da memoria | `5f2a2f04e5fd2c28b4d37d2e4734c77d7246ffbf` |
 
 ## Hipotese
@@ -22,7 +22,7 @@ Palinode pode fornecer um componente de operacoes estruturadas, evidencias e est
 
 ## Escopo e metodo
 
-Foram inspecionados manifestos, API, CLI, MCP, store, save, consolidacao, plugins, hooks e testes. Na etapa 4, API, CLI, consolidacao, Git, busca e testes focados foram executados com providers deterministas em loopback. Hooks, privacidade e rebuild permaneceram excluidos.
+Foram inspecionados manifestos, API, CLI, MCP, store, save, consolidacao, plugins, hooks e testes. Na etapa 4, API, CLI, consolidacao, Git, busca e testes focados foram executados com providers deterministas em loopback. Na Etapa 7, parser, executor e primitivas de evidencia foram extraidos e executados sem backend. Hooks, privacidade e rebuild permaneceram excluidos.
 
 ```bash
 git rev-parse HEAD
@@ -178,6 +178,14 @@ O plugin marketplace configura MCP, enquanto o ciclo completo e instalado por `p
 
 Ha seams para proposer e reconciliacao (`tests/test_proposer_seam.py:1-102`; `tests/test_reconcile_seam.py:1-204`), contrato do executor, testes de save/search/hooks e paridade de superficies (`tests/test_surface_parity.py:1-22`). A CI exclui `tests/integration` (`.github/workflows/ci.yml:72-74`) e a validacao L4 continua declaradamente aberta (`docs/VALIDATION-STRATEGY.md:65-74`). A etapa 4 executou 130 testes focados; integracoes live e a suite completa permaneceram excluidas.
 
+## Etapa 7: extracao offline
+
+O [spike de extracao](../spikes/palinode-offline-extraction.md) **passou** na revisao fixa. A evidencia foi preservada em `.artifacts/phase-1/20260905T200005Z-palinode-stage7-evidence`, conforme o [manifesto](../evidence-manifest.md). Doze blobs cobertos pela MIT foram extraidos diretamente dos objetos Git; uma facade de filesystem com 150 linhas nao comentadas forneceu guards de root, symlink e baseline, escrita atomica individual e relatorio de hashes.
+
+O ambiente minimo continha apenas `python-frontmatter==1.1.0` e `PyYAML==6.0.2`. Os testes upstream corrigidos tiveram 243 passes, 1 skip e 3 xfails esperados; nove testes da fatia e o addendum de isolamento passaram. Com relogio fixo, todas as operacoes do executor produziram saida byte a byte igual no upstream, na extracao e na repeticao. O replay do corpus aplicou dois `UPDATE`, chegou a tres segundos e `team-b` e permaneceu byte-estavel na segunda passagem. Comandos, ambiente, duracoes, estados inicial/final e inventarios estao transcritos no [relatorio do spike](../spikes/palinode-offline-extraction.md).
+
+Nenhum modulo proibido foi carregado, e os traces extraidos nao mostraram conexao externa ou processo filho. Persistem limites importantes: fact IDs foram adicionados pelo harness, `UPDATE` nao transfere linhagem de evidencia, history e alvo nao formam transacao unica, e a facade e serializada. O spike demonstra uma fatia candidata a reutilizacao; aprovacao para incorporacao depende das Etapas 8 e 9.
+
 ## Criterios
 
 | Criterio | Classificacao | Evidencia | Justificativa |
@@ -195,7 +203,7 @@ Ha seams para proposer e reconciliacao (`tests/test_proposer_seam.py:1-102`; `te
 | Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | MCP e hooks existem; falta ciclo isolado. |
 | Testabilidade | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | 130 testes deterministas de consolidacao, executor e proveniencia passaram offline. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#palinode) | Raiz/plugin sao MIT; transitivas, vetores e ativos requerem auditoria. |
-| Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Mudancas foram delimitadas; produto completo custa alto. |
+| Custo de adaptacao | passa | [Etapa 7](#etapa-7-extracao-offline) | Uma fatia exata e uma facade pequena executaram sem backend. |
 
 ## Riscos, custo e duvidas
 
@@ -203,11 +211,10 @@ Como produto completo, o custo e alto: remover daemon/SQLite obrigatorios, filtr
 
 Fluxos restantes limitados:
 
-1. Spike de um dia: extrair parser/executor sem API, SQLite ou Ollama; o proposer seam e o replay da etapa 4 reduzem, mas nao encerram, essa duvida de acoplamento.
-2. Etapa 3: fresh DB/reindex, hashes do Markdown e perda de estado DB-only.
-3. Etapa 5: drift e proposta aplicavel; a etapa 4 confirmou que o preview publico nao basta.
-4. Etapa 6: hooks e privacidade com API disponivel/indisponivel.
+1. Etapa 3: fresh DB/reindex, hashes do Markdown e perda de estado DB-only.
+2. Etapa 5: drift e proposta aplicavel; a etapa 4 confirmou que o preview publico nao basta.
+3. Etapa 6: hooks e privacidade com API disponivel/indisponivel.
 
 ## Recomendacao preliminar
 
-**Componente, condicionado ao spike de extracao.** Nao e base end-to-end. Continuam relevantes estados epistemicos, `contradicts`/`backed_by`, anchors de claims, proposer separado de executor deterministico, escrita atomica, staging explicito e reconciliacao derive/plan/apply.
+**Candidato a componente para a fatia offline demonstrada; nao e base end-to-end.** O spike removeu a duvida de acoplamento para parser, executor e primitivas de evidencia. Continuam relevantes estados epistemicos, `contradicts`/`backed_by`, anchors de claims, proposer separado de executor deterministico e escrita atomica individual; composicao de proveniencia, transacao e staging continuam responsabilidade da arquitetura consumidora. A incorporacao depende do inventario da Etapa 8 e do ADR da Etapa 9.

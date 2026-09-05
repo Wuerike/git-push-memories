@@ -200,6 +200,8 @@ Cada spike terá timebox de um dia útil e deverá produzir:
 - recomendação de continuar ou abandonar;
 - atualização da matriz comparativa.
 
+**Estado em 2026-09-05:** os dois spikes decisivos foram executados e passaram. O agent-memory demonstrou roots separados para dois consumidores somente leitura, com mutacoes Git confinadas a memoria, depois de correcoes delimitadas de cold start, staging ID e drift de arquivo; permanece candidato a componente, nao fork, por causa das falhas de privacidade e governanca. O Palinode demonstrou uma fatia offline de parser, executor e primitivas de evidencia com uma facade pequena; permanece candidato a componente da fatia, nao base end-to-end. Os spikes de claude-mem, Basic Memory e ai-memory nao foram abertos porque nao alterariam a decisao atual; gatilhos para reabertura estao no [resumo da Etapa 7](spikes/stage-7-summary.md).
+
 ### Etapa 8: consolidar resultados
 
 1. Preencher a matriz com links para todas as evidências.

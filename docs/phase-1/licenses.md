@@ -39,7 +39,9 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
 - Observacao: `claude-plugin/LICENSE` e `claude-plugin/.claude-plugin/plugin.json` confirmam MIT nesse subdiretorio. Dependencias Python/TypeScript, vetores identificados como CC BY 4.0 em `tests/test_amr_conformance.py:1-6` e avisos de codigo adaptado ainda devem ser inventariados antes de copia.
-- Disposicao de licenca: todas as formas permanecem abertas; isolamento do componente ainda precisa ser demonstrado.
+- Escopo verificado na Etapa 7: a fatia offline de parser, executor, hashing, quotes, claims e typed links foi extraida de arquivos cobertos pela MIT raiz. O runtime minimo usou `python-frontmatter==1.1.0` e `PyYAML==6.0.2`, ambos inventariados como MIT; seus textos e metadados estao na evidencia do spike.
+- Exclusoes da fatia: plugin, prompts, vetores CC BY 4.0, modelos, ativos, API, store, indice, sessoes e integracoes nao foram aprovados para copia.
+- Disposicao de licenca: fatia offline candidata a componente, em principio compativel mediante preservacao dos tres avisos MIT; a Etapa 8 ainda deve registrar a lista exata e o ADR deve aprovar qualquer incorporacao.
 
 ## claude-mem
 

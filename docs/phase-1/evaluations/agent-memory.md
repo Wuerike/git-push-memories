@@ -10,10 +10,10 @@
 | Revisao | `51dac9bf6e72c67f6314ee3abb00515986a3fa4a` |
 | Branch | `main`, alinhada a `origin/main` |
 | Estado inicial | arvore limpa |
-| Data | 2026-09-04 (triagem estatica); 2026-09-05 (Etapas 5 e 6) |
-| Avaliacao | triagem estatica, governanca offline e integracao com Claude Code |
+| Data | 2026-09-04 (triagem estatica); 2026-09-05 (Etapas 5, 6 e 7) |
+| Avaliacao | triagem estatica, governanca offline, integracao com Claude Code e spike de roots |
 | Avaliador | OpenCode |
-| Run IDs | `20260905T024115Z-agent-memory-stage5`; `stage6-agent-memory-run` |
+| Run IDs | `20260905T024115Z-agent-memory-stage5`; `stage6-agent-memory-run`; `20260905T170000Z-agent-memory-stage7` |
 | Commit inicial da memoria | lifecycle `ba3db8ff96dd79f334108e12b7206655c4dc3bd6`; demais fixtures em `*-baseline-commit.txt` e `privacy-*/prep/baseline-commit.txt` |
 
 ## Hipotese
@@ -22,7 +22,7 @@ agent-memory pode fornecer o nucleo de operacoes, diff e aplicacao explicita, de
 
 ## Escopo e metodo
 
-Na triagem estatica foram inspecionados CLI, MCP, schema, update/staging, scanner, indice, Git, adaptador Claude e testes. A Etapa 5 executou os fluxos de governanca descritos abaixo sem alterar o clone original. A Etapa 6 carregou a skill e o servidor MCP em Claude Code e exercitou proposta e recuperacao por processos MCP novos.
+Na triagem estatica foram inspecionados CLI, MCP, schema, update/staging, scanner, indice, Git, adaptador Claude e testes. A Etapa 5 executou os fluxos de governanca descritos abaixo sem alterar o clone original. A Etapa 6 carregou a skill e o servidor MCP em Claude Code e exercitou proposta e recuperacao por processos MCP novos. A Etapa 7 usou um prototipo descartavel para separar roots e testar dois consumidores concorrentes.
 
 ```bash
 git rev-parse HEAD
@@ -236,6 +236,14 @@ Um segundo processo MCP, sem contexto do primeiro, chamou `memory.fetch_context`
 
 Nao existe processo auxiliar permanente a derrubar: cada conexao inicia `agent-memory mcp`. Para observar a falha, uma segunda sessao Claude Code foi iniciada sem o binario no `PATH`. A skill continuou listada, mas o servidor apareceu como `failed`, os tres tools desapareceram e Claude Code continuou ate a falha de autenticacao do modelo. Nao ha spool, retry ou recuperacao automatica. A integracao e funcional e local, mas captura e recuperacao dependem de o modelo obedecer a skill; sem hooks, nao participam garantidamente de todo ciclo de vida.
 
+## Etapa 7: roots separados
+
+O [spike de roots](../spikes/agent-memory-split-roots.md) **passou** com um prototipo descartavel na revisao fixa. A evidencia foi preservada em `.artifacts/phase-1/20260905T170000Z-agent-memory-stage7-evidence`, conforme o [manifesto](../evidence-manifest.md). Uma interface de composicao separou code root, memory repository root e consumer ID; os tres arquivos novos omitidos pelo patch Git original tambem foram preservados no artefato.
+
+Dois repositorios de codigo somente leitura consumiram a mesma memoria sem cross-talk. O trace representativo mostrou Git apenas no repositorio de memoria, e commits, objetos e status dos code roots nao mudaram. Cold start concorrente passou 20 vezes, applies independentes foram preservados, snapshot obsoleto do mesmo arquivo foi rejeitado por drift, o rebuild recuperou tres segundos e `team-b`, e `PRAGMA integrity_check` retornou `ok`. As suites final, race e E2E passaram.
+
+O prototipo precisou corrigir tres defeitos delimitados: `SQLITE_BUSY` no cold start, colisao de staging IDs no mesmo segundo e perda silenciosa entre snapshots do mesmo arquivo. Isso demonstra que a separacao e adaptavel sem redesenhar Markdown ou FTS5, mas a revisao original ainda nao fornece o comportamento e sua orquestracao nao pode ser reutilizada sem mudancas. Privacidade e sessoes nao foram reavaliadas.
+
 ## Criterios
 
 | Criterio | Classificacao | Evidencia | Justificativa |
@@ -243,28 +251,28 @@ Nao existe processo auxiliar permanente a derrubar: cada conexao inicia `agent-m
 | Markdown e Git canonicos | passa | [Armazenamento](#armazenamento-e-roots) | Markdown e duravel; SQLite/cache sao derivados. |
 | Operacao local | passa | [Etapa 5](#ambiente-e-reproducao) | O fluxo principal de governanca concluiu offline; os demais criterios seguem independentes. |
 | Ausencia de backend obrigatorio | passa | [Armazenamento](#armazenamento-e-roots) | MCP stdio e transitorio; nao ha daemon. |
-| Indice reconstruivel | pendente | [Fluxo](#fluxo-estatico) | Implementacao existe; corpus/rebuild limpo nao foram executados. |
+| Indice reconstruivel | parcial | [Etapa 7](#etapa-7-roots-separados) | Rebuild preservou a resposta, mas foi executado no prototipo modificado, nao na revisao fixa intacta. |
 | Privacidade antes da persistencia | falha | [Etapa 5](#privacidade) | Marcadores persistiram no staging/lock; apply aceitou segredo adulterado. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-sessoes-e-drift) | Sessions, IDs e metadados sao persistidos localmente. |
 | Estado atual | passa | [Etapa 5](#proposta-revisao-e-aplicacao) | Aplicacao explicita deixou somente tres segundos e `team-b`. |
 | Consolidacao antes da publicacao | parcial | [Etapa 5](#integridade-e-drift) | Ha staging observavel, mas mutavel, sem revalidacao e contornavel por `--apply`. |
 | Revisao explicita | parcial | [Etapa 5](#proposta-revisao-e-aplicacao) | Diff/reject/apply funcionam; nao ha ajuste seguro da mesma proposta. |
-| Repositorio de memoria separado | falha | [Roots](#armazenamento-e-roots) | Memoria e fixa em `<code_root>/.agent-memory`. |
+| Repositorio de memoria separado | parcial | [Etapa 7](#etapa-7-roots-separados) | A revisao fixa une roots; prototipo delimitado separou memoria e dois consumidores. |
 | Integracao com Claude Code | parcial | [Etapa 6](#etapa-6-integracao-com-claude-code) | Skill e MCP carregaram e o ciclo funcional passou, mas nao ha hooks e a ativacao depende do modelo seguir a skill. |
 | Testabilidade | parcial | [Etapa 5](#testes-executados) | Suite passa, mas omite quatro falhas criticas demonstradas pelo harness. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#agent-memory) | Apache-2.0; transitivas/notices e npm requerem auditoria. |
-| Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Separar roots tem custo e risco altos delimitados. |
+| Custo de adaptacao | passa | [Etapa 7](#etapa-7-roots-separados) | Seam de roots e tres correcoes concorrentes foram demonstradas e delimitadas. |
 
 ## Riscos, custo e duvidas
 
-Separar roots exige propagar `CodeRoot`, `MemoryRoot` e repositorio Git, namespear por repositorio consumidor, adaptar MCP/doctor/proveniencia e testar dois code repos concorrentes. O hotfix 0.5.1 corrige roteamento cruzado anterior (`CHANGELOG.md:8-23`), o que aumenta o risco dessa mudanca. A Etapa 5 acrescenta a necessidade de tornar staging imutavel ou verificavel, revalidar scan/schema no apply, proteger o arquivo integral contra drift e isolar commits do indice preexistente.
+O spike demonstrou a separacao na composicao de CLI/MCP, o namespacing minimo e as mutacoes Git confinadas a memoria, mas uma interface de producao ainda deve cobrir doctor, instalacao e configuracao persistida. O hotfix 0.5.1 corrige roteamento cruzado anterior (`CHANGELOG.md:8-23`), e a Etapa 7 encontrou riscos adicionais em cold start e staging concorrente. A Etapa 5 mantem a necessidade de tornar staging imutavel ou verificavel, revalidar scan/schema no apply, proteger o arquivo integral contra drift e isolar commits do indice preexistente.
 
 Fluxos restantes limitados:
 
-1. Spike de um dia: `CODE_ROOT != MEMORY_ROOT`, dois repositorios consumidores e Git somente na memoria.
-2. Etapa 3/4: rebuild, processo novo, edicao externa, replace e idempotencia.
+1. Endurecer staging, revalidacao de scan/schema, drift e isolamento de commit antes de reutilizacao.
+2. Delimitar configuracao publica, doctor, instalacao e colisao de consumer IDs.
 3. Resposta autenticada do modelo, apenas se a obediencia espontanea a skill puder alterar a decisao.
 
 ## Recomendacao preliminar
 
-**Componente, condicionado ao spike de roots e a substituicao/endurecimento das fronteiras de apply, privacidade, drift e commit.** Continuam relevantes o motor Markdown byte-preserving, operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia. A governanca desta revisao nao deve ser adotada como esta; o spike so se justifica porque ainda pode determinar se o nucleo isolado compensa essas substituicoes.
+**Componente, condicionado a substituicao ou endurecimento das seams de apply, privacidade, sessoes, drift e commit.** O spike de roots passou e manteve relevantes o motor Markdown byte-preserving, operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia. A governanca da revisao original nao deve ser adotada como esta, e o resultado nao sustenta fork ou base end-to-end.
