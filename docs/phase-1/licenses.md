@@ -23,7 +23,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Uso permitido no plano atual: executar localmente para avaliacao, citar comportamentos e reimplementar ideias sem copiar expressao protegida.
 - Observacao decisiva: `plugins/claude-code/README.md` declara o plugin como MIT, mas o diretorio nao possui arquivo de licenca proprio na revisao avaliada. A origem e a extensao dessa declaracao devem ser esclarecidas antes de reutilizar qualquer arquivo do plugin.
 - Escopo verificado na triagem: os hooks executaveis ficam em `src/basic_memory/cli/commands/hook.py`; nao ha aviso de licenca separado nesse caminho, portanto a afirmacao isolada de `plugins/claude-code/README.md` nao basta para separa-los da AGPL.
-- Disposicao de licenca: referencia; eventual reutilizacao do plugin depende do spike de esclarecimento ja previsto no plano.
+- Disposicao de licenca: referencia; o spike do plugin nao foi aberto e nenhuma reutilizacao direta esta na shortlist.
 
 ## ai-memory
 
@@ -31,17 +31,17 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
 - Dependencias e ativos: `deny.toml:16-42` configura `cargo-deny`, mas a politica nao foi executada nesta etapa; `crates/ai-memory-web/build.rs:20-69` e `crates/ai-memory-web/src/routes/statics.rs:9-14` mostram CSS/logo embutidos, e `companions/ai-memory-importer/Cargo.toml:1-25` nao declara licenca propria.
-- Disposicao de licenca: todas as formas permanecem abertas; arquitetura e custo ainda precisam ser avaliados.
+- Disposicao de licenca: reimplementacao conceitual; nenhum crate ou ativo entrou na shortlist de copia. O sanitizador so deve ser auditado se Rust for escolhido no ADR.
 
 ## Palinode
 
 - Evidencia: `~/workspace/palinode/LICENSE` contem MIT, copyright 2026 Paul Kyle.
-- Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
+- Compatibilidade com a premissa: parcial para o produto completo; a fatia exata da Etapa 7 e permissiva e foi delimitada para decisao no ADR.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
 - Observacao: `claude-plugin/LICENSE` e `claude-plugin/.claude-plugin/plugin.json` confirmam MIT nesse subdiretorio. Dependencias Python/TypeScript, vetores identificados como CC BY 4.0 em `tests/test_amr_conformance.py:1-6` e avisos de codigo adaptado ainda devem ser inventariados antes de copia.
 - Escopo verificado na Etapa 7: a fatia offline de parser, executor, hashing, quotes, claims e typed links foi extraida de arquivos cobertos pela MIT raiz. O runtime minimo usou `python-frontmatter==1.1.0` e `PyYAML==6.0.2`, ambos inventariados como MIT; seus textos e metadados estao na evidencia do spike.
 - Exclusoes da fatia: plugin, prompts, vetores CC BY 4.0, modelos, ativos, API, store, indice, sessoes e integracoes nao foram aprovados para copia.
-- Disposicao de licenca: fatia offline candidata a componente, em principio compativel mediante preservacao dos tres avisos MIT; a Etapa 8 ainda deve registrar a lista exata e o ADR deve aprovar qualquer incorporacao.
+- Disposicao de licenca: fatia offline candidata a adaptacao somente se Python for o runtime principal, mediante preservacao dos tres avisos MIT; o ADR deve aprovar qualquer incorporacao.
 
 ## claude-mem
 
@@ -50,7 +50,7 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Obrigacoes para redistribuicao: fornecer copia da Apache-2.0, marcar arquivos modificados, preservar avisos aplicaveis e reproduzir as atribuicoes aplicaveis do `NOTICE`.
 - Excecao de escopo: `.claude-plugin/marketplace.json:9-21` inclui `claude-mem-cowork`, cujo `cowork/.claude-plugin/plugin.json:1-17` declara PolyForm-Noncommercial-1.0.0. Esse componente nao esta aprovado para incorporacao ao produto Apache-2.0.
 - Ativos e dependencias: o clone nao possui inventario agregado para logos, fontes, slides, GIFs e bundle; `docs/license.md:26-29` tambem registra que Apache-2.0 nao concede direitos de marca.
-- Disposicao de licenca: todas as formas permanecem abertas; privacidade, worker e persistencia de sessoes ainda precisam ser avaliados.
+- Disposicao de licenca: referencia e reimplementacao conceitual; nenhum arquivo entrou na shortlist. O subcomponente Cowork e os ativos permanecem excluidos.
 
 ## claude-bedrock
 
@@ -58,15 +58,15 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
 - Obrigacao para copia substancial: incluir o aviso de copyright e a permissao MIT.
 - Dependencias e ativos: `skills/setup/SKILL.md:116-191` instala graphify e docling sem pin ou inventario de licencas. Nao foi encontrada proveniencia individual para `docs/banner.png` ou `site/public/videos/`; esses ativos ficam fora de reutilizacao ate auditoria.
-- Disposicao de licenca: todas as formas permanecem abertas; a avaliacao determinara se ha um componente isolado ou apenas referencia.
+- Disposicao de licenca: reimplementacao conceitual e referencia; nenhum arquivo, ativo ou dependencia entrou na shortlist.
 
 ## agent-memory
 
 - Evidencia: `~/workspace/agent-memory/LICENSE` contem Apache-2.0, copyright 2026 Teterichev Anton.
-- Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas o escopo exato de uma eventual reutilizacao ainda nao foi auditado.
+- Compatibilidade com a premissa: parcial; a licenca raiz e permissiva, mas a lista final depende do runtime e do ADR.
 - Obrigacoes para redistribuicao: fornecer copia da Apache-2.0, marcar arquivos modificados e preservar avisos aplicaveis. Nenhum `NOTICE` raiz foi encontrado na revisao registrada.
 - Dependencias e empacotamento: `go.mod:5-12` lista as dependencias diretas, mas o clone nao contem SBOM nem agregacao de notices. `npm/package.json:6-11` publica somente `bin/`, sem demonstrar que a licenca acompanha o tarball.
-- Disposicao de licenca: todas as formas permanecem abertas; a separacao entre repositorio de codigo e memoria e o principal risco tecnico.
+- Disposicao de licenca: adaptacao seletiva candidata se Go for escolhido. A Etapa 7 resolveu a viabilidade de roots, mas os pacotes `internal`, dependencias e correcoes do prototipo impedem uso direto.
 
 ## twiceshy
 
@@ -75,6 +75,65 @@ As permissoes acima se referem somente ao codigo coberto pela licenca raiz. Depe
 - Uso permitido no plano atual: executar localmente para avaliacao, citar comportamentos e reimplementar ideias sem copiar expressao protegida.
 - Escopo adicional: `README.md:20-24` informa que o corpus canonico e mantido em repositorio separado; ele nao estava no clone, portanto licenca e ativos nao foram auditados nem sao candidatos a reutilizacao nesta fase.
 - Disposicao de licenca: referencia para quarentena, validacao, promocao e governanca.
+
+## Shortlist condicional da Etapa 8
+
+Nenhuma linha abaixo autoriza incorporacao. A shortlist registra somente as fontes que ainda podem ser escolhidas pelo ADR; qualquer outro arquivo, teste, fixture, prompt, plugin ou ativo continua fora do escopo.
+
+### agent-memory Markdown
+
+Origem: `xChuCx/agent-memory@51dac9bf6e72c67f6314ee3abb00515986a3fa4a`, Apache-2.0, sem `NOTICE` raiz encontrado.
+
+| Arquivo candidato | Git blob |
+|---|---|
+| `internal/markdown/parse.go` | `e4cde2d405d112a67b607f0e0f8a3747b81a76e3` |
+| `internal/markdown/splice.go` | `36c81a926fbd97d89039ffa03d963a1ecc501c12` |
+| `internal/markdown/section_id.go` | `aa801f90ce4ab852f7771000d9e0f81b648fbff6` |
+| `internal/markdown/validate.go` | `ad50e61fa055b7c286b5d829a9c496d66ffbdd22` |
+| `internal/markdown/merge.go` | `861d92bb230aab894c6ca2aacd424325f47432c4` |
+
+Esses arquivos formam o menor pacote candidato de parsing e edicao byte-preserving. A dependencia direta relevante e `github.com/yuin/goldmark@v1.7.4`, MIT. Como o pacote esta sob `internal/`, outro modulo Go nao pode importa-lo: reutilizacao exige copiar/renomear fonte ou manter fork com interface publica. Em ambos os casos, fornecer Apache-2.0, preservar avisos e marcar arquivos modificados.
+
+`internal/memory`, staging, apply, scanner, Git, adapters e indice nao estao aprovados para copia. Sao referencias porque compartilham tipos internos, e a revisao fixa nao contem as correcoes de cold start, staging ID e drift demonstradas na Etapa 7. Os arquivos do prototipo foram produzidos durante a avaliacao e nao herdam automaticamente autoria ou licenca do upstream.
+
+FTS5 tambem fica fora da shortlist inicial. Se a Fase 5 justificar o indice, sera necessario auditar `modernc.org/sqlite@v1.34.0` e sua closure, alem de `github.com/gofrs/flock@v0.12.1`, `gopkg.in/yaml.v3@v3.0.1` e todos os avisos efetivamente distribuidos.
+
+### Palinode offline
+
+Origem: `phasespace-labs/palinode@9832d58663077645e93093bac9208a084b1d7492`, MIT, sem `NOTICE` raiz encontrado.
+
+A fatia tecnicamente demonstrada contem exatamente:
+
+```text
+LICENSE
+palinode/__init__.py
+palinode/core/__init__.py
+palinode/core/parser.py
+palinode/core/parity.py
+palinode/core/hashing.py
+palinode/core/quote_verify.py
+palinode/core/claims.py
+palinode/core/typed_links.py
+palinode/consolidation/__init__.py
+palinode/consolidation/op_parse.py
+palinode/consolidation/executor.py
+```
+
+Os Git blobs e SHA-256 de cada arquivo estao preservados no [spike](spikes/palinode-offline-extraction.md) e em seu artefato. O runtime testado usou `python-frontmatter==1.1.0` e `PyYAML==6.0.2`, ambos MIT e sem outras dependencias instaladas. Distribuicao exige os avisos MIT independentes de Palinode, python-frontmatter e PyYAML.
+
+A fatia nao e pacote publicado nem interface estavel. `executor.py` precisou de adapter para substituir `git_tools`; `typed_links.py` conserva import lazy para indexer; `json_repair` foi excluido; writes historicos nao sao transacao; `UPDATE` nao transporta evidencia. A recomendacao da Etapa 8 e reimplementar os conceitos de evidencia se Go for escolhido. Source adaptation da fatia so permanece aberta se Python for a unica base.
+
+### Registro esperado
+
+| Item, se escolhido | Licenca | Material de distribuicao |
+|---|---|---|
+| fonte agent-memory selecionada | Apache-2.0 | texto Apache, avisos preservados, arquivos modificados marcados |
+| Goldmark 1.7.4 | MIT | copyright e texto MIT |
+| fonte Palinode selecionada | MIT | copyright Paul Kyle e texto MIT |
+| python-frontmatter 1.1.0 | MIT | copyright Chris Amico e texto MIT |
+| PyYAML 6.0.2 | MIT | copyrights aplicaveis e texto de permissao |
+
+O artefato Python preservou versoes e licencas, mas nao o hash da distribuicao instalada. Se Python for escolhido, o lock do produto deve registrar hashes e resolver a divergencia entre PyYAML 6.0.2 testado no spike e 6.0.3 presente no lock completo do Palinode.
 
 ## Gate para reutilizacao
 

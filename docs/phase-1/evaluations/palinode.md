@@ -193,14 +193,14 @@ Nenhum modulo proibido foi carregado, e os traces extraidos nao mostraram conexa
 | Markdown e Git canonicos | parcial | [Armazenamento](#armazenamento-e-dependencias) | Commits sao best-effort e ha escritores fora do choke point. |
 | Operacao local | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Save, preview, aplicacao, Git e recuperacao concluiram sem rede externa, com providers locais. |
 | Ausencia de backend obrigatorio | falha | [Dependencias](#armazenamento-e-dependencias) | API daemon e obrigatoria para CLI, MCP e hooks. |
-| Indice reconstruivel | pendente | [Fluxo](#fluxo-estatico) | Fresh DB/reindex existe; equivalencia e mutacoes precisam ser observadas. |
+| Indice reconstruivel | não se aplica | [Etapa 7](#etapa-7-extracao-offline) | A equivalencia do produto nao foi executada; store e indice estao fora da fatia candidata. |
 | Privacidade antes da persistencia | falha | [Privacidade](#privacidade-e-sessoes) | Nao ha filtro de segredos/PII antes de save, sessao e auditoria. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-e-sessoes) | Daily, memoria, queries e session IDs sao persistidos. |
 | Estado atual | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | `UPDATE` produziu estado atual e replay estavel, mas a escolha depende do proposer e o prompt normal recomenda `SUPERSEDE`, nao idempotente. |
 | Consolidacao antes da publicacao | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Dry-run preservou o alvo, mas omitiu a operacao exata e apply consultou o modelo novamente. |
 | Revisao explicita | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Preview pode ser abandonado; faltam ajuste, rejeicao registrada e aceite da mesma proposta. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | `memory_dir` e independente e comporta varios projetos. |
-| Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | MCP e hooks existem; falta ciclo isolado. |
+| Integracao com Claude Code | não se aplica | [Claude Code](#claude-code-e-testes) | MCP e hooks nao foram executados e estao fora da fatia candidata. |
 | Testabilidade | passa | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | 130 testes deterministas de consolidacao, executor e proveniencia passaram offline. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#palinode) | Raiz/plugin sao MIT; transitivas, vetores e ativos requerem auditoria. |
 | Custo de adaptacao | passa | [Etapa 7](#etapa-7-extracao-offline) | Uma fatia exata e uma facade pequena executaram sem backend. |
@@ -209,12 +209,11 @@ Nenhum modulo proibido foi carregado, e os traces extraidos nao mostraram conexa
 
 Como produto completo, o custo e alto: remover daemon/SQLite obrigatorios, filtrar antes de qualquer escrita, retirar sessoes, criar proposta duravel/ajustavel com drift e separar publicacao Git. As primitivas epistemicas tem custo baixo a medio; o executor custa medio se puder ser extraido sem store e LLM.
 
-Fluxos restantes limitados:
+Fluxos dispensados ou transferidos para a arquitetura consumidora:
 
-1. Etapa 3: fresh DB/reindex, hashes do Markdown e perda de estado DB-only.
-2. Etapa 5: drift e proposta aplicavel; a etapa 4 confirmou que o preview publico nao basta.
-3. Etapa 6: hooks e privacidade com API disponivel/indisponivel.
+1. Fresh DB/reindex e hooks pertencem ao produto completo, nao a fatia offline candidata.
+2. Proposta duravel, drift, privacidade e integracao Claude Code devem ser fornecidos pela arquitetura consumidora.
 
 ## Recomendacao preliminar
 
-**Candidato a componente para a fatia offline demonstrada; nao e base end-to-end.** O spike removeu a duvida de acoplamento para parser, executor e primitivas de evidencia. Continuam relevantes estados epistemicos, `contradicts`/`backed_by`, anchors de claims, proposer separado de executor deterministico e escrita atomica individual; composicao de proveniencia, transacao e staging continuam responsabilidade da arquitetura consumidora. A incorporacao depende do inventario da Etapa 8 e do ADR da Etapa 9.
+**Reimplementacao conceitual na arquitetura recomendada; source adaptation condicional se Python for a base unica.** O spike removeu a duvida de acoplamento para parser, executor e primitivas de evidencia, mas usar esse executor junto ao motor agent-memory criaria duas seams de operacao. Estados epistemicos, `contradicts`/`backed_by`, anchors de claims e quote hashing devem informar o contrato proprio de evidencia. A fatia MIT permanece candidata somente se o ADR escolher Python. Veja o [mapa de capacidades](../capability-map.md#agent-memory-versus-palinode).

@@ -106,11 +106,11 @@ Existem testes `unittest` apenas para o reporter, incluindo redacao e issues (`h
 | Indice reconstruivel | falha | [Armazenamento](#armazenamento-e-dependencias) | Nao ha rebuild de `graph.json` apenas do Markdown. |
 | Privacidade antes da persistencia | falha | [Privacidade](#privacidade-sessoes-e-estado-atual) | Temp e graph recebem conteudo antes de filtro determinista. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-sessoes-e-estado-atual) | Reporter guarda referencia/cache de sessao. |
-| Estado atual | pendente | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | O gate impediu observar o corpus; as regras indicam substituicao parcial, mas nao bastam para classificar o comportamento. |
+| Estado atual | falha | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Actors podem substituir corpo, mas links, entidades e graph merge conservam estado anterior sem garantia deterministica. |
 | Consolidacao antes da publicacao | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Ha proposta conversacional, mas graph pode mudar antes e nao existe artefato aplicavel. |
 | Revisao explicita | parcial | [Etapa 4](#etapa-4-consolidacao-do-estado-atual) | Ha yes/no/adjust, sem diff, baseline, ID ou aplicacao posterior da mesma proposta. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | Vaults independem do cwd e cobrem varios repositorios. |
-| Integracao com Claude Code | pendente | [Claude Code](#claude-code-e-testes) | Plugin e skills existem; falta ciclo isolado. |
+| Integracao com Claude Code | não se aplica | [Claude Code](#claude-code-e-testes) | O plugin parou no gate; seu runtime nao integra a disposicao final. |
 | Testabilidade | falha | [Testes](#claude-code-e-testes) | O nucleo declarativo nao possui contratos automatizados. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#claude-bedrock) | Raiz MIT; dependencias sem pin e ativos nao foram auditados. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Riscos e substituicoes estao delimitados; custo alto. |
@@ -124,7 +124,7 @@ Fluxos comportamentais dispensados nesta fase:
 1. Etapa 5: graph alterado antes da confirmacao, drift, staged alheio, commit-only e PR.
 2. Passagem de privacidade: `/preserve` e `/learn` desde a primeira exposicao.
 
-Reabrir esses fluxos exigiria decisao explicita de usar backend real e demonstracao de que a evidencia ainda pode alterar a disposicao atual.
+Esses fluxos foram encerrados sem classificacao positiva. Reabri-los exigiria decisao explicita de usar backend real e demonstracao de que a evidencia ainda pode alterar a disposicao atual.
 
 ## Recomendacao preliminar
 

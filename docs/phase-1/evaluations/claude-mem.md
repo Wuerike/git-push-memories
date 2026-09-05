@@ -123,7 +123,7 @@ Na degradacao, o worker foi encerrado. O servidor MCP ainda inicializou, mas `se
 | Criterio | Classificacao | Evidencia | Justificativa estatica |
 |---|---|---|---|
 | Markdown e Git canonicos | falha | [Armazenamento](#armazenamento-e-dependencias) | SQLite/Postgres sao canonicos; Markdown e incompleto e nao ha Git. |
-| Operacao local | pendente | [Dependencias](#armazenamento-e-dependencias) | Endpoint LLM local e possivel; falta execucao offline. |
+| Operacao local | parcial | [Etapa 6](#etapa-6-integracao-com-claude-code) | Worker e provider local executaram, mas sem Bubblewrap e sem duas sessoes autenticadas. |
 | Ausencia de backend obrigatorio | falha | [Dependencias](#armazenamento-e-dependencias) | Worker HTTP e obrigatorio. |
 | Indice reconstruivel | falha | [Armazenamento](#armazenamento-e-dependencias) | Indices voltam do SQLite, nao do Markdown exigido. |
 | Privacidade antes da persistencia | falha | [Privacidade](#privacidade-sessoes-e-telemetria) | Prompt/evento bruto e logs podem preceder a filtragem. |
@@ -133,7 +133,7 @@ Na degradacao, o worker foi encerrado. O servidor MCP ainda inicializou, mas `se
 | Revisao explicita | falha | [Proposta](#estado-atual-proposta-e-claude-code) | Nao ha gate humano antes da escrita. |
 | Repositorio de memoria separado | parcial | [Armazenamento](#armazenamento-e-dependencias) | Data dir serve varios projetos, mas nao e repositorio Git. |
 | Integracao com Claude Code | parcial | [Etapa 6](#etapa-6-integracao-com-claude-code) | Plugin, hooks e MCP carregaram; captura e recuperacao passaram no harness, mas nao entre duas sessoes autenticadas nem no sandbox do protocolo. |
-| Testabilidade | pendente | [Testes](#testes-encontrados) | Suite ampla, ainda nao executada. |
+| Testabilidade | não se aplica | [Testes](#testes-encontrados) | A suite fonte nao foi executada e nenhum modulo foi escolhido para reutilizacao. |
 | Licenca compativel | parcial | [Licencas](../licenses.md#claude-mem) | Nucleo Apache; Cowork, ativos e transitivas exigem delimitacao. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Mudancas estao delimitadas; custo alto. |
 
@@ -143,11 +143,10 @@ Virar base exigiria trocar o canonico por Markdown/Git, retirar sessoes, remover
 
 O marketplace inclui `claude-mem-cowork`, cujo manifesto declara PolyForm-Noncommercial (`cowork/.claude-plugin/plugin.json:1-17`); deve ficar fora de qualquer reutilizacao. Logos, fontes e bundles tambem exigem auditoria.
 
-Fluxos restantes limitados:
+Fluxos dispensados por nao alterarem a disposicao:
 
-1. Passagem de privacidade: prompt totalmente privado, PostToolUse e Stop sob trace, com LLM/telemetria sinteticos.
-2. Rebuild apenas de Chroma a partir de SQLite, como referencia de degradacao.
-3. Spike apenas se houver interesse em extrair adaptador/hook sem worker, sessoes e telemetria.
+1. Privacidade sob trace, rebuild de Chroma e suite fonte nao foram executados; a arquitetura ja contradiz as restricoes centrais.
+2. O spike de adapter/hook nao foi aberto porque retirar worker, sessoes e telemetria substituiria o modelo demonstrado e nao mudaria a disposicao.
 
 ## Recomendacao preliminar
 

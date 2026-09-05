@@ -78,17 +78,17 @@ Ha muitos testes de schema, index/rebuild, dedup/quarantine, spool, PII, retro, 
 | Criterio | Classificacao | Evidencia | Justificativa estatica |
 |---|---|---|---|
 | Markdown e Git canonicos | parcial | [Armazenamento](#armazenamento-e-dependencias) | O corpus externo nao estava no clone para inspecao. |
-| Operacao local | pendente | [Dependencias](#armazenamento-e-dependencias) | Recuperacao pode ser local; falta fluxo offline. |
+| Operacao local | não se aplica | [Dependencias](#armazenamento-e-dependencias) | Nenhum fluxo foi executado; o candidato permanece apenas como referencia. |
 | Ausencia de backend obrigatorio | falha | [Dependencias](#armazenamento-e-dependencias) | MCP/hooks exigem servidor ativo. |
-| Indice reconstruivel | pendente | [Fluxo](#fluxo-estatico) | Rebuild existe; equivalencia do corpus nao foi demonstrada. |
+| Indice reconstruivel | não se aplica | [Fluxo](#fluxo-estatico) | Rebuild existe estaticamente, mas o corpus externo e o fluxo nao foram executados. |
 | Privacidade antes da persistencia | falha | [Privacidade](#privacidade-sessoes-e-estado-atual) | Default preserva segredo/PII bruto e apenas marca. |
 | Sem persistencia de sessoes | falha | [Sessoes](#privacidade-sessoes-e-estado-atual) | IDs e transcripts sao persistidos em spool/telemetria. |
 | Estado atual | falha | [Estado atual](#privacidade-sessoes-e-estado-atual) | Nao ha reconciliacao generica; similar gera outro registro. |
 | Consolidacao antes da publicacao | parcial | [Revisao](#revisao-publicacao-e-claude-code) | Draft/quarantine/PR existem, sem consolidacao semantica. |
 | Revisao explicita | parcial | [Revisao](#revisao-publicacao-e-claude-code) | PR permite veto, sem aprovacao obrigatoria e com auto-merge. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | Corpus externo e desacoplado do engine. |
-| Integracao com Claude Code | pendente | [Claude Code](#revisao-publicacao-e-claude-code) | MCP/hooks existem; falta execucao isolada. |
-| Testabilidade | pendente | [Testes](#testes-encontrados) | Evidencia estatica forte; toolchain/integracoes nao foram executados. |
+| Integracao com Claude Code | não se aplica | [Claude Code](#revisao-publicacao-e-claude-code) | MCP/hooks nao foram executados e nao integram a disposicao de referencia. |
+| Testabilidade | não se aplica | [Testes](#testes-encontrados) | A suite nao foi executada e nenhuma fonte foi selecionada para reutilizacao. |
 | Licenca compativel | falha | [Licencas](../licenses.md#twiceshy) | AGPL impede fork/componente Apache-2.0; referencia continua permitida. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Fork e inviavel; reimplementacao seletiva tem custo medio. |
 
@@ -96,7 +96,7 @@ Ha muitos testes de schema, index/rebuild, dedup/quarantine, spool, PII, retro, 
 
 A licenca elimina a adocao direta e nenhuma execucao pode mudar isso. Como referencia, os maiores riscos sao daemon, transcript, politica default de segredo bruto, falta de estado atual e auto-merge sem aceite. Reimplementar de forma independente somente o contrato de quarantine, estados de confianca e recuperacao precision-first tem custo medio; reproduzir a promocao com repro/judge teria custo alto e nao e necessario para a decisao atual.
 
-Fluxo restante limitado: inspecionar o repositorio externo do corpus apenas se o formato/schema de registros for selecionado para reimplementacao conceitual. Os demais comportamentos nao precisam ser executados para decidir a disposicao.
+O repositorio externo do corpus so deve ser inspecionado se seu formato/schema for selecionado futuramente para reimplementacao conceitual. Os comportamentos nao executados foram encerrados sem classificacao positiva porque nao alteram a disposicao.
 
 ## Recomendacao preliminar
 

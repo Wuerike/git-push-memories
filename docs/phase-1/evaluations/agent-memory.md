@@ -275,4 +275,4 @@ Fluxos restantes limitados:
 
 ## Recomendacao preliminar
 
-**Componente, condicionado a substituicao ou endurecimento das seams de apply, privacidade, sessoes, drift e commit.** O spike de roots passou e manteve relevantes o motor Markdown byte-preserving, operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia. A governanca da revisao original nao deve ser adotada como esta, e o resultado nao sustenta fork ou base end-to-end.
+**Adaptacao seletiva condicionada ao ADR.** Se Go for escolhido, os cinco arquivos do pacote Markdown byte-preserving formam a principal shortlist de fonte. Operacoes por secao, FTS5, staging/diff, lock, merge driver e proveniencia permanecem referencias, mas apply, privacidade, sessoes, drift e commit devem ser substituidos ou endurecidos sob interfaces do produto. O spike de roots passou; a revisao original nao sustenta fork ou base end-to-end. Veja o [mapa de capacidades](../capability-map.md#agent-memory-versus-palinode).

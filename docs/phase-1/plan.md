@@ -210,6 +210,8 @@ Cada spike terá timebox de um dia útil e deverá produzir:
 4. Comparar custo de adaptação, dependências operacionais e riscos das alternativas restantes.
 5. Registrar dúvidas remanescentes e encerrar as que não alteram a decisão.
 
+**Estado em 2026-09-05:** etapa concluida. A matriz nao possui classificacoes `pendente`; capacidades comportamentais nao executadas e fora do papel final foram encerradas como `não se aplica`, sem inferir sucesso. O [mapa de capacidades](capability-map.md) elimina fork integral e runtime misto, resolve owners sobrepostos e apresenta tres alternativas ao ADR: base Go com adaptacao seletiva do Markdown do agent-memory, base Python com adaptacao seletiva de primitivas Palinode ou implementacao limpa informada por ambos. A shortlist e as obrigacoes condicionais estao em [licencas](licenses.md#shortlist-condicional-da-etapa-8). Runtime, source adaptation, schema e publicacao permanecem decisoes da Etapa 9; nenhuma exige novo teste de candidato.
+
 O mapa deve incluir, no mínimo:
 
 - formato e organização do Markdown;

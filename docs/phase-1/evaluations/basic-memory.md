@@ -138,7 +138,7 @@ Ha testes focados para escrita/leitura (`tests/mcp/test_tool_write_note.py:153-2
 | Criterio | Classificacao | Evidencia | Justificativa |
 |---|---|---|---|
 | Markdown e Git canonicos | parcial | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | A pagina e a busca foram reconstruidas, mas ha autoridade DB-first temporaria, journal nao derivado e Git externo. |
-| Operacao local | pendente | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | O subfluxo de recuperacao concluiu sem rede; captura, consolidacao e hooks ainda nao foram executados. |
+| Operacao local | parcial | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | Indexacao, busca, edicao externa e rebuild concluiram offline; captura e consolidacao nao foram executadas. |
 | Ausencia de backend obrigatorio | passa | [Dependencias](#armazenamento-e-dependencias) | API ASGI e watcher operam no mesmo processo; backends externos sao opcionais. |
 | Indice reconstruivel | passa | [Etapa 3](#etapa-3-armazenamento-e-recuperacao) | Banco zerado e reconstruido do Markdown preservou busca normalizada e leitura integral. |
 | Privacidade antes da persistencia | falha | [Privacidade](#governanca-privacidade-e-claude-code) | Nao existe filtro de conteudo antes das escritas. |
@@ -147,8 +147,8 @@ Ha testes focados para escrita/leitura (`tests/mcp/test_tool_write_note.py:153-2
 | Consolidacao antes da publicacao | falha | [Governanca](#governanca-privacidade-e-claude-code) | A preparacao interna nao e proposta observavel e a mutacao e direta. |
 | Revisao explicita | falha | [Governanca](#governanca-privacidade-e-claude-code) | Nao ha inspecao, ajuste, rejeicao e aceite. |
 | Repositorio de memoria separado | passa | [Armazenamento](#armazenamento-e-dependencias) | O projeto de memoria e configuravel e pode servir varios repositorios. |
-| Integracao com Claude Code | pendente | [Claude Code](#governanca-privacidade-e-claude-code) | Plugin e hooks existem, mas o ciclo isolado nao foi executado. |
-| Testabilidade | pendente | [Testes](#testes-e-contratos-encontrados) | Ha contratos extensos, ainda nao executados. |
+| Integracao com Claude Code | não se aplica | [Claude Code](#governanca-privacidade-e-claude-code) | O ciclo nao foi executado; hooks e launchers foram excluidos da referencia final por licenca e acoplamento ao nucleo AGPL. |
+| Testabilidade | não se aplica | [Testes](#testes-e-contratos-encontrados) | A suite nao foi executada; a AGPL eliminou reutilizacao direta e tornou o fluxo nao decisivo. |
 | Licenca compativel | falha | [Licencas](../licenses.md#basic-memory) | AGPL impede fork/componente Apache-2.0; referencia independente continua permitida. |
 | Custo de adaptacao | passa | [Custo](#riscos-custo-e-duvidas) | Mudancas estao delimitadas; adocao direta e inviavel sem relicenciamento. |
 
@@ -158,11 +158,11 @@ Como base, exigiria criar privacidade pre-persistencia, proposta/revisao, public
 
 A unica duvida capaz de alterar reutilizacao direta e o escopo da afirmacao MIT em `plugins/claude-code/README.md:216-218`, pois nao existe `LICENSE` propria no subdiretorio. Ela so merece spike se houver intencao concreta de reutilizar o plugin.
 
-Fluxos restantes limitados:
+Fluxos dispensados por nao alterarem a disposicao:
 
-1. Etapa 4: substituicao exata versus append para timeout e ownership, incluindo idempotencia.
-2. Etapa 6: `SessionStart`/`PreCompact` sob trace e falha do MCP, com `BM_BIN` fixo na revisao.
+1. Consolidacao semantica e idempotencia nao foram executadas; a edicao externa da Etapa 3 prova apenas reconciliacao arquivo-indice.
+2. `SessionStart`/`PreCompact` e a suite fonte nao foram executados e nao sustentam classificacao comportamental positiva.
 
 ## Recomendacao preliminar
 
-**Referencia.** Fork e componente estao eliminados pela AGPL; privacidade, sessoes e governanca eliminam a arquitetura como base. Permanecem relevantes Markdown estruturado, reconciliacao arquivo-indice, FTS local, CAS/checksums, edicao por secao e recuperacao limitada no `SessionStart`.
+**Referencia.** Fork e componente estao eliminados pela AGPL; privacidade, sessoes e governanca eliminam a arquitetura como base. Permanecem relevantes Markdown estruturado, reconciliacao arquivo-indice, FTS local, CAS/checksums e edicao por secao. Plugin, hooks e comportamento de `SessionStart` ficaram fora da referencia final.
