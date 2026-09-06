@@ -107,6 +107,22 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 
 - [Roadmap](docs/roadmap.md) — sequência de resultados, avaliações e decisões que orientará o desenvolvimento.
 
+## Desenvolvimento
+
+O walking skeleton da Fase 2 requer Go 1.25.0 ou superior e fixa a toolchain Go 1.25.12. Para verificar o projeto:
+
+```bash
+make verify
+```
+
+Depois do primeiro download da toolchain e das dependências, `make verify-offline` repete a matriz sem acessar o proxy de módulos. Ambos os comandos impõem Go 1.25.12, inclusive quando outra versão está instalada localmente.
+
+O servidor MCP exige dois worktrees Git distintos e explícitos:
+
+```bash
+go run ./cmd/git-push-memories mcp --memory-root /path/to/memory --code-root /path/to/code
+```
+
 ## Licença
 
 O software deste repositório é disponibilizado sob a [Apache License 2.0](LICENSE).
