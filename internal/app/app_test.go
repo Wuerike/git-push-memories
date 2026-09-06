@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -201,6 +202,7 @@ func TestProposalShowAndRejectCommands(t *testing.T) {
 func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
 	codeRoot := newGitRoot(t, "code")
+	stateRoot := filepath.Join(t.TempDir(), "state")
 	beforeMemory := treeFingerprint(t, memoryRoot)
 	beforeCode := treeFingerprint(t, codeRoot)
 
@@ -213,6 +215,7 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 			"mcp",
 			"--memory-root", memoryRoot,
 			"--code-root", codeRoot,
+			"--state-root", stateRoot,
 		}, serverInput, serverOutput, &stderr, "test-version")
 	}()
 
@@ -228,8 +231,8 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 2 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_search" {
-		t.Fatalf("ListTools() = %+v, want memory_expand and memory_search", result.Tools)
+	if len(result.Tools) != 3 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_propose_replace" || result.Tools[2].Name != "memory_search" {
+		t.Fatalf("ListTools() = %+v, want only memory_expand, memory_propose_replace, and memory_search", result.Tools)
 	}
 	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_search",
@@ -278,6 +281,9 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	}
 	if got := treeFingerprint(t, codeRoot); got != beforeCode {
 		t.Fatalf("code root changed: before %s, after %s", beforeCode, got)
+	}
+	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state root exists without an accepted proposal: %v", err)
 	}
 }
 

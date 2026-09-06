@@ -17,7 +17,7 @@ import (
 )
 
 const usage = `Usage:
-  git-push-memories mcp --memory-root <path> --code-root <path>
+  git-push-memories mcp --memory-root <path> --code-root <path> --state-root <path>
   git-push-memories retrieve <query> --memory-root <path> --code-root <path> --budget-bytes <n>
   git-push-memories proposal show <proposal-id> --memory-root <path> --code-root <path> --state-root <path>
   git-push-memories proposal reject <proposal-id> --reason <reason> --memory-root <path> --code-root <path> --state-root <path>
@@ -196,6 +196,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	flags.SetOutput(stderr)
 	memoryRoot := flags.String("memory-root", "", "path to the memory Git worktree root")
 	codeRoot := flags.String("code-root", "", "path to the code Git worktree root")
+	stateRoot := flags.String("state-root", "", "path to private proposal state")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -209,7 +210,7 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	server, err := mcpserver.New(cfg, version)
+	server, err := mcpserver.New(cfg, *stateRoot, version)
 	if err != nil {
 		fmt.Fprintln(stderr, "MCP server could not initialize")
 		return 1

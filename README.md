@@ -120,15 +120,18 @@ Depois do primeiro download da toolchain e das dependências, `make verify-offli
 O servidor MCP exige dois worktrees Git distintos e explícitos:
 
 ```bash
-go run ./cmd/git-push-memories mcp --memory-root /path/to/memory --code-root /path/to/code
+go run ./cmd/git-push-memories mcp --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
 ```
 
-Nesta etapa, o servidor publica duas tools estritamente read-only:
+O servidor publica tres tools:
 
 - `memory_search`, para buscar excerpts Markdown dentro de um orçamento em bytes;
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto.
+- `memory_propose_replace`, para criar explicitamente uma proposta estruturada sem aplicar Markdown ou executar Git.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
+
+O [material de integracao com Claude Code](integrations/claude-code/README.md) configura esse servidor e fornece um skill de proposta exclusivamente manual. Nenhum hook de sessao e instalado; apply e publish permanecem comandos humanos da CLI.
 
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
