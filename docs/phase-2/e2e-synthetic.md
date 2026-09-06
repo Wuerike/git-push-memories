@@ -54,4 +54,16 @@ Um run focado de desenvolvimento confirmou 329 bytes na busca e 323 no expand in
 
 ## Run classificatorio
 
-Pendente da revisao limpa deste incremento.
+O run `20260906T190518Z-synthetic-e2e` avaliou a revisao limpa `156d9c43b10364853067947c3bcce476fc84cdd6` com Go 1.25.12, Git 2.54.0, Claude Code 2.1.263 e MCP SDK 1.7.0. A evidencia local esta em `.artifacts/phase-2/20260906T190518Z-synthetic-e2e`; o checksum do inventario `checksums.sha256` e `07ef8d69c4421c378e54af3cdbb0925fee69c31406c190a3cc44e5333d5bdbb2`.
+
+Todos os estagios terminaram com exit 0:
+
+| Estagio | Duracao |
+|---|---:|
+| E2E sintetico offline | 951 ms |
+| fault injection | 1.056 ms |
+| `make verify` | 1.492 ms |
+| `make verify-offline` | 1.567 ms |
+| scan dos artefatos | 0 ms |
+
+O resultado classificatorio repetiu as metricas do run de desenvolvimento: 329/323 bytes no search/expand inicial e 328/322 no search/expand final. O arquivo final teve hash `fc1eeb4c4ae74bff0ac295089192508f93f6025db8ac71cd67939b77df57ff05`, igual ao fixture esperado; o commit sintetico conteve somente `services/checkout-api.md`; proposta terminal foi removida; receipts permaneceram fechados e sem corpo; quatro casos de privacidade foram rejeitados; state root de leitura nao foi criado; e os scans encontraram zero marcador fora da fonte, zero destino de escrita no trace e zero marcador na evidencia preservada.
