@@ -1,0 +1,9 @@
+queues:
+  route-amber:
+    status: active
+    owner: routing-ops
+    purpose: priority parcel escalation
+  route-slate:
+    status: retired
+    owner: dispatch-legacy
+    purpose: legacy escalation

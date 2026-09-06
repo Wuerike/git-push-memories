@@ -400,9 +400,9 @@ O ponto de linearizacao do conteudo e a captura do blob: depois de adquirir o in
 
 ## T10: executar experimento real
 
-**Cenario ou hipotese:** uma memoria curta de estado atual reduz trabalho ou evita erro em uma tarefa real posterior.
+**Cenario ou hipotese:** uma memoria curta de estado atual reduz trabalho ou evita erro em uma tarefa posterior executada por um agente autenticado.
 
-**Precondicao humana:** escolher um repositorio, uma descoberta nao sensivel e uma pagina de memoria com anchors. Pre-registrar a especificacao sanitizada da tarefa posterior, uma rubrica de correcao, uma metrica primaria e seu limiar antes de executar qualquer sessao.
+**Precondicao humana:** escolher e aprovar um repositorio, uma descoberta nao sensivel e uma pagina de memoria com anchors. O repositorio pode ser um benchmark sintetico, publico e versionado no proprio produto; o gate real e a inferencia autenticada, nao o uso de codigo privado ou de producao. Pre-registrar a especificacao sanitizada da tarefa posterior, uma rubrica de correcao, uma metrica primaria e seu limiar antes de executar qualquer sessao.
 
 **Escopo:** realizar uma sessao A de descoberta/captura/publicacao e exatamente tres pares independentes da tarefa posterior. Cada par usa dois worktrees no mesmo commit, HOME/state novos, a mesma especificacao de tarefa, modelo, versao do Claude Code, configuracao, permissoes, ferramentas e limite de contexto. O tratamento habilita somente a memoria publicada; o controle desabilita a integracao de memoria. A ordem dentro de cada par e sorteada por seed registrada. Nenhum resultado de um run e fornecido ao seguinte. Runs extras exigem protocolo novo e nao podem substituir seletivamente nenhum dos tres pares.
 

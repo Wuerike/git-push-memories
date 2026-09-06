@@ -119,6 +119,8 @@ Depois do primeiro download da toolchain e das dependências, `make verify-offli
 
 O [E2E sintetico da Fase 2](docs/phase-2/e2e-synthetic.md) executa o fluxo completo e uma passagem separada de privacidade, preservando evidencias sanitizadas em `.artifacts/phase-2/`.
 
+O [experimento controlado de valor](docs/phase-2/value-experiment-protocol.md) usa somente fixtures sinteticos versionados e sessoes autenticadas isoladas para comparar tres pares com e sem memoria.
+
 O servidor MCP exige dois worktrees Git distintos e explícitos:
 
 ```bash

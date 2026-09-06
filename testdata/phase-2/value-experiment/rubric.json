@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "blind": true,
+  "checks": [
+    {
+      "id": "hidden-tests",
+      "weight": 4,
+      "pass": "All evaluator tests pass after the hidden test file is injected."
+    },
+    {
+      "id": "public-tests",
+      "weight": 2,
+      "pass": "All repository tests pass."
+    },
+    {
+      "id": "api-preserved",
+      "weight": 2,
+      "pass": "The exported ErrUnknownTier, Escalation fields, and EscalationFor signature are unchanged."
+    },
+    {
+      "id": "scope",
+      "weight": 2,
+      "pass": "Changes are limited to dispatch implementation and focused tests, with no fixture evidence modified."
+    }
+  ],
+  "maximum_score": 10,
+  "correctness_gate": "hidden-tests, public-tests, and api-preserved must pass"
+}
