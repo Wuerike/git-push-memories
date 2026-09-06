@@ -107,6 +107,8 @@ A fase termina quando existir uma base escolhida ou uma justificativa explícita
 
 **Plano executável:** [Plano da Fase 2](phase-2/plan.md).
 
+**Estado em 2026-09-06:** T1-T10 concluidas com decisao `revisar o fluxo`; fase reaberta para bootstrap sem Markdown manual e Fase 3 bloqueada ate nova validacao de valor.
+
 ### Resultado esperado
 
 Demonstrar, de ponta a ponta, que conhecimento descoberto em uma sessão pode melhorar uma tarefa executada em outra sessão.
@@ -115,6 +117,8 @@ O primeiro fluxo deve privilegiar captura explícita para reduzir variáveis:
 
 ```text
 comando explícito
+-> pesquisa de memória relacionada
+-> escolha confirmada entre criar página, criar seção ou substituir seção
 -> proposta temporária
 -> alteração de uma página Markdown
 -> revisão local
@@ -122,13 +126,15 @@ comando explícito
 -> recuperação contextual em outra sessão
 ```
 
-A proposta deve preferir alterar a explicação do estado atual a simplesmente acrescentar um novo registro cronológico.
+A proposta deve preferir alterar a explicação do estado atual a simplesmente acrescentar um novo registro cronológico. Quando ainda não houver alvo válido, o produto deve gerar página ou seção com identidade estável em vez de exigir preparação manual.
 
 ### Entregáveis
 
 - integração mínima com Claude Code;
 - comando de captura explícita;
 - formato inicial das páginas e propostas;
+- criação da primeira página e de novas seções com schema e anchors gerados pelo produto;
+- escolha explícita entre criar página, criar seção e substituir o conteúdo de uma seção existente;
 - consolidação de uma proposta como alteração Markdown;
 - publicação usando o fluxo Git existente;
 - recuperação com orçamento de contexto limitado;
@@ -136,7 +142,7 @@ A proposta deve preferir alterar a explicação do estado atual a simplesmente a
 
 ### Gate de decisão
 
-A fase termina quando ao menos um cenário real mostrar que a memória publicada melhora a execução posterior sem exigir acesso à sessão original.
+A fase termina quando o fluxo partir de um memory root sem Markdown preparado e ao menos um cenário autenticado mostrar que a memória publicada melhora a execução posterior sem exigir acesso à sessão original. O primeiro experimento, executado em 2026-09-06, teve 6/6 runs válidos, mas somente 1/3 pares superou o limiar de tempo; portanto o gate permanece aberto com decisão `revisar o fluxo`.
 
 ## Fase 3: Confiança e governança
 
