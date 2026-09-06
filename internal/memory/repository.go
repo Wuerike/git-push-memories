@@ -136,6 +136,34 @@ func (repository *Repository) Apply(ctx context.Context, change ChangeSet) (Rece
 	return receipt, err
 }
 
+func (repository *Repository) Preview(ctx context.Context, request PreviewRequest) (Preview, error) {
+	var preview Preview
+	err := repository.withLock(ctx, false, func() error {
+		state, err := repository.load(ctx, request.Target.Path)
+		if err != nil {
+			return err
+		}
+		if err := repository.ensureTargetClean(ctx, state.snapshot.Path, state.snapshot.Head); err != nil {
+			return err
+		}
+		postState, err := replaceSection(state.source, state.parsed, request.Target.SectionID, request.Replacement)
+		if err != nil {
+			return err
+		}
+		if err := repository.confirmPreviewState(ctx, state.snapshot); err != nil {
+			return err
+		}
+		preview = Preview{
+			Target:       Target{Path: state.snapshot.Path, SectionID: request.Target.SectionID},
+			BaselineHash: state.snapshot.FileHash, PostStateHash: hash(postState),
+			Head: state.snapshot.Head, Blob: state.snapshot.Blob,
+			Baseline: append([]byte(nil), state.source...), PostState: postState,
+		}
+		return nil
+	})
+	return preview, err
+}
+
 func (repository *Repository) apply(ctx context.Context, change ChangeSet) (Receipt, error) {
 	if err := ctx.Err(); err != nil {
 		return Receipt{}, err
@@ -152,35 +180,9 @@ func (repository *Repository) apply(ctx context.Context, change ChangeSet) (Rece
 	if err != nil {
 		return Receipt{}, err
 	}
-	if !utf8.ValidString(change.Replacement) || bytes.Contains([]byte(change.Replacement), []byte("<!-- @id:")) {
-		return Receipt{}, fmt.Errorf("%w: invalid replacement", ErrInvalidSchema)
-	}
-	replacementSections, err := markdown.ParseSections([]byte(change.Replacement))
-	if err != nil || len(replacementSections) != 0 {
-		return Receipt{}, fmt.Errorf("%w: replacement contains heading", ErrInvalidSchema)
-	}
-
-	targetIndex := -1
-	for i, section := range parsed {
-		if section.AnchorID == change.Target.SectionID {
-			targetIndex = i
-			break
-		}
-	}
-	if targetIndex < 0 {
-		return Receipt{}, ErrSectionNotFound
-	}
-	target := parsed[targetIndex]
-	if targetIndex+1 < len(parsed) && parsed[targetIndex+1].ByteStart < target.ByteEnd {
-		return Receipt{}, ErrSectionNotLeaf
-	}
-	postState, err := markdown.ReplaceSectionContent(source, target, []byte(change.Replacement))
+	postState, err := replaceSection(source, parsed, change.Target.SectionID, change.Replacement)
 	if err != nil {
-		return Receipt{}, fmt.Errorf("replace section: %w", ErrInvalidSchema)
-	}
-	postSections, err := validateDocument(postState)
-	if err != nil || !sameDocumentShape(parsed, postSections) {
-		return Receipt{}, fmt.Errorf("%w: replacement changes document structure", ErrInvalidSchema)
+		return Receipt{}, err
 	}
 	if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, repository.fault); err != nil {
 		return Receipt{}, fmt.Errorf("write memory file: %w", err)
@@ -190,6 +192,39 @@ func (repository *Repository) apply(ctx context.Context, change ChangeSet) (Rece
 		BaselineHash:  baselineHash,
 		PostStateHash: hash(postState),
 	}, nil
+}
+
+func replaceSection(source []byte, parsed []markdown.Section, sectionID, replacement string) ([]byte, error) {
+	if !utf8.ValidString(replacement) || bytes.Contains([]byte(replacement), []byte("<!-- @id:")) {
+		return nil, fmt.Errorf("%w: invalid replacement", ErrInvalidSchema)
+	}
+	replacementSections, err := markdown.ParseSections([]byte(replacement))
+	if err != nil || len(replacementSections) != 0 {
+		return nil, fmt.Errorf("%w: replacement contains heading", ErrInvalidSchema)
+	}
+	targetIndex := -1
+	for i, section := range parsed {
+		if section.AnchorID == sectionID {
+			targetIndex = i
+			break
+		}
+	}
+	if targetIndex < 0 {
+		return nil, ErrSectionNotFound
+	}
+	target := parsed[targetIndex]
+	if targetIndex+1 < len(parsed) && parsed[targetIndex+1].ByteStart < target.ByteEnd {
+		return nil, ErrSectionNotLeaf
+	}
+	postState, err := markdown.ReplaceSectionContent(source, target, []byte(replacement))
+	if err != nil {
+		return nil, fmt.Errorf("replace section: %w", ErrInvalidSchema)
+	}
+	postSections, err := validateDocument(postState)
+	if err != nil || !sameDocumentShape(parsed, postSections) {
+		return nil, fmt.Errorf("%w: replacement changes document structure", ErrInvalidSchema)
+	}
+	return postState, nil
 }
 
 func sameDocumentShape(before, after []markdown.Section) bool {

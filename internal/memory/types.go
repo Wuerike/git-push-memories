@@ -8,6 +8,7 @@ var (
 	ErrSectionNotFound = errors.New("section not found")
 	ErrSectionNotLeaf  = errors.New("section is not a leaf")
 	ErrDrift           = errors.New("memory file drifted")
+	ErrTargetDirty     = errors.New("memory target has Git changes")
 )
 
 type Scope struct {
@@ -46,4 +47,19 @@ type Receipt struct {
 	Target        Target
 	BaselineHash  string
 	PostStateHash string
+}
+
+type PreviewRequest struct {
+	Target      Target
+	Replacement string
+}
+
+type Preview struct {
+	Target        Target
+	BaselineHash  string
+	PostStateHash string
+	Head          string
+	Blob          string
+	Baseline      []byte
+	PostState     []byte
 }

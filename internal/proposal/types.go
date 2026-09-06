@@ -1,0 +1,62 @@
+package proposal
+
+import (
+	"errors"
+	"time"
+)
+
+var (
+	ErrNotFound      = errors.New("proposal not found")
+	ErrInvalidReason = errors.New("invalid rejection reason")
+	ErrNotApplied    = errors.New("proposal was not applied")
+)
+
+type Target struct {
+	Path      string `json:"path"`
+	SectionID string `json:"section_id"`
+}
+
+type Operation struct {
+	Type        string `json:"type"`
+	Target      Target `json:"target"`
+	Replacement string `json:"replacement"`
+}
+
+type Baseline struct {
+	FileHash string `json:"file_hash"`
+	Head     string `json:"head"`
+	Blob     string `json:"blob"`
+}
+
+type PostState struct {
+	FileHash string `json:"file_hash"`
+}
+
+type View struct {
+	SchemaVersion int       `json:"schema_version"`
+	ID            string    `json:"id"`
+	Revision      int       `json:"revision"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	Operation     Operation `json:"operation"`
+	Baseline      Baseline  `json:"baseline"`
+	PostState     PostState `json:"post_state"`
+	Diff          string    `json:"diff"`
+	SourcePaths   []string  `json:"source_paths"`
+}
+
+type DecisionReceipt struct {
+	SchemaVersion int       `json:"schema_version"`
+	ProposalID    string    `json:"proposal_id"`
+	Revision      int       `json:"revision"`
+	Status        string    `json:"status"`
+	Reason        string    `json:"reason"`
+	DecidedAt     time.Time `json:"decided_at"`
+}
+
+type Review struct {
+	Proposal *View            `json:"proposal,omitempty"`
+	Decision *DecisionReceipt `json:"decision,omitempty"`
+}
+
+type ApplyReceipt struct{}

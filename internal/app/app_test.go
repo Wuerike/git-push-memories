@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wuerike/git-push-memories/internal/intake"
+	"github.com/Wuerike/git-push-memories/internal/proposal"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -119,6 +121,56 @@ func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
 	}
 	if treeFingerprint(t, memoryRoot) != beforeMemory || treeFingerprint(t, codeRoot) != beforeCode {
 		t.Fatal("retrieve changed a configured worktree")
+	}
+}
+
+func TestProposalShowAndRejectCommands(t *testing.T) {
+	memoryRoot := newGitRoot(t, "memory")
+	codeRoot := newGitRoot(t, "code")
+	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	page := "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\nold\n"
+	if err := os.WriteFile(pagePath, []byte(page), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, memoryRoot, "config", "user.name", "Test")
+	runGit(t, memoryRoot, "config", "user.email", "test@example.com")
+	runGit(t, memoryRoot, "add", ".")
+	runGit(t, memoryRoot, "commit", "--quiet", "-m", "initial")
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := guard.Inspect(intake.NewCandidate([]byte(`{"target_path":"services/checkout-api.md","section_id":"checkout-api-operation","replacement":"\nnew\n","source_paths":[]}`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := workflow.Prepare(context.Background(), allowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.Close(); err != nil {
+		t.Fatal(err)
+	}
+	common := []string{"--memory-root", memoryRoot, "--code-root", codeRoot, "--state-root", stateRoot}
+
+	var stdout, stderr bytes.Buffer
+	showArgs := append([]string{"proposal", "show", view.ID}, common...)
+	if exitCode := Run(context.Background(), showArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), view.ID) {
+		t.Fatalf("proposal show exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	rejectArgs := append([]string{"proposal", "reject", view.ID, "--reason", "incorrect"}, common...)
+	if exitCode := Run(context.Background(), rejectArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"rejected"`) {
+		t.Fatalf("proposal reject exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
 }
 

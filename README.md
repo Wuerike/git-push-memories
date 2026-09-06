@@ -136,6 +136,8 @@ A mesma recuperação também pode ser chamada diretamente pela CLI:
 go run ./cmd/git-push-memories retrieve "checkout timeout team" --memory-root /path/to/memory --code-root /path/to/code --budget-bytes 2048
 ```
 
+Propostas pendentes podem ser revisadas ou rejeitadas pela CLI com `proposal show` e `proposal reject`. Esses comandos exigem `--memory-root`, `--code-root` e um `--state-root` privado fora dos dois repositórios. Apply e publicação serão acrescentados nos próximos incrementos da Fase 2.
+
 ## Licença
 
 O software deste repositório é disponibilizado sob a [Apache License 2.0](LICENSE).

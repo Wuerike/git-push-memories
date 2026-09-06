@@ -3,12 +3,14 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
+	"github.com/Wuerike/git-push-memories/internal/proposal"
 	"github.com/Wuerike/git-push-memories/internal/protocol"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 )
@@ -16,6 +18,8 @@ import (
 const usage = `Usage:
   git-push-memories mcp --memory-root <path> --code-root <path>
   git-push-memories retrieve <query> --memory-root <path> --code-root <path> --budget-bytes <n>
+  git-push-memories proposal show <proposal-id> --memory-root <path> --code-root <path> --state-root <path>
+  git-push-memories proposal reject <proposal-id> --reason <reason> --memory-root <path> --code-root <path> --state-root <path>
   git-push-memories version
   git-push-memories help
 `
@@ -37,10 +41,71 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runMCP(ctx, args[1:], stdin, stdout, stderr, version)
 	case "retrieve":
 		return runRetrieve(ctx, args[1:], stdout, stderr)
+	case "proposal":
+		return runProposal(args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n%s", args[0], usage)
 		return 2
 	}
+}
+
+func runProposal(args []string, stdout, stderr io.Writer) int {
+	if len(args) < 2 || (args[0] != "show" && args[0] != "reject") {
+		fmt.Fprintln(stderr, "proposal requires show or reject and a proposal ID")
+		return 2
+	}
+	action, id := args[0], args[1]
+	flags := flag.NewFlagSet("proposal "+action, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	memoryRoot := flags.String("memory-root", "", "path to the memory Git worktree root")
+	codeRoot := flags.String("code-root", "", "path to the code Git worktree root")
+	stateRoot := flags.String("state-root", "", "path to private proposal state")
+	reason := flags.String("reason", "", "closed rejection reason")
+	if err := flags.Parse(args[2:]); err != nil {
+		return 2
+	}
+	if flags.NArg() != 0 || (action == "show" && *reason != "") {
+		fmt.Fprintln(stderr, "invalid proposal arguments")
+		return 2
+	}
+	cfg, err := config.Load(*memoryRoot, *codeRoot)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	var workflow *proposal.Workflow
+	if action == "show" {
+		workflow, err = proposal.OpenReadOnly(cfg.MemoryRoot, cfg.CodeRoot, *stateRoot)
+	} else {
+		workflow, err = proposal.New(cfg.MemoryRoot, cfg.CodeRoot, *stateRoot)
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "proposal workflow could not initialize")
+		return 1
+	}
+	defer workflow.Close()
+	var response any
+	if action == "show" {
+		response, err = workflow.Review(id)
+	} else {
+		response, err = workflow.Reject(id, *reason)
+	}
+	if err != nil {
+		switch {
+		case errors.Is(err, proposal.ErrInvalidReason):
+			fmt.Fprintln(stderr, "invalid_rejection_reason")
+		case errors.Is(err, proposal.ErrNotFound):
+			fmt.Fprintln(stderr, "proposal_not_found")
+		default:
+			fmt.Fprintln(stderr, "proposal_operation_failed")
+		}
+		return 1
+	}
+	if err := json.NewEncoder(stdout).Encode(protocol.NewEnvelope(response)); err != nil {
+		fmt.Fprintln(stderr, "write proposal response failed")
+		return 1
+	}
+	return 0
 }
 
 func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
