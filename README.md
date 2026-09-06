@@ -123,6 +123,19 @@ O servidor MCP exige dois worktrees Git distintos e explícitos:
 go run ./cmd/git-push-memories mcp --memory-root /path/to/memory --code-root /path/to/code
 ```
 
+Nesta etapa, o servidor publica duas tools estritamente read-only:
+
+- `memory_search`, para buscar excerpts Markdown dentro de um orçamento em bytes;
+- `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto.
+
+O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
+
+A mesma recuperação também pode ser chamada diretamente pela CLI:
+
+```bash
+go run ./cmd/git-push-memories retrieve "checkout timeout team" --memory-root /path/to/memory --code-root /path/to/code --budget-bytes 2048
+```
+
 ## Licença
 
 O software deste repositório é disponibilizado sob a [Apache License 2.0](LICENSE).

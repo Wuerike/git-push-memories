@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -74,6 +76,52 @@ func TestMCPDoesNotExposeInvalidRootPath(t *testing.T) {
 	}
 }
 
+func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
+	memoryRoot := newGitRoot(t, "memory")
+	codeRoot := newGitRoot(t, "code")
+	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	page := "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\ntimeout team-b\n"
+	if err := os.WriteFile(pagePath, []byte(page), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, memoryRoot, "config", "user.name", "Test")
+	runGit(t, memoryRoot, "config", "user.email", "test@example.com")
+	runGit(t, memoryRoot, "add", ".")
+	runGit(t, memoryRoot, "commit", "--quiet", "-m", "initial")
+	beforeMemory := treeFingerprint(t, memoryRoot)
+	beforeCode := treeFingerprint(t, codeRoot)
+
+	var stdout, stderr bytes.Buffer
+	exitCode := Run(context.Background(), []string{
+		"retrieve", "checkout timeout team",
+		"--memory-root", memoryRoot,
+		"--code-root", codeRoot,
+		"--budget-bytes", "2048",
+	}, strings.NewReader(""), &stdout, &stderr, "test-version")
+	if exitCode != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", exitCode, stderr.String())
+	}
+	var response struct {
+		SchemaVersion int                     `json:"schema_version"`
+		Data          retrieval.ContextBundle `json:"data"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SchemaVersion != 1 || len(response.Data.Items) != 1 {
+		t.Fatalf("retrieve response = %+v", response)
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("stderr = %q, want empty", stderr.String())
+	}
+	if treeFingerprint(t, memoryRoot) != beforeMemory || treeFingerprint(t, codeRoot) != beforeCode {
+		t.Fatal("retrieve changed a configured worktree")
+	}
+}
+
 func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
 	codeRoot := newGitRoot(t, "code")
@@ -104,8 +152,35 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 0 {
-		t.Fatalf("ListTools() returned %d tools, want 0", len(result.Tools))
+	if len(result.Tools) != 2 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_search" {
+		t.Fatalf("ListTools() = %+v, want memory_expand and memory_search", result.Tools)
+	}
+	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search",
+		Arguments: map[string]any{
+			"query":        "checkout timeout",
+			"budget_bytes": 2048,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if toolResult.IsError {
+		t.Fatalf("memory_search returned tool error: %+v", toolResult.Content)
+	}
+	encoded, err := json.Marshal(toolResult.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		SchemaVersion int                     `json:"schema_version"`
+		Data          retrieval.ContextBundle `json:"data"`
+	}
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.SchemaVersion != 1 || len(response.Data.Items) != 0 {
+		t.Fatalf("memory_search response = %+v", response)
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
@@ -141,6 +216,14 @@ func newGitRoot(t *testing.T, name string) string {
 		t.Fatalf("git init: %v: %s", err, output)
 	}
 	return root
+}
+
+func runGit(t *testing.T, root string, arguments ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", arguments, err, output)
+	}
 }
 
 func treeFingerprint(t *testing.T, root string) string {

@@ -25,6 +25,14 @@ type Repository struct {
 }
 
 func New(root string) (*Repository, error) {
+	return open(root, true)
+}
+
+func NewReadOnly(root string) (*Repository, error) {
+	return open(root, false)
+}
+
+func open(root string, cleanTemporaries bool) (*Repository, error) {
 	absolute, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("memory root is invalid")
@@ -43,9 +51,11 @@ func New(root string) (*Repository, error) {
 		return nil, fmt.Errorf("memory root is invalid")
 	}
 	repository := &Repository{root: rootHandle}
-	if err := repository.withLock(context.Background(), true, repository.cleanupTemporaryFiles); err != nil {
-		_ = rootHandle.Close()
-		return nil, fmt.Errorf("clean memory temporaries: %w", err)
+	if cleanTemporaries {
+		if err := repository.withLock(context.Background(), true, repository.cleanupTemporaryFiles); err != nil {
+			_ = rootHandle.Close()
+			return nil, fmt.Errorf("clean memory temporaries: %w", err)
+		}
 	}
 	return repository, nil
 }
