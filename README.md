@@ -117,6 +117,8 @@ make verify
 
 Depois do primeiro download da toolchain e das dependências, `make verify-offline` repete a matriz sem acessar o proxy de módulos. Ambos os comandos impõem Go 1.25.12, inclusive quando outra versão está instalada localmente.
 
+O [E2E sintetico da Fase 2](docs/phase-2/e2e-synthetic.md) executa o fluxo completo e uma passagem separada de privacidade, preservando evidencias sanitizadas em `.artifacts/phase-2/`.
+
 O servidor MCP exige dois worktrees Git distintos e explícitos:
 
 ```bash
