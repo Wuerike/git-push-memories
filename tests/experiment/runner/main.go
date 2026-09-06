@@ -16,6 +16,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -141,16 +142,17 @@ type report struct {
 }
 
 type runner struct {
-	ctx          context.Context
-	repository   string
-	fixture      string
-	evidence     string
-	temporary    string
-	authRoot     string
-	credentials  string
-	binary       string
-	claudeBinary string
-	protocol     experiment
+	ctx              context.Context
+	repository       string
+	fixture          string
+	evidence         string
+	temporary        string
+	authRoot         string
+	credentials      string
+	verificationFile string
+	binary           string
+	claudeBinary     string
+	protocol         experiment
 }
 
 func main() {
@@ -164,6 +166,7 @@ func runMain() error {
 	evidence := flag.String("evidence-root", "", "new directory for sanitized evidence")
 	credentials := flag.String("credentials", filepath.Join(os.Getenv("HOME"), ".claude", ".credentials.json"), "Claude credential source copied only to tmpfs")
 	authRoot := flag.String("auth-root", "", "existing private tmpfs directory controlled by the caller")
+	verificationFile := flag.String("verification-file", "", "sanitized pre-run verification TSV")
 	flag.Parse()
 	if *evidence == "" {
 		return errors.New("evidence root is required")
@@ -172,7 +175,7 @@ func runMain() error {
 	defer stop()
 	ctx, cancel := context.WithTimeout(signalContext, 35*time.Minute)
 	defer cancel()
-	r, err := newRunner(ctx, *evidence, *credentials, *authRoot)
+	r, err := newRunner(ctx, *evidence, *credentials, *authRoot, *verificationFile)
 	if err != nil {
 		return err
 	}
@@ -185,7 +188,7 @@ func runMain() error {
 	return nil
 }
 
-func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot string) (*runner, error) {
+func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot, verificationFile string) (*runner, error) {
 	repository, err := commandOutput(ctx, "", nil, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, errors.New("locate repository")
@@ -228,7 +231,7 @@ func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot str
 	}()
 	r := &runner{
 		ctx: ctx, repository: repository, fixture: filepath.Join(repository, "testdata", "phase-2", "value-experiment"),
-		evidence: evidence, temporary: temporary, authRoot: authRoot, credentials: credentials,
+		evidence: evidence, temporary: temporary, authRoot: authRoot, credentials: credentials, verificationFile: verificationFile,
 	}
 	if err := decodeFile(filepath.Join(r.fixture, "experiment.json"), &r.protocol); err != nil {
 		return nil, err
@@ -262,26 +265,13 @@ func (r *runner) execute() error {
 	if r.protocol.Profile.Filesystem != "bubblewrap-workspace-only" || r.protocol.Profile.PermissionMode != "acceptEdits" || r.protocol.Profile.PermissionPrompts != "none" {
 		return errors.New("unsupported pre-registered execution profile")
 	}
-	verificationCommands := []struct {
-		name       string
-		executable string
-		arguments  []string
-	}{
-		{name: "tests", executable: "go", arguments: []string{"test", "./..."}},
-		{name: "race", executable: "go", arguments: []string{"test", "-race", "./..."}},
-		{name: "vet", executable: "go", arguments: []string{"vet", "./..."}},
-		{name: "build", executable: "go", arguments: []string{"build", "./..."}},
-		{name: "fault-injection", executable: "go", arguments: []string{"test", "./internal/proposal", "./internal/publisher", "-run", "Recovers|Retry|SyncFails|Interrupted|Recovery|Interruption|Reuses|ObservesEdits|ConcurrentBranch|IndexLock|Temporar", "-count=1"}},
+	verification, err := readVerification(r.verificationFile)
+	if err != nil || len(verification) != 5 {
+		return errors.New("invalid pre-run verification evidence")
 	}
-	var verification []commandEvidence
 	verificationMS := int64(0)
-	for _, registered := range verificationCommands {
-		evidence := runMeasured(r.ctx, r.repository, nil, registered.name, registered.executable, registered.arguments...)
-		verification = append(verification, evidence)
+	for _, evidence := range verification {
 		verificationMS += evidence.DurationMS
-		if err := writeJSON(filepath.Join(r.evidence, "verification.json"), verification); err != nil {
-			return errors.New("persist pre-run verification")
-		}
 		if evidence.ExitCode != 0 {
 			return errors.New("pre-run verification failed")
 		}
@@ -846,14 +836,33 @@ func run(ctx context.Context, directory string, environment []string, executable
 	return command.Run()
 }
 
-func runMeasured(ctx context.Context, directory string, environment []string, name, executable string, arguments ...string) commandEvidence {
-	started := time.Now()
-	err := run(ctx, directory, environment, executable, arguments...)
-	exitCode := 0
+func readVerification(path string) ([]commandEvidence, error) {
+	contents, err := os.ReadFile(path)
 	if err != nil {
-		exitCode = 1
+		return nil, err
 	}
-	return commandEvidence{Name: name, Command: strings.Join(append([]string{executable}, arguments...), " "), ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()}
+	lines := strings.Split(strings.TrimSpace(string(contents)), "\n")
+	if len(lines) != 6 || lines[0] != "name\tcommand\texit_code\tduration_ms" {
+		return nil, errors.New("invalid verification TSV")
+	}
+	expectedNames := []string{"tests", "race", "vet", "build", "fault-injection"}
+	result := make([]commandEvidence, 0, 5)
+	for index, line := range lines[1:] {
+		fields := strings.Split(line, "\t")
+		if len(fields) != 4 || fields[0] != expectedNames[index] {
+			return nil, errors.New("invalid verification row")
+		}
+		exitCode, err := strconv.Atoi(fields[2])
+		if err != nil {
+			return nil, err
+		}
+		duration, err := strconv.ParseInt(fields[3], 10, 64)
+		if err != nil || duration < 0 {
+			return nil, errors.New("invalid verification duration")
+		}
+		result = append(result, commandEvidence{Name: fields[0], Command: fields[1], ExitCode: exitCode, DurationMS: duration})
+	}
+	return result, nil
 }
 
 func commandOutput(ctx context.Context, directory string, environment []string, executable string, arguments ...string) (string, error) {
