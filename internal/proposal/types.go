@@ -60,9 +60,10 @@ type DecisionReceipt struct {
 }
 
 type Review struct {
-	Proposal *View            `json:"proposal,omitempty"`
-	Decision *DecisionReceipt `json:"decision,omitempty"`
-	Applied  *ApplyReceipt    `json:"applied,omitempty"`
+	Proposal  *View               `json:"proposal,omitempty"`
+	Decision  *DecisionReceipt    `json:"decision,omitempty"`
+	Applied   *ApplyReceipt       `json:"applied,omitempty"`
+	Published *PublicationReceipt `json:"published,omitempty"`
 }
 
 type ApplyReceipt struct {
@@ -75,4 +76,18 @@ type ApplyReceipt struct {
 	Target        Target    `json:"target"`
 	Baseline      Baseline  `json:"baseline"`
 	PostState     PostState `json:"post_state"`
+}
+
+type PublicationReceipt struct {
+	SchemaVersion int       `json:"schema_version"`
+	ProposalID    string    `json:"proposal_id"`
+	Revision      int       `json:"revision"`
+	Status        string    `json:"status"`
+	PublishedAt   time.Time `json:"published_at"`
+	MemoryRoot    string    `json:"memory_root"`
+	Target        Target    `json:"target"`
+	Branch        string    `json:"branch"`
+	Parent        string    `json:"parent"`
+	Commit        string    `json:"commit"`
+	Blob          string    `json:"blob"`
 }

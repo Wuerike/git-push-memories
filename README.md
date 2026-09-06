@@ -142,7 +142,13 @@ Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `p
 go run ./cmd/git-push-memories proposal apply <proposal-id> --revision 1 --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
 ```
 
-O apply deixa a atualização como `applied_unpublished`; a publicação em commit Git será acrescentada em T7.
+O apply deixa a atualização como `applied_unpublished`. A publicação local cria um commit limitado ao target sem consumir staging alheio:
+
+```bash
+go run ./cmd/git-push-memories proposal publish <proposal-id> --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
+```
+
+O Publisher não acessa remotos. O commit recebe o trailer `Git-Push-Memories-Proposal: <id>/<revision>` e falhas recuperáveis preservam o estado `applied_unpublished`.
 
 ## Licença
 

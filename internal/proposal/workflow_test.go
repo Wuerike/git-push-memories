@@ -17,6 +17,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/proposal"
+	gitpublisher "github.com/Wuerike/git-push-memories/internal/publisher"
 )
 
 const initialPage = `# checkout-api
@@ -526,6 +527,56 @@ func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
 	defer restarted.Close()
 	if _, err := os.Stat(proposalPath); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("startup retained payload after durable apply receipt")
+	}
+}
+
+func TestPublishPersistsReceiptAndIsIdempotent(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err != nil {
+		t.Fatal(err)
+	}
+	driver, err := gitpublisher.New(memoryRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer driver.Close()
+	applied, err := workflow.Applied(view.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	published, err := driver.Publish(context.Background(), applied)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := workflow.RecordPublication(context.Background(), published)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeated, err := workflow.RecordPublication(context.Background(), published)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(receipt, repeated) || receipt.Status != "published" {
+		t.Fatalf("Publish() receipts = %+v and %+v", receipt, repeated)
+	}
+	review, err := workflow.Review(view.ID)
+	if err != nil || review.Published == nil || !reflect.DeepEqual(*review.Published, receipt) {
+		t.Fatalf("Review() after publish = %+v, %v", review, err)
+	}
+	assertMode(t, filepath.Join(stateRoot, "publications", view.ID+".json"), 0o600)
+	if _, err := os.Stat(filepath.Join(stateRoot, "publishing", view.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("durable publication receipt retained operation marker")
 	}
 }
 

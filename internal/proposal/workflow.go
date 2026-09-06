@@ -143,6 +143,17 @@ func (workflow *Workflow) Prepare(ctx context.Context, candidate intake.AllowedC
 }
 
 func (workflow *Workflow) Review(id string) (Review, error) {
+	published, err := workflow.store.readPublication(id)
+	if err == nil {
+		applied, applyErr := workflow.store.readApply(id)
+		if applyErr != nil || !publicationMatchesApply(published, applied) || published.MemoryRoot != workflow.memoryRoot {
+			return Review{}, ErrIntegrity
+		}
+		return Review{Published: &published}, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return Review{}, err
+	}
 	applied, err := workflow.store.readApply(id)
 	if err == nil {
 		if applied.MemoryRoot != workflow.memoryRoot {
@@ -165,6 +176,56 @@ func (workflow *Workflow) Review(id string) (Review, error) {
 		return Review{}, err
 	}
 	return Review{Proposal: &view}, nil
+}
+
+func (workflow *Workflow) RecordPublication(ctx context.Context, receipt PublicationReceipt) (PublicationReceipt, error) {
+	var stored PublicationReceipt
+	err := workflow.store.withProposalLock(ctx, receipt.ProposalID, func() error {
+		existing, err := workflow.store.readPublication(receipt.ProposalID)
+		if err == nil {
+			if existing != receipt {
+				return ErrIntegrity
+			}
+			if err := workflow.store.confirmDurable("publications"); err != nil {
+				return err
+			}
+			stored = existing
+			return nil
+		}
+		if !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		applied, err := workflow.Applied(receipt.ProposalID)
+		if err != nil || !publicationMatchesApply(receipt, applied) {
+			return ErrIntegrity
+		}
+		if err := workflow.store.writePublication(receipt); err != nil {
+			return err
+		}
+		stored = receipt
+		return nil
+	})
+	return stored, err
+}
+
+func (workflow *Workflow) Published(id string) (PublicationReceipt, error) {
+	receipt, err := workflow.store.readPublication(id)
+	if err != nil {
+		return PublicationReceipt{}, err
+	}
+	applied, err := workflow.store.readApply(id)
+	if err != nil || !publicationMatchesApply(receipt, applied) || receipt.MemoryRoot != workflow.memoryRoot {
+		return PublicationReceipt{}, ErrIntegrity
+	}
+	if err := workflow.store.confirmDurable("publications"); err != nil {
+		return PublicationReceipt{}, err
+	}
+	return receipt, nil
+}
+
+func publicationMatchesApply(publication PublicationReceipt, apply ApplyReceipt) bool {
+	return publication.SchemaVersion == 1 && publication.ProposalID == apply.ProposalID && publication.Revision == apply.Revision && publication.Status == "published" && !publication.PublishedAt.IsZero() &&
+		publication.MemoryRoot == apply.MemoryRoot && publication.Target == apply.Target && publication.Parent == apply.Baseline.Head && publication.Branch != "" && publication.Commit != "" && publication.Blob != ""
 }
 
 var rejectionReasons = map[string]struct{}{

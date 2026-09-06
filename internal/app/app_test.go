@@ -190,6 +190,12 @@ func TestProposalShowAndRejectCommands(t *testing.T) {
 	if exitCode := Run(context.Background(), applyArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"applied_unpublished"`) {
 		t.Fatalf("proposal apply exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
+	stdout.Reset()
+	stderr.Reset()
+	publishArgs := append([]string{"proposal", "publish", view.ID}, common...)
+	if exitCode := Run(context.Background(), publishArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"published"`) {
+		t.Fatalf("proposal publish exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	}
 }
 
 func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {

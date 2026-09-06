@@ -126,6 +126,17 @@ func (store *store) readApply(id string) (ApplyReceipt, error) {
 	return receipt, nil
 }
 
+func (store *store) readPublication(id string) (PublicationReceipt, error) {
+	var receipt PublicationReceipt
+	if !validID.MatchString(id) {
+		return receipt, ErrNotFound
+	}
+	if err := store.readJSON("publications", id+".json", &receipt); err != nil {
+		return receipt, err
+	}
+	return receipt, nil
+}
+
 func (store *store) proposalIDs() ([]string, error) {
 	directory := filepath.Join(store.root, "proposals")
 	if err := validatePrivateDirectory(directory); err != nil {
@@ -210,6 +221,11 @@ func validateStoredState(name string, target any) error {
 			!validHash(value.Baseline.FileHash) || value.Baseline.Head == "" || value.Baseline.Blob == "" || !validHash(value.PostState.FileHash) {
 			return errors.New("invalid apply receipt")
 		}
+	case *PublicationReceipt:
+		if value.SchemaVersion != 1 || value.ProposalID != id || value.Revision != 1 || value.Status != "published" || value.PublishedAt.IsZero() ||
+			value.MemoryRoot == "" || value.Target.Path == "" || value.Target.SectionID == "" || value.Branch == "" || value.Parent == "" || value.Commit == "" || value.Blob == "" {
+			return errors.New("invalid publication receipt")
+		}
 	default:
 		return errors.New("unsupported proposal state")
 	}
@@ -243,6 +259,14 @@ func (store *store) writeApply(receipt ApplyReceipt) error {
 		return err
 	}
 	return store.durableWrite("applies", receipt.ProposalID+".json", encoded)
+}
+
+func (store *store) writePublication(receipt PublicationReceipt) error {
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	return store.durableWrite("publications", receipt.ProposalID+".json", encoded)
 }
 
 func (store *store) finishApply(id string) error {
