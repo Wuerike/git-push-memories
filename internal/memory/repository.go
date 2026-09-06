@@ -164,6 +164,78 @@ func (repository *Repository) Preview(ctx context.Context, request PreviewReques
 	return preview, err
 }
 
+func (repository *Repository) ReconcileApply(ctx context.Context, request ReconcileRequest) (ReconcileResult, error) {
+	var result ReconcileResult
+	err := repository.withLock(ctx, true, func() error {
+		if request.Preflight != nil {
+			if err := request.Preflight(); err != nil {
+				return err
+			}
+		}
+		canonicalPath, current, mode, err := repository.read(request.Target.Path)
+		if err != nil {
+			return err
+		}
+		head, blob, err := repository.gitIdentity(ctx, canonicalPath)
+		if err != nil || head != request.Head || blob != request.Blob {
+			return ErrDrift
+		}
+		baseline, err := repository.gitOutput(ctx, "cat-file", "blob", request.Blob)
+		if err != nil || hash(baseline) != request.BaselineHash {
+			return ErrDrift
+		}
+		parsed, err := validateDocument(baseline)
+		if err != nil {
+			return err
+		}
+		postState, err := replaceSection(baseline, parsed, request.Target.SectionID, request.Replacement)
+		if err != nil {
+			return err
+		}
+		if hash(postState) != request.PostStateHash {
+			return ErrDrift
+		}
+		result = ReconcileResult{
+			Target:   memoryTarget(canonicalPath, request.Target.SectionID),
+			Baseline: append([]byte(nil), baseline...), PostState: postState,
+		}
+		if request.Validate != nil {
+			if err := request.Validate(result.Baseline, result.PostState); err != nil {
+				return err
+			}
+		}
+		switch hash(current) {
+		case request.PostStateHash:
+			result.State = ReconcilePostState
+			return nil
+		case request.BaselineHash:
+			result.State = ReconcileBaseline
+			if request.Mode == ReconcileOnly {
+				return nil
+			}
+			if err := repository.ensureTargetClean(ctx, canonicalPath, request.Head); err != nil {
+				return err
+			}
+			_, confirmed, _, err := repository.read(canonicalPath)
+			if err != nil || hash(confirmed) != request.BaselineHash {
+				return ErrDrift
+			}
+			if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, repository.fault); err != nil {
+				return fmt.Errorf("write memory file: %w", err)
+			}
+			result.State = ReconcilePostState
+			return nil
+		default:
+			return ErrDrift
+		}
+	})
+	return result, err
+}
+
+func memoryTarget(path, sectionID string) Target {
+	return Target{Path: path, SectionID: sectionID}
+}
+
 func (repository *Repository) apply(ctx context.Context, change ChangeSet) (Receipt, error) {
 	if err := ctx.Err(); err != nil {
 		return Receipt{}, err

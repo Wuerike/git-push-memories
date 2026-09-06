@@ -1,6 +1,7 @@
 package proposal_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
@@ -146,6 +147,385 @@ func TestRejectIsClosedDurableAndIdempotent(t *testing.T) {
 	review, err := workflow.Review(view.ID)
 	if err != nil || review.Decision == nil || !reflect.DeepEqual(*review.Decision, receipt) {
 		t.Fatalf("Review() after reject = %+v, %v", review, err)
+	}
+}
+
+func TestApplyExactRevisionIsDurableAndIdempotent(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\n- timeout: tres segundos\n- owner: team-b\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.ProposalID != view.ID || receipt.Revision != 1 || receipt.Status != "applied_unpublished" ||
+		receipt.Target != view.Operation.Target || receipt.Baseline != view.Baseline || receipt.PostState != view.PostState {
+		t.Fatalf("Apply() receipt = %+v", receipt)
+	}
+	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	applied, err := os.ReadFile(pagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(applied), "timeout: tres segundos") || strings.Contains(string(applied), "timeout: cinco segundos") {
+		t.Fatalf("Apply() contents = %q", applied)
+	}
+	repeated, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(receipt, repeated) {
+		t.Fatalf("repeated Apply() = %+v, want %+v", repeated, receipt)
+	}
+	afterRepeat, err := os.ReadFile(pagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(applied, afterRepeat) {
+		t.Fatal("repeated Apply() rewrote memory")
+	}
+	stored, err := workflow.Applied(view.ID)
+	if err != nil || !reflect.DeepEqual(stored, receipt) {
+		t.Fatalf("Applied() = %+v, %v", stored, err)
+	}
+	review, err := workflow.Review(view.ID)
+	if err != nil || review.Applied == nil || !reflect.DeepEqual(*review.Applied, receipt) {
+		t.Fatalf("Review() after apply = %+v, %v", review, err)
+	}
+	assertMode(t, filepath.Join(stateRoot, "applies", view.ID+".json"), 0o600)
+	if _, err := os.Stat(filepath.Join(stateRoot, "proposals", view.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("Apply() retained proposal payload")
+	}
+}
+
+func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(t *testing.T, memoryRoot, stateRoot string, view proposal.View)
+		want   error
+	}{
+		{
+			name: "drift outside section",
+			mutate: func(t *testing.T, memoryRoot, _ string, _ proposal.View) {
+				path := filepath.Join(memoryRoot, "services", "checkout-api.md")
+				if err := os.WriteFile(path, []byte(initialPage+"\noutside\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			},
+			want: memory.ErrDrift,
+		},
+		{
+			name: "tampered diff",
+			mutate: func(t *testing.T, _ string, stateRoot string, view proposal.View) {
+				editStoredProposal(t, stateRoot, view.ID, func(stored *proposal.View) { stored.Diff += "tampered" })
+			},
+			want: proposal.ErrIntegrity,
+		},
+		{
+			name: "sensitive replacement",
+			mutate: func(t *testing.T, _ string, stateRoot string, view proposal.View) {
+				editStoredProposal(t, stateRoot, view.ID, func(stored *proposal.View) {
+					stored.Operation.Replacement = "Authorization: Bearer secret"
+				})
+			},
+			want: proposal.ErrIntegrity,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memoryRoot := newMemoryRoot(t)
+			codeRoot := newCodeRoot(t)
+			stateRoot := filepath.Join(t.TempDir(), "state")
+			workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = workflow.Close() })
+			view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(t, memoryRoot, stateRoot, view)
+			before, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, test.want) {
+				t.Fatalf("Apply() error = %v, want %v", err, test.want)
+			}
+			after, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("failed Apply() changed memory")
+			}
+		})
+	}
+
+	memoryRoot := newMemoryRoot(t)
+	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision+1); !errors.Is(err, proposal.ErrWrongRevision) {
+		t.Fatalf("Apply() wrong revision error = %v", err)
+	}
+}
+
+func editStoredProposal(t *testing.T, stateRoot, id string, edit func(*proposal.View)) {
+	t.Helper()
+	path := filepath.Join(stateRoot, "proposals", id+".json")
+	encoded, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var view proposal.View
+	if err := json.Unmarshal(encoded, &view); err != nil {
+		t.Fatal(err)
+	}
+	edit(&view)
+	encoded, err = json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyAndRejectRaceHasOneTerminalReceipt(t *testing.T) {
+	for iteration := range 64 {
+		memoryRoot := newMemoryRoot(t)
+		codeRoot := newCodeRoot(t)
+		stateRoot := filepath.Join(t.TempDir(), "state")
+		workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+		if err != nil {
+			t.Fatal(err)
+		}
+		view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		start := make(chan struct{})
+		results := make(chan error, 2)
+		go func() {
+			<-start
+			_, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+			results <- err
+		}()
+		go func() {
+			<-start
+			_, err := workflow.Reject(view.ID, "incorrect")
+			results <- err
+		}()
+		close(start)
+		first, second := <-results, <-results
+		if (first == nil) == (second == nil) || (first != nil && !errors.Is(first, proposal.ErrTerminal)) || (second != nil && !errors.Is(second, proposal.ErrTerminal)) {
+			t.Fatalf("iteration %d race errors = %v, %v", iteration, first, second)
+		}
+		_, applyErr := os.Stat(filepath.Join(stateRoot, "applies", view.ID+".json"))
+		_, rejectErr := os.Stat(filepath.Join(stateRoot, "decisions", view.ID+".json"))
+		if (applyErr == nil) == (rejectErr == nil) {
+			t.Fatalf("iteration %d terminal receipts: apply=%v reject=%v", iteration, applyErr, rejectErr)
+		}
+		contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if applyErr == nil && !strings.Contains(string(contents), "\ncurrent\n") {
+			t.Fatalf("iteration %d apply won without post-state", iteration)
+		}
+		if rejectErr == nil && string(contents) != initialPage {
+			t.Fatalf("iteration %d reject won with changed memory", iteration)
+		}
+		if err := workflow.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestStartupReconcilesPostStateWithoutApplyReceipt(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.Close(); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := memory.New(memoryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.Apply(context.Background(), memory.ChangeSet{
+		Target:       memory.Target{Path: view.Operation.Target.Path, SectionID: view.Operation.Target.SectionID},
+		BaselineHash: view.Baseline.FileHash, Replacement: view.Operation.Replacement,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	receipt, err := restarted.Applied(view.ID)
+	if err != nil || receipt.ProposalID != view.ID || receipt.Status != "applied_unpublished" {
+		t.Fatalf("startup Applied() = %+v, %v", receipt, err)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, "proposals", view.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("startup recovery retained proposal payload")
+	}
+}
+
+func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		mutate func(t *testing.T, memoryRoot string)
+	}{
+		{name: "baseline", mutate: func(*testing.T, string) {}},
+		{name: "drift", mutate: func(t *testing.T, memoryRoot string) {
+			path := filepath.Join(memoryRoot, "services", "checkout-api.md")
+			if err := os.WriteFile(path, []byte(initialPage+"\ndrift\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			memoryRoot := newMemoryRoot(t)
+			codeRoot := newCodeRoot(t)
+			stateRoot := filepath.Join(t.TempDir(), "state")
+			workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := workflow.Close(); err != nil {
+				t.Fatal(err)
+			}
+			test.mutate(t, memoryRoot)
+			before, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			if _, err := restarted.Applied(view.ID); !errors.Is(err, proposal.ErrNotApplied) {
+				t.Fatalf("startup Applied() error = %v", err)
+			}
+			after, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(before, after) {
+				t.Fatal("startup changed baseline or drift")
+			}
+		})
+	}
+}
+
+func TestBaselineRestoredAfterInterruptedApplyRemainsEligible(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository, err := memory.New(memoryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.Apply(context.Background(), memory.ChangeSet{
+		Target:       memory.Target{Path: view.Operation.Target.Path, SectionID: view.Operation.Target.SectionID},
+		BaselineHash: view.Baseline.FileHash, Replacement: view.Operation.Replacement,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memoryRoot, "services", "checkout-api.md"), []byte(initialPage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), "\ncurrent\n") {
+		t.Fatal("retry did not apply after baseline was restored")
+	}
+}
+
+func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := workflow.Prepare(context.Background(), allowedCandidate(t, "\ncurrent\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposalPath := filepath.Join(stateRoot, "proposals", view.ID+".json")
+	payload, err := os.ReadFile(proposalPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(proposalPath, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	if _, err := os.Stat(proposalPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("startup retained payload after durable apply receipt")
 	}
 }
 

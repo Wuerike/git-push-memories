@@ -64,11 +64,15 @@ func TestRepeatedRejectFinishesCleanupAfterDurableReceipt(t *testing.T) {
 	id := "0123456789abcdef0123456789abcdef"
 	hash := "sha256:" + strings.Repeat("0", 64)
 	view := View{
-		SchemaVersion: 1, ID: id, Revision: 1, Status: "pending", CreatedAt: time.Unix(1, 0).UTC(),
+		SchemaVersion: 1, ID: id, Nonce: id, Revision: 1, Status: "pending", CreatedAt: time.Unix(1, 0).UTC(),
 		Operation: Operation{Type: "replace_section_content", Target: Target{Path: "a.md", SectionID: "a"}},
 		Baseline:  Baseline{FileHash: hash, Head: "head", Blob: "blob"}, PostState: PostState{FileHash: hash},
 		Diff: "diff", SourcePaths: []string{},
 	}
+	if err := sealProposal(&view); err != nil {
+		t.Fatal(err)
+	}
+	id = view.ID
 	if err := store.writeProposal(view); err != nil {
 		t.Fatal(err)
 	}
@@ -87,5 +91,49 @@ func TestRepeatedRejectFinishesCleanupAfterDurableReceipt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "proposals", id+".json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("Reject() did not finish payload cleanup")
+	}
+}
+
+func TestStartupCleanupDoesNotRemoveAnActiveTemporary(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	store, err := newStore(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	store.fault = func(stage string) error {
+		if stage == "before_rename" {
+			close(entered)
+			<-release
+		}
+		return nil
+	}
+	view := View{ID: "0123456789abcdef0123456789abcdef"}
+	writeDone := make(chan error, 1)
+	go func() { writeDone <- store.writeProposal(view) }()
+	<-entered
+	cleanupStarted := make(chan struct{})
+	cleanupDone := make(chan error, 1)
+	go func() {
+		close(cleanupStarted)
+		_, err := newStore(root, true)
+		cleanupDone <- err
+	}()
+	<-cleanupStarted
+	select {
+	case err := <-cleanupDone:
+		t.Fatalf("startup cleanup did not wait for active write: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	if err := <-writeDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-cleanupDone; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "proposals", view.ID+".json")); err != nil {
+		t.Fatal("startup cleanup removed published proposal")
 	}
 }

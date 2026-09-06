@@ -136,7 +136,13 @@ A mesma recuperação também pode ser chamada diretamente pela CLI:
 go run ./cmd/git-push-memories retrieve "checkout timeout team" --memory-root /path/to/memory --code-root /path/to/code --budget-bytes 2048
 ```
 
-Propostas pendentes podem ser revisadas ou rejeitadas pela CLI com `proposal show` e `proposal reject`. Esses comandos exigem `--memory-root`, `--code-root` e um `--state-root` privado fora dos dois repositórios. Apply e publicação serão acrescentados nos próximos incrementos da Fase 2.
+Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `proposal show`, `proposal reject` e `proposal apply`. Esses comandos exigem `--memory-root`, `--code-root` e um `--state-root` privado fora dos dois repositórios. Apply exige a revisão exata, por exemplo:
+
+```bash
+go run ./cmd/git-push-memories proposal apply <proposal-id> --revision 1 --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
+```
+
+O apply deixa a atualização como `applied_unpublished`; a publicação em commit Git será acrescentada em T7.
 
 ## Licença
 

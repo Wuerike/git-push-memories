@@ -9,6 +9,9 @@ var (
 	ErrNotFound      = errors.New("proposal not found")
 	ErrInvalidReason = errors.New("invalid rejection reason")
 	ErrNotApplied    = errors.New("proposal was not applied")
+	ErrWrongRevision = errors.New("proposal revision does not match")
+	ErrTerminal      = errors.New("proposal already has a terminal decision")
+	ErrIntegrity     = errors.New("proposal integrity check failed")
 )
 
 type Target struct {
@@ -35,6 +38,7 @@ type PostState struct {
 type View struct {
 	SchemaVersion int       `json:"schema_version"`
 	ID            string    `json:"id"`
+	Nonce         string    `json:"nonce"`
 	Revision      int       `json:"revision"`
 	Status        string    `json:"status"`
 	CreatedAt     time.Time `json:"created_at"`
@@ -43,6 +47,7 @@ type View struct {
 	PostState     PostState `json:"post_state"`
 	Diff          string    `json:"diff"`
 	SourcePaths   []string  `json:"source_paths"`
+	IntegrityHash string    `json:"integrity_hash"`
 }
 
 type DecisionReceipt struct {
@@ -57,6 +62,17 @@ type DecisionReceipt struct {
 type Review struct {
 	Proposal *View            `json:"proposal,omitempty"`
 	Decision *DecisionReceipt `json:"decision,omitempty"`
+	Applied  *ApplyReceipt    `json:"applied,omitempty"`
 }
 
-type ApplyReceipt struct{}
+type ApplyReceipt struct {
+	SchemaVersion int       `json:"schema_version"`
+	ProposalID    string    `json:"proposal_id"`
+	Revision      int       `json:"revision"`
+	Status        string    `json:"status"`
+	AppliedAt     time.Time `json:"applied_at"`
+	MemoryRoot    string    `json:"memory_root"`
+	Target        Target    `json:"target"`
+	Baseline      Baseline  `json:"baseline"`
+	PostState     PostState `json:"post_state"`
+}

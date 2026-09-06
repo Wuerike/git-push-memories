@@ -63,3 +63,36 @@ type Preview struct {
 	Baseline      []byte
 	PostState     []byte
 }
+
+type ReconcileRequest struct {
+	Target        Target
+	Replacement   string
+	BaselineHash  string
+	PostStateHash string
+	Head          string
+	Blob          string
+	Preflight     func() error
+	Validate      func(baseline, postState []byte) error
+	Mode          ReconcileMode
+}
+
+type ReconcileMode uint8
+
+const (
+	ReconcileOnly ReconcileMode = iota
+	ApplyBaseline
+)
+
+type ReconcileState uint8
+
+const (
+	ReconcileBaseline ReconcileState = iota + 1
+	ReconcilePostState
+)
+
+type ReconcileResult struct {
+	Target    Target
+	Baseline  []byte
+	PostState []byte
+	State     ReconcileState
+}

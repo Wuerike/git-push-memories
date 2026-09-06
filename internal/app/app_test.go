@@ -172,6 +172,24 @@ func TestProposalShowAndRejectCommands(t *testing.T) {
 	if exitCode := Run(context.Background(), rejectArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"rejected"`) {
 		t.Fatalf("proposal reject exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
 	}
+
+	workflow, err = proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err = workflow.Prepare(context.Background(), allowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	applyArgs := append([]string{"proposal", "apply", view.ID, "--revision", "1"}, common...)
+	if exitCode := Run(context.Background(), applyArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"applied_unpublished"`) {
+		t.Fatalf("proposal apply exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
+	}
 }
 
 func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
