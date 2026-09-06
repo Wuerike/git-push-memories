@@ -105,6 +105,8 @@ A fase termina quando existir uma base escolhida ou uma justificativa explícita
 
 ## Fase 2: Fluxo vertical mínimo
 
+**Plano executável:** [Plano da Fase 2](phase-2/plan.md).
+
 ### Resultado esperado
 
 Demonstrar, de ponta a ponta, que conhecimento descoberto em uma sessão pode melhorar uma tarefa executada em outra sessão.
