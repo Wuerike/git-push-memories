@@ -66,13 +66,36 @@ func validateOps(src []byte, ops []SpliceOp) error {
 
 // ReplaceSectionContent replaces only the body after the heading and anchor.
 func ReplaceSectionContent(src []byte, section Section, replacement []byte) ([]byte, error) {
-	bodyStart := section.HeadingEnd
-	if section.AnchorID != "" {
-		bodyStart = headingLineEnd(src, bodyStart)
+	bodyStart, err := sectionBodyStart(src, section)
+	if err != nil {
+		return nil, err
 	}
 	return Splice(src, []SpliceOp{{
 		ByteStart:   bodyStart,
 		ByteEnd:     section.ByteEnd,
 		Replacement: replacement,
 	}})
+}
+
+// SectionContent returns a copy of the section body without its heading or anchor.
+func SectionContent(src []byte, section Section) ([]byte, error) {
+	bodyStart, err := sectionBodyStart(src, section)
+	if err != nil {
+		return nil, err
+	}
+	if section.ByteEnd < bodyStart || section.ByteEnd > len(src) {
+		return nil, fmt.Errorf("section has invalid body bounds")
+	}
+	return append([]byte(nil), src[bodyStart:section.ByteEnd]...), nil
+}
+
+func sectionBodyStart(src []byte, section Section) (int, error) {
+	if section.ByteStart < 0 || section.HeadingEnd < section.ByteStart || section.HeadingEnd > len(src) {
+		return 0, fmt.Errorf("section has invalid heading bounds")
+	}
+	bodyStart := section.HeadingEnd
+	if section.AnchorID != "" {
+		bodyStart = headingLineEnd(src, bodyStart)
+	}
+	return bodyStart, nil
 }

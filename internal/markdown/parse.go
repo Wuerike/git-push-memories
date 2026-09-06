@@ -1,7 +1,8 @@
 // Adapted from xChuCx/agent-memory internal/markdown/parse.go at
 // 51dac9bf6e72c67f6314ee3abb00515986a3fa4a (blob e4cde2d405d112a67b607f0e0f8a3747b81a76e3).
 // Copyright 2026 Teterichev Anton. Licensed under Apache-2.0.
-// Modified by git-push-memories: anchors are strict and duplicate IDs fail parsing.
+// Modified by git-push-memories: anchors are strict, duplicate IDs fail parsing,
+// and frontmatter is excluded from section identity.
 
 // Package markdown implements byte-preserving Markdown parsing and editing.
 package markdown
@@ -35,7 +36,8 @@ type Section struct {
 // ParseSections returns sections with byte offsets in document order.
 func ParseSections(src []byte) ([]Section, error) {
 	md := goldmark.New()
-	doc := md.Parser().Parse(text.NewReader(src))
+	parseSource := maskFrontmatter(src)
+	doc := md.Parser().Parse(text.NewReader(parseSource))
 
 	type headingInfo struct {
 		text       string
@@ -104,6 +106,35 @@ func ParseSections(src []byte) ([]Section, error) {
 		}
 	}
 	return sections, nil
+}
+
+func maskFrontmatter(src []byte) []byte {
+	firstEnd := headingLineEnd(src, 0)
+	if !isFrontmatterDelimiter(src[:firstEnd]) {
+		return src
+	}
+	for lineStart := firstEnd; lineStart < len(src); {
+		lineEnd := headingLineEnd(src, lineStart)
+		if isFrontmatterDelimiter(src[lineStart:lineEnd]) || isFrontmatterEnd(src[lineStart:lineEnd]) {
+			masked := append([]byte(nil), src...)
+			for i := 0; i < lineEnd; i++ {
+				if masked[i] != '\n' && masked[i] != '\r' {
+					masked[i] = ' '
+				}
+			}
+			return masked
+		}
+		lineStart = lineEnd
+	}
+	return src
+}
+
+func isFrontmatterDelimiter(line []byte) bool {
+	return string(bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))) == "---"
+}
+
+func isFrontmatterEnd(line []byte) bool {
+	return string(bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))) == "..."
 }
 
 // FindByID returns the section with id, if one exists.

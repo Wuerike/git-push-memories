@@ -8,7 +8,7 @@
 - Upstream `NOTICE`: none at the recorded revision.
 - Incorporated source: only `internal/markdown/parse.go`, `internal/markdown/splice.go`, and `internal/markdown/section_id.go`.
 - Original blobs: `e4cde2d405d112a67b607f0e0f8a3747b81a76e3`, `36c81a926fbd97d89039ffa03d963a1ecc501c12`, and `aa801f90ce4ab852f7771000d9e0f81b648fbff6`, respectively.
-- Modifications: strict canonical immediate anchors; duplicate-ID rejection; explicit heading syntax offsets including Setext; body-only replacement; removal of automatic anchor insertion; local names and diagnostics.
+- Modifications: strict canonical immediate anchors; duplicate-ID rejection; explicit heading syntax offsets including Setext; frontmatter masking for section identity; body-only replacement; removal of automatic anchor insertion; local names and diagnostics.
 
 No upstream tests, fixtures, `validate.go`, `merge.go`, or other agent-memory source is incorporated.
 
