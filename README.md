@@ -121,6 +121,8 @@ O [E2E sintetico da Fase 2](docs/phase-2/e2e-synthetic.md) executa o fluxo compl
 
 O [experimento controlado de valor](docs/phase-2/value-experiment-protocol.md) usa somente fixtures sinteticos versionados e sessoes autenticadas isoladas para comparar tres pares com e sem memoria.
 
+O [relatorio do experimento](docs/phase-2/value-experiment-report.md) registra a decisao pre-registrada `revisar o fluxo`: correcao foi preservada, mas o limiar por pares nao foi atingido com consistencia suficiente para iniciar a Fase 3.
+
 O servidor MCP exige dois worktrees Git distintos e explícitos:
 
 ```bash

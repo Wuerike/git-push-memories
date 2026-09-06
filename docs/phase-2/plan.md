@@ -16,7 +16,7 @@ captura explicita no Claude Code
 -> recuperacao textual em outro processo
 ```
 
-A fase possui dois gates. O gate tecnico usa um corpus sintetico reproduzivel. O gate de valor usa uma descoberta real e compara uma tarefa com e sem a memoria recuperada. Passar somente o gate tecnico nao conclui a fase.
+A fase possui dois gates. O gate tecnico usa um corpus sintetico reproduzivel. O gate de valor usa inferencia autenticada sobre uma descoberta pre-registrada, que pode pertencer a um benchmark sintetico publico, e compara uma tarefa com e sem a memoria recuperada. Passar somente o gate tecnico nao conclui a fase.
 
 ## Fontes de decisao
 
