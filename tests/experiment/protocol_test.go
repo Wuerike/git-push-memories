@@ -16,6 +16,7 @@ import (
 
 type protocol struct {
 	SchemaVersion int               `json:"schema_version"`
+	Seed          string            `json:"randomization_seed"`
 	Model         string            `json:"model"`
 	Effort        string            `json:"effort"`
 	PrimaryMetric string            `json:"primary_metric"`
@@ -44,7 +45,7 @@ func TestValueExperimentProtocolIsFrozenAndSelfConsistent(t *testing.T) {
 		t.Fatalf("pair count = %d", len(registered.Pairs))
 	}
 	for index, pair := range registered.Pairs {
-		hash := sha256.Sum256([]byte("gpm-value-v1:" + string(rune('1'+index))))
+		hash := sha256.Sum256([]byte(registered.Seed + ":" + string(rune('1'+index))))
 		order := []string{"control", "treatment"}
 		if hash[0]%2 == 1 {
 			order = []string{"treatment", "control"}

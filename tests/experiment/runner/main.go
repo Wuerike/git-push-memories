@@ -279,6 +279,9 @@ func (r *runner) execute() error {
 		evidence := runMeasured(r.ctx, r.repository, nil, registered.name, registered.executable, registered.arguments...)
 		verification = append(verification, evidence)
 		verificationMS += evidence.DurationMS
+		if err := writeJSON(filepath.Join(r.evidence, "verification.json"), verification); err != nil {
+			return errors.New("persist pre-run verification")
+		}
 		if evidence.ExitCode != 0 {
 			return errors.New("pre-run verification failed")
 		}

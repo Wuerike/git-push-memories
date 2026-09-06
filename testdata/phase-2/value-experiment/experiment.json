@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "experiment_id": "parcel-dispatch-value-v1",
-  "randomization_seed": "gpm-value-v1",
+  "experiment_id": "parcel-dispatch-value-v2",
+  "randomization_seed": "gpm-value-v2b",
   "model": "sonnet",
   "claude_code_version": "2.1.263",
   "effort": "medium",
@@ -42,9 +42,9 @@
     "hidden_evaluator": "090889185387b84eef911da287b27caefdcbe8f0d31493bbb33f875d2337adda"
   },
   "pairs": [
-    {"pair": 1, "order_hash": "53f63fbd48498a9bf2cc9b19a27cb5fc0161d80ff2ec282c105ea9ba00714a6d", "order": ["treatment", "control"]},
-    {"pair": 2, "order_hash": "0a7e2aab891570ec642d723bc97677b002e183452d08fa98111ea6fd3a27d8a3", "order": ["control", "treatment"]},
-    {"pair": 3, "order_hash": "05bf35432a6c8226b59dd8ed17ca30480a2e6e3e351dd1fe38bacb1cf7bf9c6f", "order": ["treatment", "control"]}
+    {"pair": 1, "order_hash": "9ff5e0a52852fe84ba6269874603a8274622e6948391a4e3a3e0346402df8236", "order": ["treatment", "control"]},
+    {"pair": 2, "order_hash": "a28b2c560193f01fde917d1fa21cce65e0ea43cd56b7fc9ea5eb9de975f4bda9", "order": ["control", "treatment"]},
+    {"pair": 3, "order_hash": "d4cff12e1fb97b55238828c03cef436415c900f3ea7154abf6dae4d461554a7b", "order": ["control", "treatment"]}
   ],
   "decision_rule": {
     "continue": "Treatment passes the correctness gate in every pair, never scores below control, and improves the primary metric by at least 25% in at least two pairs.",

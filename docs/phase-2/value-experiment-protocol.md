@@ -20,7 +20,7 @@ A sessao A deve distinguir estado atual de historico e propor a pagina `domains/
 - A credencial OAuth existente e copiada com modo `0600` somente para um diretorio `tmpfs` por run e removida assim que o processo termina. Credencial, config e estado de sessao nunca entram na evidencia.
 - Claude Code usa `--no-session-persistence`, MCP estrito, permission prompts desabilitados e allowlist de tools. Nao sao carregados hooks, skills ou settings do usuario/projeto.
 - Tratamento recebe `memory_search`/`memory_expand` sobre a memoria publicada e nega `memory_propose_replace`. Controle recebe um MCP config vazio. Prompt, system prompt, modelo, tools de codigo e budgets sao identicos.
-- A ordem vem de SHA-256 de `gpm-value-v1:<pair>`: primeiro byte impar coloca tratamento primeiro; primeiro byte par coloca controle primeiro. Os tres resultados congelados sao tratamento-controle, controle-tratamento e tratamento-controle.
+- A ordem v2 vem de SHA-256 de `gpm-value-v2b:<pair>`: primeiro byte impar coloca tratamento primeiro; primeiro byte par coloca controle primeiro. Os tres resultados congelados sao tratamento-controle, controle-tratamento e controle-tratamento.
 - Respostas e eventos Claude sao consumidos em memoria. O parser retira somente modelo, duracao, custo, turnos e contagens de tools; texto, inputs e resultados nao sao gravados.
 
 ## Avaliacao cega
@@ -46,7 +46,11 @@ O limiar e reducao de pelo menos 25% em dois dos tres pares. `continuar` exige t
 
 O runner recusa worktree sujo e evidence root existente. Um ledger local impede repetir seletivamente o mesmo protocolo depois de observar resultados. Runs extras exigem novo experiment ID, seed, protocolo e commit.
 
-A evidencia preserva apenas `report.json` e `checksums.sha256`. Nao preserva prompt, resposta, transcript, stream Claude, stderr, credencial, config temporaria, state root, diff bruto ou conteudo de arquivos modificados. O report contem configuracao normalizada, comandos e duracoes separados para testes, race, vet, build e fault injection, versoes, criterio de ranking, hashes dos fixtures, inventario inicial de paths, trees/index/diff da memoria, paths e hashes dos resultados e a rubrica cega.
+A evidencia preserva `verification.json`, `report.json` e `checksums.sha256`. Nao preserva prompt, resposta, transcript, stream Claude, stderr, credencial, config temporaria, state root, diff bruto ou conteudo de arquivos modificados. `verification.json` e atualizado antes da primeira inferencia depois de cada check. O report contem configuracao normalizada, comandos e duracoes separados para testes, race, vet, build e fault injection, versoes, criterio de ranking, hashes dos fixtures, inventario inicial de paths, trees/index/diff da memoria, paths e hashes dos resultados e a rubrica cega.
+
+## Tentativa operacional v1
+
+O protocolo `parcel-dispatch-value-v1`, congelado em `c56dc3d3bd9f6e7d81079da4f6667081ccfa8792`, abortou no preflight antes de iniciar qualquer processo Claude. Seu evidence root permaneceu vazio e nenhum outcome foi observado. O ledger local foi preservado como `started`; v1 nao sera repetido. A v2 altera experiment ID, seed e ordem e adiciona evidencia incremental dos checks de preflight, sem mudar hipotese, tarefa, rubrica ou limiar.
 
 ## Execucao
 
@@ -58,4 +62,4 @@ tests/experiment/run-phase-2-value.sh
 
 O runner pode consumir ate USD 7 pelo limite pre-registrado, embora ambientes por assinatura possam nao reportar custo marginal. A execucao termina sem publicar nada fora dos repositorios Git descartaveis locais.
 
-O hash atual de `experiment.json` e `2be41ac82974b4abef8d93c493e1b5c747bd01d9989ca5c31fa0af1683156b05`. Resultados serao registrados em `docs/phase-2/value-experiment-report.md` somente depois de concluida a avaliacao pre-registrada.
+O hash atual de `experiment.json` e `46249d8fcf9258e165a7ce9f0e4d809e702f407506d4109442762ce0574da281`. Resultados serao registrados em `docs/phase-2/value-experiment-report.md` somente depois de concluida a avaliacao pre-registrada.
