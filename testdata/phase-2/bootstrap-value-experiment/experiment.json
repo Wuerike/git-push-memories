@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "experiment_id": "parcel-dispatch-bootstrap-value-v1",
+  "randomization_seed": "gpm-bootstrap-value-v1",
+  "model": "sonnet",
+  "claude_code_version": "2.1.263",
+  "effort": "medium",
+  "autocompact": "100k",
+  "memory_bootstrap": true,
+  "execution_profile": {
+    "filesystem": "bubblewrap-workspace-only",
+    "session_persistence": false,
+    "setting_sources": [],
+    "permission_mode": "acceptEdits",
+    "permission_prompts": "none",
+    "strict_mcp_config": true,
+    "network": "shared-for-authenticated-inference",
+    "session_a_tools": ["mcp__git-push-memories__memory_search", "mcp__git-push-memories__memory_expand", "mcp__git-push-memories__memory_propose_create_page"],
+    "session_a_denied_tools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Task", "mcp__git-push-memories__memory_propose_create_section", "mcp__git-push-memories__memory_propose_replace"],
+    "task_tools": ["Read", "Grep", "Glob", "Edit", "Write", "Bash(go test ./...)", "Bash(gofmt *)", "mcp__git-push-memories__memory_search", "mcp__git-push-memories__memory_expand"],
+    "task_denied_tools": ["WebFetch", "WebSearch", "Task", "mcp__git-push-memories__memory_propose_create_page", "mcp__git-push-memories__memory_propose_create_section", "mcp__git-push-memories__memory_propose_replace"]
+  },
+  "max_budget_usd_per_session": 1.0,
+  "memory_search_budget_bytes": 2048,
+  "primary_metric": "task_duration_ms",
+  "improvement_threshold": 0.25,
+  "required_improved_pairs": 2,
+  "human_turns": ["create a root page", "confirm"],
+  "fixture_hashes": {
+    "session_a": "98748ebe28f289a0f052c08a96561bceb1e2fa43e634ebf04dda296b2b21ebb5",
+    "session_a_system": "26b283478c0e9e2384d07a48cfe8407f0cdc6a0a447fac4fb401f898c6d3ea07",
+    "remember_skill": "bc5dd192fc853124f007f1a6f2ef64085a13ff8bb666aad091955632525706d9",
+    "task": "d3b3e31e59a365566b21783fbce05a6b7865d13ae2d019ead4797c17d7246827",
+    "task_system": "c69a6ec2f84b1e5c37190bf755c1096553b93a1ba59596f685e7a2193e79e4de",
+    "rubric": "e56e673d4d0fc54daa8eaeb1065e7a5b1aa57eb102a45dc2e5c2e00c22b0e69d",
+    "memory_expected": "112a7947bc2a86ff565df5ff83c5f6052897851f5116076b02e7f9787ee33acf",
+    "code_go_mod": "8696520b7d890425e4aaedec901abcd7732a68be54685a09c85a98cf8f93286f",
+    "policy_initial": "46c315b71853db1aa3b0559184b5e323c8655840c37ed86b3c8f0eeea0ccf013",
+    "policy_public_test": "a427448e2abc3342a3d15aaa38f6a839cf6a2a250b6f41e92b8c878b0bd20601",
+    "current_alerts": "7c6c58bb66a27f47a467e6250d624a9542912d3157d8abbe2dd63d2282e356e4",
+    "queue_ownership": "fe5c96bce1d0ccd35b0f125bdf0e7c9ff613235cbc7637509ccd24f98370f399",
+    "legacy_policy": "e1ce067fe4d217a9d09854bbcffc4539dfe76b055bd5f5420595b78db04129aa",
+    "hidden_evaluator": "090889185387b84eef911da287b27caefdcbe8f0d31493bbb33f875d2337adda"
+  },
+  "pairs": [
+    {"pair": 1, "order_hash": "da84dee8fca1c8b3b86d1bef632477eefc574c6b623e04487f30699d19c3cfe4", "order": ["control", "treatment"]},
+    {"pair": 2, "order_hash": "06c65e3dd9683e24219de5356cccb7a2f62eaa119f4d2520fe168d14b881620e", "order": ["control", "treatment"]},
+    {"pair": 3, "order_hash": "a3ca26942f136454e46032ced02a2ad49f297c6b7bb9480cdecf9223800b3e95", "order": ["treatment", "control"]}
+  ],
+  "decision_rule": {
+    "continue": "Treatment passes the correctness gate in every pair, never scores below control, and improves the primary metric by at least 25% in at least two pairs.",
+    "revise_flow": "Treatment preserves correctness but misses the primary metric threshold, or operational friction invalidates a pair before any result is observed.",
+    "did_not_demonstrate_value": "Treatment regresses correctness or rubric score in any valid pair."
+  }
+}

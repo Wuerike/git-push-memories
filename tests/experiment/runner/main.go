@@ -33,6 +33,8 @@ type experiment struct {
 	Metric        string            `json:"primary_metric"`
 	Threshold     float64           `json:"improvement_threshold"`
 	RequiredPairs int               `json:"required_improved_pairs"`
+	Bootstrap     bool              `json:"memory_bootstrap"`
+	HumanTurns    []string          `json:"human_turns"`
 	Profile       executionProfile  `json:"execution_profile"`
 	FixtureHashes map[string]string `json:"fixture_hashes"`
 	Pairs         []pair            `json:"pairs"`
@@ -64,6 +66,10 @@ type sessionMetric struct {
 	ExplorationCalls int            `json:"code_exploration_tool_calls"`
 	ToolCounts       map[string]int `json:"tool_counts"`
 	MemoryRelevant   bool           `json:"memory_context_relevant"`
+	ChoicePresented  bool           `json:"remember_choice_presented,omitempty"`
+	ReviewPresented  bool           `json:"remember_review_presented,omitempty"`
+	HumanTurns       int            `json:"remember_human_turns,omitempty"`
+	SearchEmpty      bool           `json:"remember_search_empty,omitempty"`
 }
 
 type commandEvidence struct {
@@ -97,6 +103,8 @@ type comparison struct {
 	ControlScore       int     `json:"control_score"`
 	TreatmentCalls     int     `json:"treatment_exploration_calls"`
 	ControlCalls       int     `json:"control_exploration_calls"`
+	TreatmentDuration  int64   `json:"treatment_duration_ms"`
+	ControlDuration    int64   `json:"control_duration_ms"`
 	Improvement        float64 `json:"improvement"`
 	ThresholdMet       bool    `json:"threshold_met"`
 	CorrectnessNoWorse bool    `json:"correctness_no_worse"`
@@ -145,11 +153,14 @@ type runner struct {
 	ctx              context.Context
 	repository       string
 	fixture          string
+	baseFixture      string
 	evidence         string
 	temporary        string
 	authRoot         string
 	credentials      string
 	verificationFile string
+	sourceHash       string
+	preregistration  string
 	binary           string
 	claudeBinary     string
 	protocol         experiment
@@ -163,11 +174,27 @@ func main() {
 }
 
 func runMain() error {
+	printSourceHash := flag.Bool("print-source-hash", false, "print the current non-artifact repository source hash")
 	evidence := flag.String("evidence-root", "", "new directory for sanitized evidence")
 	credentials := flag.String("credentials", filepath.Join(os.Getenv("HOME"), ".claude", ".credentials.json"), "Claude credential source copied only to tmpfs")
 	authRoot := flag.String("auth-root", "", "existing private tmpfs directory controlled by the caller")
 	verificationFile := flag.String("verification-file", "", "sanitized pre-run verification TSV")
+	protocolRoot := flag.String("protocol-root", "", "alternate experiment fixture root")
+	sourceHash := flag.String("source-hash", "", "pre-run hash of bootstrap experiment sources")
+	preregistration := flag.String("preregistration-file", "", "read-only bootstrap pre-run receipt")
 	flag.Parse()
+	if *printSourceHash {
+		repository, err := commandOutput(context.Background(), "", nil, "git", "rev-parse", "--show-toplevel")
+		if err != nil {
+			return errors.New("locate repository")
+		}
+		sourceHash, err := experimentSourceHash(strings.TrimSpace(repository))
+		if err != nil {
+			return err
+		}
+		fmt.Println(sourceHash)
+		return nil
+	}
 	if *evidence == "" {
 		return errors.New("evidence root is required")
 	}
@@ -175,7 +202,7 @@ func runMain() error {
 	defer stop()
 	ctx, cancel := context.WithTimeout(signalContext, 35*time.Minute)
 	defer cancel()
-	r, err := newRunner(ctx, *evidence, *credentials, *authRoot, *verificationFile)
+	r, err := newRunner(ctx, *evidence, *credentials, *authRoot, *verificationFile, *protocolRoot, *sourceHash, *preregistration)
 	if err != nil {
 		return err
 	}
@@ -188,14 +215,14 @@ func runMain() error {
 	return nil
 }
 
-func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot, verificationFile string) (*runner, error) {
+func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot, verificationFile, protocolRoot, sourceHash, preregistration string) (*runner, error) {
 	repository, err := commandOutput(ctx, "", nil, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
 		return nil, errors.New("locate repository")
 	}
 	repository = strings.TrimSpace(repository)
 	status, err := commandOutput(ctx, repository, nil, "git", "status", "--porcelain=v1")
-	if err != nil || status != "" {
+	if err != nil || (status != "" && protocolRoot == "") {
 		return nil, errors.New("experiment requires a clean product worktree")
 	}
 	if _, err := os.Stat(evidence); !errors.Is(err, os.ErrNotExist) {
@@ -229,12 +256,32 @@ func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot, ve
 			_ = os.RemoveAll(authRoot)
 		}
 	}()
+	baseFixture := filepath.Join(repository, "testdata", "phase-2", "value-experiment")
+	fixture := baseFixture
+	if protocolRoot != "" {
+		fixture, err = filepath.Abs(protocolRoot)
+		if err != nil || !strings.HasPrefix(filepath.Clean(fixture), repository+string(filepath.Separator)) {
+			return nil, errors.New("protocol root must be inside repository")
+		}
+	}
 	r := &runner{
-		ctx: ctx, repository: repository, fixture: filepath.Join(repository, "testdata", "phase-2", "value-experiment"),
-		evidence: evidence, temporary: temporary, authRoot: authRoot, credentials: credentials, verificationFile: verificationFile,
+		ctx: ctx, repository: repository, fixture: fixture, baseFixture: baseFixture,
+		evidence: evidence, temporary: temporary, authRoot: authRoot, credentials: credentials, verificationFile: verificationFile, sourceHash: sourceHash, preregistration: preregistration,
 	}
 	if err := decodeFile(filepath.Join(r.fixture, "experiment.json"), &r.protocol); err != nil {
 		return nil, err
+	}
+	if protocolRoot != "" && !r.protocol.Bootstrap {
+		return nil, errors.New("alternate protocol must be a bootstrap experiment")
+	}
+	if r.protocol.Bootstrap {
+		actualSourceHash, hashErr := experimentSourceHash(repository)
+		if hashErr != nil || sourceHash == "" || sourceHash != actualSourceHash {
+			return nil, errors.New("bootstrap experiment source hash mismatch")
+		}
+		if err := r.validatePreregistration(); err != nil {
+			return nil, err
+		}
 	}
 	claudeBinary, err := exec.LookPath("claude")
 	if err != nil {
@@ -258,6 +305,27 @@ func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot, ve
 	return r, nil
 }
 
+func (r *runner) validatePreregistration() error {
+	contents, err := os.ReadFile(r.preregistration)
+	if err != nil {
+		return errors.New("read bootstrap pre-registration")
+	}
+	revision := strings.TrimSpace(mustOutput(r.ctx, r.repository, nil, "git", "rev-parse", "HEAD"))
+	expected := []string{
+		"experiment_id=" + r.protocol.ExperimentID,
+		"status=started",
+		"approved=true",
+		"revision_base=" + revision,
+		"protocol_hash=" + hashFile(filepath.Join(r.fixture, "experiment.json")),
+		"source_hash=" + r.sourceHash,
+		"evidence=" + r.evidence,
+	}
+	if !equalStrings(strings.Split(strings.TrimSpace(string(contents)), "\n"), expected) {
+		return errors.New("bootstrap pre-registration mismatch")
+	}
+	return nil
+}
+
 func (r *runner) execute() error {
 	if err := r.verifyFixtureHashes(); err != nil {
 		return err
@@ -278,16 +346,22 @@ func (r *runner) execute() error {
 	}
 	memoryRoot := filepath.Join(r.temporary, "memory")
 	codeRoot := filepath.Join(r.temporary, "code")
-	if err := copyTree(filepath.Join(r.fixture, "memory-initial"), memoryRoot); err != nil {
+	if r.protocol.Bootstrap {
+		if err := os.MkdirAll(memoryRoot, 0o755); err != nil {
+			return err
+		}
+	} else {
+		if err := copyTree(filepath.Join(r.fixture, "memory-initial"), memoryRoot); err != nil {
+			return err
+		}
+	}
+	if err := copyTree(filepath.Join(r.baseFixture, "code-seed"), codeRoot); err != nil {
 		return err
 	}
-	if err := copyTree(filepath.Join(r.fixture, "code-seed"), codeRoot); err != nil {
+	if err := seedGit(r.ctx, memoryRoot, "seed memory", r.protocol.Bootstrap); err != nil {
 		return err
 	}
-	if err := seedGit(r.ctx, memoryRoot, "seed memory"); err != nil {
-		return err
-	}
-	if err := seedGit(r.ctx, codeRoot, "seed code"); err != nil {
+	if err := seedGit(r.ctx, codeRoot, "seed code", false); err != nil {
 		return err
 	}
 	memoryInitialTree := mustOutput(r.ctx, memoryRoot, nil, "git", "rev-parse", "HEAD^{tree}")
@@ -303,10 +377,22 @@ func (r *runner) execute() error {
 	if err != nil {
 		return err
 	}
-	sessionA, err := r.runClaude("session-a", codeRoot, sessionAEnv, sessionAConfig, filepath.Join(r.fixture, "session-a-system.md"), filepath.Join(r.fixture, "session-a.md"), false)
+	var sessionA sessionMetric
+	if r.protocol.Bootstrap {
+		sessionA, err = r.runRememberSession(codeRoot, sessionAEnv, sessionAConfig)
+	} else {
+		sessionA, err = r.runClaude("session-a", codeRoot, sessionAEnv, sessionAConfig, filepath.Join(r.fixture, "session-a-system.md"), filepath.Join(r.fixture, "session-a.md"), false)
+	}
 	cleanup()
-	if err != nil || !sessionA.Authenticated || sessionA.ToolCounts["mcp__git-push-memories__memory_propose_replace"] != 1 {
+	expectedProposalTool := "mcp__git-push-memories__memory_propose_replace"
+	if r.protocol.Bootstrap {
+		expectedProposalTool = "mcp__git-push-memories__memory_propose_create_page"
+	}
+	if err != nil || !sessionA.Authenticated || sessionA.ToolCounts[expectedProposalTool] != 1 {
 		return errors.New("authenticated discovery session failed")
+	}
+	if r.protocol.Bootstrap && (!sessionA.ChoicePresented || !sessionA.ReviewPresented || !sessionA.SearchEmpty || sessionA.HumanTurns != 2 || sessionA.ToolCounts["mcp__git-push-memories__memory_search"] != 1) {
+		return errors.New("authenticated remember flow did not match pre-registration")
 	}
 	if dirty := mustOutput(r.ctx, codeRoot, nil, "git", "status", "--porcelain=v1"); dirty != "" {
 		return errors.New("discovery session changed code repository")
@@ -348,7 +434,7 @@ func (r *runner) execute() error {
 			if err != nil {
 				return err
 			}
-			metric, sessionErr := r.runClaude(runID, workspace, environment, mcpConfig, filepath.Join(r.fixture, "task-system.md"), filepath.Join(r.fixture, "task.md"), withMemory)
+			metric, sessionErr := r.runClaude(runID, workspace, environment, mcpConfig, filepath.Join(r.baseFixture, "task-system.md"), filepath.Join(r.baseFixture, "task.md"), withMemory)
 			removeAuth()
 			if sessionErr != nil {
 				metric.ExitCode = 1
@@ -381,8 +467,12 @@ func (r *runner) execute() error {
 		decision = "revise_flow"
 	}
 	revision := strings.TrimSpace(mustOutput(r.ctx, r.repository, nil, "git", "rev-parse", "HEAD"))
+	worktreeState := "clean"
+	if r.protocol.Bootstrap {
+		worktreeState = "source-hash-verified"
+	}
 	report := report{
-		SchemaVersion: 1, ExperimentID: r.protocol.ExperimentID, ProductRevision: revision, ProductWorktree: "clean",
+		SchemaVersion: 1, ExperimentID: r.protocol.ExperimentID, ProductRevision: revision, ProductWorktree: worktreeState,
 		ProtocolHash: hashFile(filepath.Join(r.fixture, "experiment.json")), CodeCommit: strings.TrimSpace(codeCommit), MemoryCommit: strings.TrimSpace(memoryCommit),
 		Model: r.protocol.Model, ClaudeVersion: optionalOutput(r.ctx, r.claudeBinary, "--version"), GoVersion: optionalOutput(r.ctx, "go", "version"), GitVersion: optionalOutput(r.ctx, "git", "--version"), MCPSDKVersion: binaryDependencyVersion(r.ctx, r.binary, "github.com/modelcontextprotocol/go-sdk"), TaskContextBytes: contextBytes,
 		VerificationPassed: true, VerificationMS: verificationMS, Verification: verification, MemoryInitialTree: memoryInitialTree, MemoryFinalTree: memoryFinalTree,
@@ -390,7 +480,7 @@ func (r *runner) execute() error {
 		EffectiveConfig:  map[string]any{"model": r.protocol.Model, "claude_code_version": r.protocol.ClaudeVersion, "effort": r.protocol.Effort, "autocompact": r.protocol.Autocompact, "max_budget_usd_per_session": r.protocol.MaxBudget, "permission_mode": r.protocol.Profile.PermissionMode, "permission_prompts": r.protocol.Profile.PermissionPrompts, "filesystem": r.protocol.Profile.Filesystem, "task_tools": r.protocol.Profile.TaskTools, "task_denied_tools": r.protocol.Profile.TaskDenied, "paths": "isolated placeholders only"},
 		RankingCriterion: "distinct query-token matches descending; path, section order, and section ID ascending", FixtureHashes: r.protocol.FixtureHashes, CodeInitialPaths: codeInitialPaths,
 		SessionA: sessionA, Sessions: sessions, BlindEvaluations: evaluations, Assignments: assignments, Comparisons: comparisons, ImprovedPairs: improved, Decision: decision,
-		Evidence: map[string]any{"raw_responses_persisted": false, "credentials_persisted": false, "session_state_persisted": false, "model_consistent": modelConsistent, "pairs": 3, "runs": 6},
+		Evidence: map[string]any{"raw_responses_persisted": false, "credentials_persisted": false, "session_state_persisted": false, "model_consistent": modelConsistent, "pairs": 3, "runs": 6, "memory_bootstrap": r.protocol.Bootstrap, "source_hash": r.sourceHash},
 	}
 	if err := writeJSON(filepath.Join(r.evidence, "report.json"), report); err != nil {
 		return err
@@ -405,6 +495,25 @@ func (r *runner) verifyFixtureHashes() error {
 		"code_go_mod": "code-seed/go.mod", "policy_initial": "code-seed/dispatch/policy.go", "policy_public_test": "code-seed/dispatch/policy_test.go",
 		"current_alerts": "code-seed/deploy/production-alerts.yaml", "queue_ownership": "code-seed/ops/queues.yaml", "legacy_policy": "code-seed/docs/legacy-policy.md",
 		"hidden_evaluator": "evaluator/policy_hidden_test.go",
+	}
+	if r.protocol.Bootstrap {
+		paths = map[string]string{
+			"session_a": "session-a.md", "session_a_system": "session-a-system.md", "memory_expected": "memory-expected/parcel-dispatch.md",
+		}
+		shared := map[string]string{
+			"task": "task.md", "task_system": "task-system.md", "rubric": "rubric.json", "code_go_mod": "code-seed/go.mod",
+			"policy_initial": "code-seed/dispatch/policy.go", "policy_public_test": "code-seed/dispatch/policy_test.go",
+			"current_alerts": "code-seed/deploy/production-alerts.yaml", "queue_ownership": "code-seed/ops/queues.yaml",
+			"legacy_policy": "code-seed/docs/legacy-policy.md", "hidden_evaluator": "evaluator/policy_hidden_test.go",
+		}
+		for name, relative := range shared {
+			if hashFile(filepath.Join(r.baseFixture, filepath.FromSlash(relative))) != r.protocol.FixtureHashes[name] {
+				return fmt.Errorf("fixture hash mismatch: %s", name)
+			}
+		}
+		if hashFile(filepath.Join(r.repository, "integrations", "claude-code", "skills", "remember", "SKILL.md")) != r.protocol.FixtureHashes["remember_skill"] {
+			return errors.New("fixture hash mismatch: remember_skill")
+		}
 	}
 	for name, relative := range paths {
 		if hashFile(filepath.Join(r.fixture, filepath.FromSlash(relative))) != r.protocol.FixtureHashes[name] {
@@ -426,6 +535,12 @@ func (r *runner) sessionConfig(name, codeRoot, memoryRoot, stateRoot string, wit
 	}
 	if err := os.MkdirAll(stateRoot, 0o700); err != nil {
 		return "", nil, nil, err
+	}
+	if name == "session-a" && r.protocol.Bootstrap {
+		skillTarget := filepath.Join(configRoot, "skills", "remember", "SKILL.md")
+		if err := copyFile(filepath.Join(r.repository, "integrations", "claude-code", "skills", "remember", "SKILL.md"), skillTarget); err != nil {
+			return "", nil, nil, err
+		}
 	}
 	credentials, err := os.ReadFile(r.credentials)
 	if err != nil {
@@ -485,7 +600,7 @@ func (r *runner) runClaude(runID, workspace string, environment []string, mcpCon
 	memoryRoot := environmentValue(environment, "GPM_HOST_MEMORY")
 	withMemory := environmentValue(environment, "GPM_WITH_MEMORY") == "true"
 	bwrap := []string{
-		"--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts", "--unshare-ipc",
+		"--clearenv", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts", "--unshare-ipc",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
 		"--ro-bind", "/etc/ssl", "/etc/ssl", "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind", "/etc/hosts", "/etc/hosts",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input",
@@ -534,6 +649,164 @@ func (r *runner) runClaude(runID, workspace string, environment []string, mcpCon
 	}
 	if metric.ExitCode != 0 || !metric.Authenticated {
 		return metric, errors.New("Claude session returned an error")
+	}
+	return metric, nil
+}
+
+func (r *runner) runRememberSession(workspace string, environment []string, mcpConfig string) (sessionMetric, error) {
+	prompt, err := os.ReadFile(filepath.Join(r.fixture, "session-a.md"))
+	if err != nil {
+		return sessionMetric{RunID: "session-a"}, err
+	}
+	arguments := []string{
+		"--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--no-session-persistence", "--no-chrome", "--restricted",
+		"--strict-mcp-config", "--mcp-config", mcpConfig, "--setting-sources", "", "--model", r.protocol.Model,
+		"--effort", r.protocol.Effort, "--autocompact", r.protocol.Autocompact, "--max-budget-usd", fmt.Sprintf("%.2f", r.protocol.MaxBudget),
+		"--permission-mode", r.protocol.Profile.PermissionMode, "--permission-prompts", r.protocol.Profile.PermissionPrompts,
+		"--append-system-prompt-file", "/input/system.md", "--tools", "",
+		"--allowed-tools", strings.Join(r.protocol.Profile.SessionATools, ","), "--disallowed-tools", strings.Join(r.protocol.Profile.SessionADenied, ","),
+	}
+	configRoot := environmentValue(environment, "GPM_HOST_CONFIG")
+	home := environmentValue(environment, "GPM_HOST_HOME")
+	stateRoot := environmentValue(environment, "GPM_HOST_STATE")
+	memoryRoot := environmentValue(environment, "GPM_HOST_MEMORY")
+	bwrap := []string{
+		"--clearenv", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts", "--unshare-ipc",
+		"--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
+		"--ro-bind", "/etc/ssl", "/etc/ssl", "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind", "/etc/hosts", "/etc/hosts",
+		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input",
+		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, "/state",
+		"--ro-bind", r.binary, "/opt/git-push-memories", "--ro-bind", r.claudeBinary, "/opt/claude",
+		"--ro-bind", filepath.Join(r.fixture, "session-a-system.md"), "/input/system.md", "--ro-bind", workspace, "/workspace", "--bind", memoryRoot, "/memory",
+		"--chdir", "/workspace", "--setenv", "PATH", "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
+		"--setenv", "HOME", "/home/experiment", "--setenv", "CLAUDE_CONFIG_DIR", "/config", "--setenv", "XDG_CONFIG_HOME", "/config/xdg",
+		"--setenv", "TMPDIR", "/tmp", "--setenv", "GOPROXY", "off", "--setenv", "GOTOOLCHAIN", "go1.25.12",
+		"--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_CONFIG_GLOBAL", "/dev/null", "--", "/opt/claude",
+	}
+	bwrap = append(bwrap, arguments...)
+	command := exec.CommandContext(r.ctx, "bwrap", bwrap...)
+	command.WaitDelay = 5 * time.Second
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		return sessionMetric{RunID: "session-a"}, err
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		return sessionMetric{RunID: "session-a"}, err
+	}
+	command.Stderr = io.Discard
+	started := time.Now()
+	if err := command.Start(); err != nil {
+		return sessionMetric{RunID: "session-a"}, err
+	}
+	encoder := json.NewEncoder(stdin)
+	send := func(text string) error {
+		return encoder.Encode(map[string]any{"type": "user", "message": map[string]any{"role": "user", "content": text}})
+	}
+	if err := send(string(prompt)); err != nil {
+		_ = stdin.Close()
+		_ = command.Wait()
+		return sessionMetric{RunID: "session-a"}, err
+	}
+	for index := range prompt {
+		prompt[index] = 0
+	}
+	metric := sessionMetric{RunID: "session-a", ToolCounts: map[string]int{}}
+	searchToolIDs := map[string]bool{}
+	phase := 0
+	var responseText strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	for scanner.Scan() {
+		line := append([]byte(nil), scanner.Bytes()...)
+		var event map[string]any
+		if json.Unmarshal(line, &event) == nil && event["type"] == "assistant" {
+			message, _ := event["message"].(map[string]any)
+			if model, ok := message["model"].(string); ok && metric.Model == "" {
+				metric.Model = model
+			}
+			contents, _ := message["content"].([]any)
+			for _, raw := range contents {
+				content, _ := raw.(map[string]any)
+				if text, ok := content["text"].(string); ok {
+					responseText.WriteString(text)
+				}
+				if content["type"] == "tool_use" {
+					name, _ := content["name"].(string)
+					metric.ToolCounts[name]++
+					if name == "mcp__git-push-memories__memory_propose_create_page" && phase != 2 {
+						metric.ExitCode = 1
+					}
+					if name == "mcp__git-push-memories__memory_search" {
+						if id, ok := content["id"].(string); ok {
+							searchToolIDs[id] = true
+						}
+					}
+				}
+			}
+		}
+		if json.Unmarshal(line, &event) == nil && event["type"] == "user" {
+			message, _ := event["message"].(map[string]any)
+			contents, _ := message["content"].([]any)
+			for _, raw := range contents {
+				content, _ := raw.(map[string]any)
+				id, _ := content["tool_use_id"].(string)
+				if content["type"] == "tool_result" && searchToolIDs[id] {
+					encoded, _ := json.Marshal(content["content"])
+					metric.SearchEmpty = bytes.Contains(encoded, []byte(`\"items\":[]`)) || bytes.Contains(encoded, []byte(`"items":[]`))
+					for index := range encoded {
+						encoded[index] = 0
+					}
+				}
+			}
+		}
+		if json.Unmarshal(line, &event) == nil && event["type"] == "result" {
+			metric.Authenticated = true
+			metric.CostUSD, _ = event["total_cost_usd"].(float64)
+			if turns, ok := event["num_turns"].(float64); ok {
+				metric.Turns = int(turns)
+			}
+			if isError, _ := event["is_error"].(bool); isError {
+				metric.ExitCode = 1
+				_ = stdin.Close()
+				continue
+			}
+			text := responseText.String()
+			switch phase {
+			case 0:
+				metric.ChoicePresented = strings.Count(text, "create a root page") == 1 && strings.Count(text, "cancel") == 1 && !strings.Contains(text, "create a section") && !strings.Contains(text, "replace")
+				if len(r.protocol.HumanTurns) != 2 || !metric.ChoicePresented || !metric.SearchEmpty || send(r.protocol.HumanTurns[0]) != nil {
+					metric.ExitCode = 1
+					_ = stdin.Close()
+				} else {
+					metric.HumanTurns++
+					phase++
+					responseText.Reset()
+				}
+			case 1:
+				expectedBody := "- Priority parcels escalate after 90 seconds through `route-amber`.\n- The active queue is owned by `routing-ops`."
+				metric.ReviewPresented = strings.Count(text, "parcel-dispatch.md") == 1 && strings.Count(text, "Parcel dispatch") == 1 && strings.Count(text, expectedBody) == 1 && strings.Count(text, "deploy/production-alerts.yaml") == 1 && strings.Count(text, "ops/queues.yaml") == 1
+				if !metric.ReviewPresented || send(r.protocol.HumanTurns[1]) != nil {
+					metric.ExitCode = 1
+					_ = stdin.Close()
+				} else {
+					metric.HumanTurns++
+					phase++
+					responseText.Reset()
+				}
+			default:
+				_ = stdin.Close()
+			}
+		}
+		for index := range line {
+			line[index] = 0
+		}
+	}
+	metric.DurationMS = time.Since(started).Milliseconds()
+	waitErr := command.Wait()
+	if scanner.Err() != nil || waitErr != nil || metric.ExitCode != 0 || phase != 2 || metric.ToolCounts["mcp__git-push-memories__memory_propose_create_page"] != 1 {
+		metric.ExitCode = 1
+		return metric, errors.New("interactive Claude remember session failed")
 	}
 	return metric, nil
 }
@@ -615,9 +888,18 @@ func (r *runner) approveProposal(memoryRoot, codeRoot, stateRoot, id string) err
 			Proposal *struct {
 				Revision  int `json:"revision"`
 				Operation struct {
+					Type   string `json:"type"`
+					Target struct {
+						Path string `json:"path"`
+					} `json:"target"`
+					Title       string   `json:"title"`
+					Body        string   `json:"body"`
 					Replacement string   `json:"replacement"`
 					SourcePaths []string `json:"source_paths"`
 				} `json:"operation"`
+				PostState struct {
+					FileHash string `json:"file_hash"`
+				} `json:"post_state"`
 				SourcePaths []string `json:"source_paths"`
 			} `json:"proposal"`
 		} `json:"data"`
@@ -625,11 +907,20 @@ func (r *runner) approveProposal(memoryRoot, codeRoot, stateRoot, id string) err
 	if json.Unmarshal([]byte(show), &envelope) != nil || envelope.Data.Proposal == nil {
 		return errors.New("decode discovery proposal")
 	}
-	expectedMemory, _ := os.ReadFile(filepath.Join(r.fixture, "memory-expected", "domains", "parcel-dispatch.md"))
-	expectedBody := sectionBody(string(expectedMemory))
+	expectedPath := filepath.Join(r.fixture, "memory-expected", "domains", "parcel-dispatch.md")
+	if r.protocol.Bootstrap {
+		expectedPath = filepath.Join(r.fixture, "memory-expected", "parcel-dispatch.md")
+	}
+	expectedMemory, _ := os.ReadFile(expectedPath)
 	sources := append([]string(nil), envelope.Data.Proposal.SourcePaths...)
 	sort.Strings(sources)
-	if envelope.Data.Proposal.Revision != 1 || envelope.Data.Proposal.Operation.Replacement != expectedBody || !equalStrings(sources, []string{"deploy/production-alerts.yaml", "ops/queues.yaml"}) {
+	validOperation := envelope.Data.Proposal.Operation.Replacement == sectionBody(string(expectedMemory))
+	if r.protocol.Bootstrap {
+		expectedBody := "- Priority parcels escalate after 90 seconds through `route-amber`.\n- The active queue is owned by `routing-ops`."
+		body := strings.TrimSuffix(envelope.Data.Proposal.Operation.Body, "\n")
+		validOperation = envelope.Data.Proposal.Operation.Type == "create_page" && envelope.Data.Proposal.Operation.Target.Path == "parcel-dispatch.md" && envelope.Data.Proposal.Operation.Title == "Parcel dispatch" && body == expectedBody && envelope.Data.Proposal.PostState.FileHash == memoryHash(expectedMemory)
+	}
+	if envelope.Data.Proposal.Revision != 1 || !validOperation || !equalStrings(sources, []string{"deploy/production-alerts.yaml", "ops/queues.yaml"}) {
 		return errors.New("proposal does not match pre-registered memory")
 	}
 	if _, err := commandOutput(r.ctx, "", isolatedRuntime(), r.binary, append([]string{"proposal", "apply", id, "--revision", "1"}, common...)...); err != nil {
@@ -638,7 +929,11 @@ func (r *runner) approveProposal(memoryRoot, codeRoot, stateRoot, id string) err
 	if _, err := commandOutput(r.ctx, "", isolatedRuntime(), r.binary, append([]string{"proposal", "publish", id}, common...)...); err != nil {
 		return errors.New("publish discovery proposal")
 	}
-	actual, _ := os.ReadFile(filepath.Join(memoryRoot, "domains", "parcel-dispatch.md"))
+	actualPath := filepath.Join(memoryRoot, "domains", "parcel-dispatch.md")
+	if r.protocol.Bootstrap {
+		actualPath = filepath.Join(memoryRoot, "parcel-dispatch.md")
+	}
+	actual, _ := os.ReadFile(actualPath)
 	if !bytes.Equal(actual, expectedMemory) {
 		return errors.New("published memory differs from pre-registration")
 	}
@@ -675,7 +970,7 @@ func (r *runner) evaluate(runID, workspace, expectedAPI string) evaluation {
 	hidden := filepath.Join(workspace, "dispatch", "zz_gpm_evaluator_test.go")
 	if _, err := os.Stat(hidden); !errors.Is(err, os.ErrNotExist) {
 		evaluation.EvaluatorValid = false
-	} else if err := copyFile(filepath.Join(r.fixture, "evaluator", "policy_hidden_test.go"), hidden); err != nil {
+	} else if err := copyFile(filepath.Join(r.baseFixture, "evaluator", "policy_hidden_test.go"), hidden); err != nil {
 		evaluation.EvaluatorValid = false
 	} else {
 		hiddenStarted := time.Now()
@@ -757,10 +1052,15 @@ func decide(protocol experiment, sessions []sessionMetric, evaluations []evaluat
 				control = runID
 			}
 		}
-		treatmentCalls, controlCalls := metrics[treatment].ExplorationCalls, metrics[control].ExplorationCalls
+		treatmentMetric, controlMetric := metrics[treatment], metrics[control]
+		treatmentCalls, controlCalls := treatmentMetric.ExplorationCalls, controlMetric.ExplorationCalls
+		treatmentValue, controlValue := float64(treatmentCalls), float64(controlCalls)
+		if protocol.Metric == "task_duration_ms" {
+			treatmentValue, controlValue = float64(treatmentMetric.DurationMS), float64(controlMetric.DurationMS)
+		}
 		improvement := 0.0
-		if controlCalls > 0 {
-			improvement = float64(controlCalls-treatmentCalls) / float64(controlCalls)
+		if controlValue > 0 {
+			improvement = (controlValue - treatmentValue) / controlValue
 		}
 		thresholdMet := improvement >= protocol.Threshold
 		if thresholdMet {
@@ -768,15 +1068,15 @@ func decide(protocol experiment, sessions []sessionMetric, evaluations []evaluat
 		}
 		noWorse := scores[treatment].Correctness && scores[treatment].Score >= scores[control].Score
 		pairValid := scores[treatment].EvaluatorValid && scores[control].EvaluatorValid && metrics[treatment].ExitCode == 0 && metrics[control].ExitCode == 0 && metrics[treatment].Authenticated && metrics[control].Authenticated
-		comparisons = append(comparisons, comparison{Pair: pairIndex, TreatmentRun: treatment, ControlRun: control, TreatmentScore: scores[treatment].Score, ControlScore: scores[control].Score, TreatmentCalls: treatmentCalls, ControlCalls: controlCalls, Improvement: improvement, ThresholdMet: thresholdMet, CorrectnessNoWorse: noWorse, PairValid: pairValid})
+		comparisons = append(comparisons, comparison{Pair: pairIndex, TreatmentRun: treatment, ControlRun: control, TreatmentScore: scores[treatment].Score, ControlScore: scores[control].Score, TreatmentCalls: treatmentCalls, ControlCalls: controlCalls, TreatmentDuration: treatmentMetric.DurationMS, ControlDuration: controlMetric.DurationMS, Improvement: improvement, ThresholdMet: thresholdMet, CorrectnessNoWorse: noWorse, PairValid: pairValid})
+	}
+	for _, comparison := range comparisons {
+		if comparison.PairValid && !comparison.CorrectnessNoWorse {
+			return comparisons, improved, "did_not_demonstrate_value"
+		}
 	}
 	if operationalFailure {
 		return comparisons, improved, "revise_flow"
-	}
-	for _, comparison := range comparisons {
-		if !comparison.CorrectnessNoWorse {
-			return comparisons, improved, "did_not_demonstrate_value"
-		}
 	}
 	if improved < protocol.RequiredPairs {
 		return comparisons, improved, "revise_flow"
@@ -801,8 +1101,12 @@ func sectionBody(page string) string {
 	return page[index+len(anchor):]
 }
 
-func seedGit(ctx context.Context, root, message string) error {
-	commands := [][]string{{"init", "--quiet"}, {"config", "user.name", "Value Experiment"}, {"config", "user.email", "value-experiment@example.invalid"}, {"add", "."}, {"commit", "--quiet", "-m", message}}
+func seedGit(ctx context.Context, root, message string, allowEmpty bool) error {
+	commit := []string{"commit", "--quiet", "-m", message}
+	if allowEmpty {
+		commit = []string{"commit", "--quiet", "--allow-empty", "-m", message}
+	}
+	commands := [][]string{{"init", "--quiet"}, {"config", "user.name", "Value Experiment"}, {"config", "user.email", "value-experiment@example.invalid"}, {"add", "."}, commit}
 	for _, arguments := range commands {
 		if err := run(ctx, root, nil, "git", arguments...); err != nil {
 			return err
@@ -963,6 +1267,44 @@ func hashFile(path string) string {
 func hashBytes(contents []byte) string {
 	hash := sha256.Sum256(contents)
 	return hex.EncodeToString(hash[:])
+}
+
+func memoryHash(contents []byte) string {
+	return "sha256:" + hashBytes(contents)
+}
+
+func experimentSourceHash(repository string) (string, error) {
+	var paths []string
+	err := filepath.WalkDir(repository, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		relative, relErr := filepath.Rel(repository, path)
+		if relErr != nil {
+			return relErr
+		}
+		if entry.IsDir() && (relative == ".git" || relative == ".artifacts" || strings.HasPrefix(relative, ".git"+string(filepath.Separator)) || strings.HasPrefix(relative, ".artifacts"+string(filepath.Separator))) {
+			return filepath.SkipDir
+		}
+		if entry.Type().IsRegular() {
+			paths = append(paths, filepath.ToSlash(relative))
+		}
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	sort.Strings(paths)
+	hasher := sha256.New()
+	for _, relative := range paths {
+		contents, readErr := os.ReadFile(filepath.Join(repository, filepath.FromSlash(relative)))
+		if readErr != nil {
+			return "", readErr
+		}
+		fmt.Fprintf(hasher, "%s\x00%d\x00", relative, len(contents))
+		_, _ = hasher.Write(contents)
+	}
+	return hex.EncodeToString(hasher.Sum(nil)), nil
 }
 
 func markerValues(contents []byte) [][]byte {

@@ -15,10 +15,22 @@ import (
 )
 
 type protocol struct {
-	SchemaVersion int               `json:"schema_version"`
-	Seed          string            `json:"randomization_seed"`
-	Model         string            `json:"model"`
-	Effort        string            `json:"effort"`
+	SchemaVersion int      `json:"schema_version"`
+	ExperimentID  string   `json:"experiment_id"`
+	Seed          string   `json:"randomization_seed"`
+	Model         string   `json:"model"`
+	ClaudeVersion string   `json:"claude_code_version"`
+	Effort        string   `json:"effort"`
+	Autocompact   string   `json:"autocompact"`
+	MaxBudget     float64  `json:"max_budget_usd_per_session"`
+	Bootstrap     bool     `json:"memory_bootstrap"`
+	HumanTurns    []string `json:"human_turns"`
+	Profile       struct {
+		Filesystem        string   `json:"filesystem"`
+		PermissionMode    string   `json:"permission_mode"`
+		PermissionPrompts string   `json:"permission_prompts"`
+		SessionATools     []string `json:"session_a_tools"`
+	} `json:"execution_profile"`
 	PrimaryMetric string            `json:"primary_metric"`
 	Threshold     float64           `json:"improvement_threshold"`
 	RequiredPairs int               `json:"required_improved_pairs"`
@@ -84,6 +96,52 @@ func TestValueExperimentStartsSolvableButUnimplemented(t *testing.T) {
 	expected := readFile(t, filepath.Join(fixtureRoot, "memory-expected", "domains", "parcel-dispatch.md"))
 	if bytes.Equal(initial, expected) || !reflect.DeepEqual(anchorLines(initial), anchorLines(expected)) {
 		t.Fatal("memory fixtures do not represent an anchored replacement")
+	}
+}
+
+func TestBootstrapValueExperimentProtocolIsFrozenAndSelfConsistent(t *testing.T) {
+	root := repositoryRoot(t)
+	fixtureRoot := filepath.Join(root, "testdata", "phase-2", "bootstrap-value-experiment")
+	var registered protocol
+	decodeFile(t, filepath.Join(fixtureRoot, "experiment.json"), &registered)
+	if registered.SchemaVersion != 2 || registered.ExperimentID != "parcel-dispatch-bootstrap-value-v1" || registered.Model != "sonnet" || registered.ClaudeVersion != "2.1.263" || registered.Effort != "medium" || registered.Autocompact != "100k" || registered.MaxBudget != 1 || !registered.Bootstrap || registered.PrimaryMetric != "task_duration_ms" || registered.Threshold != 0.25 || registered.RequiredPairs != 2 {
+		t.Fatalf("unexpected bootstrap execution config: %+v", registered)
+	}
+	if !reflect.DeepEqual(registered.HumanTurns, []string{"create a root page", "confirm"}) || registered.Profile.Filesystem != "bubblewrap-workspace-only" || registered.Profile.PermissionMode != "acceptEdits" || registered.Profile.PermissionPrompts != "none" || !reflect.DeepEqual(registered.Profile.SessionATools, []string{"mcp__git-push-memories__memory_search", "mcp__git-push-memories__memory_expand", "mcp__git-push-memories__memory_propose_create_page"}) {
+		t.Fatalf("unexpected bootstrap interaction config: %+v", registered)
+	}
+	if len(registered.Pairs) != 3 {
+		t.Fatalf("pair count = %d", len(registered.Pairs))
+	}
+	for index, pair := range registered.Pairs {
+		hash := sha256.Sum256([]byte(registered.Seed + ":" + string(rune('1'+index))))
+		order := []string{"control", "treatment"}
+		if hash[0]%2 == 1 {
+			order = []string{"treatment", "control"}
+		}
+		if pair.Pair != index+1 || pair.OrderHash != hex.EncodeToString(hash[:]) || !reflect.DeepEqual(pair.Order, order) {
+			t.Fatalf("pair %d randomization does not match seed", index+1)
+		}
+	}
+	files := map[string]string{
+		"session_a":        "testdata/phase-2/bootstrap-value-experiment/session-a.md",
+		"session_a_system": "testdata/phase-2/bootstrap-value-experiment/session-a-system.md",
+		"memory_expected":  "testdata/phase-2/bootstrap-value-experiment/memory-expected/parcel-dispatch.md",
+		"remember_skill":   "integrations/claude-code/skills/remember/SKILL.md",
+		"task":             "testdata/phase-2/value-experiment/task.md", "task_system": "testdata/phase-2/value-experiment/task-system.md",
+		"rubric": "testdata/phase-2/value-experiment/rubric.json", "code_go_mod": "testdata/phase-2/value-experiment/code-seed/go.mod",
+		"policy_initial": "testdata/phase-2/value-experiment/code-seed/dispatch/policy.go", "policy_public_test": "testdata/phase-2/value-experiment/code-seed/dispatch/policy_test.go",
+		"current_alerts": "testdata/phase-2/value-experiment/code-seed/deploy/production-alerts.yaml", "queue_ownership": "testdata/phase-2/value-experiment/code-seed/ops/queues.yaml",
+		"legacy_policy": "testdata/phase-2/value-experiment/code-seed/docs/legacy-policy.md", "hidden_evaluator": "testdata/phase-2/value-experiment/evaluator/policy_hidden_test.go",
+	}
+	for name, relative := range files {
+		if got := hashFile(t, filepath.Join(root, filepath.FromSlash(relative))); got != registered.FixtureHashes[name] {
+			t.Fatalf("fixture %s hash = %s, registered %s", name, got, registered.FixtureHashes[name])
+		}
+	}
+	expected := string(readFile(t, filepath.Join(fixtureRoot, "memory-expected", "parcel-dispatch.md")))
+	if strings.Count(expected, "<!-- @id:") != 2 || !strings.Contains(expected, "90 seconds") || !strings.Contains(expected, "route-amber") || !strings.Contains(expected, "routing-ops") {
+		t.Fatal("bootstrap expected memory is not the frozen canonical page")
 	}
 }
 

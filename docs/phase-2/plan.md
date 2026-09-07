@@ -1,6 +1,6 @@
 # Plano da Fase 2: fluxo vertical minimo
 
-Status do plano: **T1-T18 concluidas; T19 pendente; Fase 3 bloqueada**.
+Status do plano: **T1-T19 concluidas; decisao final `revisar o fluxo`; Fase 3 bloqueada**.
 
 ## Objetivo
 
@@ -61,7 +61,7 @@ Por decisao humana em 2026-09-06, T1-T10 permanecem concluidas e suas evidencias
 | Faixa | Estado | Resultado |
 |---|---|---|
 | T1-T9 | concluida | gate tecnico original de replace reproduzivel |
-| T10 | concluida | decisao `revisar o fluxo`; somente 1/3 pares passou o limiar de tempo |
+| T10 | concluida | decisao `revisar o fluxo`; somente 1/3 pares passou o limiar de exploracao |
 | T11 | concluida | preview canonico de pagina nova, sem mutacao |
 | T12 | concluida | proposal/apply/recovery v2 para `create_page`, com reader v1 compativel |
 | T13 | concluida | publicacao path-scoped de arquivo novo com baseline ausente |
@@ -70,7 +70,7 @@ Por decisao humana em 2026-09-06, T1-T10 permanecem concluidas e suas evidencias
 | T16 | concluida | `/remember` pesquisa, apresenta escolha e confirma uma proposta |
 | T17 | concluida | gate tecnico revisado partindo de zero Markdown |
 | T18 | concluida | overhead local p50 158 ms; nenhuma otimizacao exigida |
-| T19 | pendente | novo gate autenticado de valor |
+| T19 | concluida | sessao A abortou antes dos pares; decisao `revisar o fluxo`; Fase 3 bloqueada |
 
 Neste plano, **bootstrap de memoria** significa criar o primeiro arquivo Markdown duravel em um memory root que ja existe como Git worktree local, possui `HEAD` resolvivel, e distinto do code root e nao contem arquivos `*.md`. Um commit inicial vazio e suficiente. Inicializar, clonar ou configurar remotes Git, suportar repositorio unborn e criar paginas em diretorios aninhados nao bloqueiam este gate.
 
