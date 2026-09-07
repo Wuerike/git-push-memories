@@ -44,7 +44,7 @@ func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if view.SchemaVersion != 1 || len(view.ID) != 32 || view.Revision != 1 || view.Status != "pending" {
+	if view.SchemaVersion != 2 || view.Baseline.Exists == nil || !*view.Baseline.Exists || len(view.ID) != 32 || view.Revision != 1 || view.Status != "pending" {
 		t.Fatalf("Prepare() identity = %+v", view)
 	}
 	if _, err := workflow.Applied(view.ID); !errors.Is(err, proposal.ErrNotApplied) {
@@ -80,6 +80,150 @@ func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.
 	}
 	if review.Proposal == nil || !reflect.DeepEqual(*review.Proposal, view) {
 		t.Fatalf("Review() = %+v, want %+v", review, view)
+	}
+}
+
+func TestCreatePageProposalAppliesOnceFromAbsentBaseline(t *testing.T) {
+	memoryRoot := newEmptyMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+
+	view, err := workflow.Prepare(context.Background(), allowedCreatePageCandidate(t, "Current state."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.SchemaVersion != 2 || view.Operation.Type != "create_page" || view.Operation.Title != "Parcel Dispatch" || view.Operation.Body != "Current state." {
+		t.Fatalf("Prepare() create operation = %+v", view)
+	}
+	if view.Baseline.Exists == nil || *view.Baseline.Exists || view.Baseline.FileHash != "" || view.Baseline.Blob != "" || view.Baseline.Head == "" {
+		t.Fatalf("Prepare() baseline = %+v", view.Baseline)
+	}
+	if !strings.HasPrefix(view.Diff, "--- /dev/null\n+++ b/parcel-dispatch.md\n") {
+		t.Fatalf("Prepare() diff = %q", view.Diff)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "parcel-dispatch.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("Prepare() created the target")
+	}
+
+	receipt, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if receipt.SchemaVersion != 2 || receipt.Baseline.Exists == nil || *receipt.Baseline.Exists || receipt.Target != view.Operation.Target || receipt.PostState != view.PostState {
+		t.Fatalf("Apply() receipt = %+v", receipt)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, "parcel-dispatch.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(page), "<!-- @id: parcel-dispatch-overview -->\nCurrent state.\n") {
+		t.Fatalf("created page = %q", page)
+	}
+	repeated, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil || !reflect.DeepEqual(repeated, receipt) {
+		t.Fatalf("repeated Apply() = %+v, %v; want %+v", repeated, err, receipt)
+	}
+}
+
+func TestCreatePageApplyRejectsTargetCreatedAfterPrepare(t *testing.T) {
+	memoryRoot := newEmptyMemoryRoot(t)
+	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCreatePageCandidate(t, "Current state."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pagePath := filepath.Join(memoryRoot, "parcel-dispatch.md")
+	concurrent := []byte("concurrent content\n")
+	if err := os.WriteFile(pagePath, concurrent, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, memory.ErrDrift) {
+		t.Fatalf("Apply() error = %v, want ErrDrift", err)
+	}
+	got, err := os.ReadFile(pagePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, concurrent) {
+		t.Fatal("Apply() overwrote the concurrent target")
+	}
+}
+
+func TestCreatePageStartupRecoversPostStateWithoutApplyReceipt(t *testing.T) {
+	memoryRoot := newEmptyMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := workflow.Prepare(context.Background(), allowedCreatePageCandidate(t, "Current state."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.Close(); err != nil {
+		t.Fatal(err)
+	}
+	postState := "# Parcel Dispatch\n<!-- @id: parcel-dispatch -->\n\n## Overview\n<!-- @id: parcel-dispatch-overview -->\nCurrent state.\n"
+	if err := os.WriteFile(filepath.Join(memoryRoot, "parcel-dispatch.md"), []byte(postState), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = restarted.Close() })
+	receipt, err := restarted.Applied(view.ID)
+	if err != nil || receipt.SchemaVersion != 2 || receipt.ProposalID != view.ID {
+		t.Fatalf("startup Applied() = %+v, %v", receipt, err)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, "proposals", view.ID+".json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("startup recovery retained create proposal")
+	}
+}
+
+func TestCreatePageConcurrentApplyReturnsOneDurableResult(t *testing.T) {
+	memoryRoot := newEmptyMemoryRoot(t)
+	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCreatePageCandidate(t, "Current state."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan struct {
+		receipt proposal.ApplyReceipt
+		err     error
+	}, 2)
+	for range 2 {
+		go func() {
+			<-start
+			receipt, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+			results <- struct {
+				receipt proposal.ApplyReceipt
+				err     error
+			}{receipt, err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil || !reflect.DeepEqual(first.receipt, second.receipt) {
+		t.Fatalf("concurrent Apply() = (%+v, %v), (%+v, %v)", first.receipt, first.err, second.receipt, second.err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "parcel-dispatch.md")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -169,7 +313,7 @@ func TestApplyExactRevisionIsDurableAndIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	if receipt.ProposalID != view.ID || receipt.Revision != 1 || receipt.Status != "applied_unpublished" ||
-		receipt.Target != view.Operation.Target || receipt.Baseline != view.Baseline || receipt.PostState != view.PostState {
+		receipt.Target != view.Operation.Target || !reflect.DeepEqual(receipt.Baseline, view.Baseline) || receipt.PostState != view.PostState {
 		t.Fatalf("Apply() receipt = %+v", receipt)
 	}
 	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
@@ -649,6 +793,26 @@ func allowedCandidate(t *testing.T, replacement string) intake.AllowedCandidate 
 	return allowed
 }
 
+func allowedCreatePageCandidate(t *testing.T, body string) intake.AllowedCandidate {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"operation": "create_page", "target_path": "parcel-dispatch.md", "title": "Parcel Dispatch",
+		"body": body, "source_paths": []string{"services/parcel/service.yaml"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := guard.Inspect(intake.NewCandidate(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return allowed
+}
+
 func newMemoryRoot(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "memory")
@@ -664,6 +828,19 @@ func newMemoryRoot(t *testing.T) string {
 	runGit(t, root, "config", "user.email", "test@example.com")
 	runGit(t, root, "add", ".")
 	runGit(t, root, "commit", "--quiet", "-m", "initial")
+	return root
+}
+
+func newEmptyMemoryRoot(t *testing.T) string {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "memory")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "init", "--quiet")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial")
 	return root
 }
 

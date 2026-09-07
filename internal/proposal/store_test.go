@@ -1,10 +1,12 @@
 package proposal
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +93,50 @@ func TestRepeatedRejectFinishesCleanupAfterDurableReceipt(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "proposals", id+".json")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("Reject() did not finish payload cleanup")
+	}
+}
+
+func TestStoreReadsPersistedV1StateWithoutV2Fields(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "state")
+	store, err := newStore(root, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hash := "sha256:" + strings.Repeat("0", 64)
+	view := View{
+		SchemaVersion: 1, Nonce: "0123456789abcdef0123456789abcdef", Revision: 1, Status: "pending", CreatedAt: time.Unix(1, 0).UTC(),
+		Operation: Operation{Type: "replace_section_content", Target: Target{Path: "a.md", SectionID: "a"}, Replacement: "old"},
+		Baseline:  Baseline{FileHash: hash, Head: "head", Blob: "blob"}, PostState: PostState{FileHash: hash}, Diff: "diff", SourcePaths: []string{},
+	}
+	if err := sealProposal(&view); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{`"exists"`, `"title"`, `"body"`} {
+		if bytes.Contains(encoded, []byte(forbidden)) {
+			t.Fatalf("v1 fixture contains v2 field %s: %s", forbidden, encoded)
+		}
+	}
+	if err := store.durableWrite("proposals", view.ID+".json", encoded); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.readProposal(view.ID)
+	if err != nil || !reflect.DeepEqual(got, view) {
+		t.Fatalf("readProposal() = %+v, %v; want %+v", got, err, view)
+	}
+	apply := ApplyReceipt{
+		SchemaVersion: 1, ProposalID: view.ID, Revision: 1, Status: "applied_unpublished", AppliedAt: time.Unix(2, 0).UTC(), MemoryRoot: "/memory",
+		Target: view.Operation.Target, Baseline: view.Baseline, PostState: view.PostState,
+	}
+	if err := store.writeApply(apply); err != nil {
+		t.Fatal(err)
+	}
+	gotApply, err := store.readApply(view.ID)
+	if err != nil || !reflect.DeepEqual(gotApply, apply) {
+		t.Fatalf("readApply() = %+v, %v; want %+v", gotApply, err, apply)
 	}
 }
 

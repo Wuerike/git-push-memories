@@ -22,13 +22,16 @@ type Target struct {
 type Operation struct {
 	Type        string `json:"type"`
 	Target      Target `json:"target"`
-	Replacement string `json:"replacement"`
+	Replacement string `json:"replacement,omitempty"`
+	Title       string `json:"title,omitempty"`
+	Body        string `json:"body,omitempty"`
 }
 
 type Baseline struct {
-	FileHash string `json:"file_hash"`
+	Exists   *bool  `json:"exists,omitempty"`
+	FileHash string `json:"file_hash,omitempty"`
 	Head     string `json:"head"`
-	Blob     string `json:"blob"`
+	Blob     string `json:"blob,omitempty"`
 }
 
 type PostState struct {

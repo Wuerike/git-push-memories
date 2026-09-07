@@ -3,6 +3,7 @@ package memory
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -40,6 +41,14 @@ func (stage writeStage) String() string {
 }
 
 func durableReplace(rootFD int, relativePath string, content []byte, mode os.FileMode, fault writeFault) error {
+	return durableWrite(rootFD, relativePath, content, mode, false, fault)
+}
+
+func durableCreate(rootFD int, relativePath string, content []byte, mode os.FileMode, fault writeFault) error {
+	return durableWrite(rootFD, relativePath, content, mode, true, fault)
+}
+
+func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileMode, create bool, fault writeFault) error {
 	parentPath, base := path.Split(relativePath)
 	parentPath = strings.TrimSuffix(parentPath, "/")
 	if parentPath == "" {
@@ -83,8 +92,17 @@ func durableReplace(rootFD int, relativePath string, content []byte, mode os.Fil
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := unix.Renameat(parentFD, temporaryName, parentFD, base); err != nil {
-		return err
+	var renameErr error
+	if create {
+		renameErr = unix.Renameat2(parentFD, temporaryName, parentFD, base, unix.RENAME_NOREPLACE)
+	} else {
+		renameErr = unix.Renameat(parentFD, temporaryName, parentFD, base)
+	}
+	if renameErr != nil {
+		if create && errors.Is(renameErr, unix.EEXIST) {
+			return ErrDrift
+		}
+		return renameErr
 	}
 	if err := injectWriteFault(fault, writeRenamed); err != nil {
 		return err
@@ -93,6 +111,23 @@ func durableReplace(rootFD int, relativePath string, content []byte, mode os.Fil
 		return fmt.Errorf("sync memory directory: %w", err)
 	}
 	return nil
+}
+
+func syncParentDirectory(rootFD int, relativePath string) error {
+	parentPath, _ := path.Split(relativePath)
+	parentPath = strings.TrimSuffix(parentPath, "/")
+	if parentPath == "" {
+		parentPath = "."
+	}
+	parentFD, err := unix.Openat2(rootFD, parentPath, &unix.OpenHow{
+		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	})
+	if err != nil {
+		return err
+	}
+	defer unix.Close(parentFD)
+	return unix.Fsync(parentFD)
 }
 
 func createTemporaryAt(parentFD int) (string, *os.File, error) {

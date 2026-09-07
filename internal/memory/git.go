@@ -37,6 +37,22 @@ func (repository *Repository) ensureTargetClean(ctx context.Context, relativePat
 }
 
 func (repository *Repository) ensureTargetAbsent(ctx context.Context, relativePath string) (string, error) {
+	headID, err := repository.ensureGitTargetAbsent(ctx, relativePath)
+	if err != nil {
+		return "", err
+	}
+	var stat unix.Stat_t
+	err = unix.Fstatat(int(repository.root.Fd()), relativePath, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if err == nil {
+		return "", ErrTargetExists
+	}
+	if !errors.Is(err, unix.ENOENT) {
+		return "", fmt.Errorf("inspect memory target: %w", ErrInvalidPath)
+	}
+	return headID, nil
+}
+
+func (repository *Repository) ensureGitTargetAbsent(ctx context.Context, relativePath string) (string, error) {
 	head, err := repository.gitOutput(ctx, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return "", fmt.Errorf("read Git HEAD: %w", ErrInvalidSchema)
@@ -55,14 +71,6 @@ func (repository *Repository) ensureTargetAbsent(ctx context.Context, relativePa
 	}
 	if len(indexEntry) != 0 {
 		return "", ErrTargetExists
-	}
-	var stat unix.Stat_t
-	err = unix.Fstatat(int(repository.root.Fd()), relativePath, &stat, unix.AT_SYMLINK_NOFOLLOW)
-	if err == nil {
-		return "", ErrTargetExists
-	}
-	if !errors.Is(err, unix.ENOENT) {
-		return "", fmt.Errorf("inspect memory target: %w", ErrInvalidPath)
 	}
 	return headID, nil
 }

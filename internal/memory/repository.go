@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wuerike/git-push-memories/internal/markdown"
+	"github.com/Wuerike/git-push-memories/internal/unifieddiff"
 	"golang.org/x/sys/unix"
 )
 
@@ -201,11 +203,70 @@ func (repository *Repository) PreviewCreatePage(ctx context.Context, request Cre
 		}
 		preview = CreatePagePreview{
 			Target: Target{Path: targetPath, SectionID: pageID + "-overview"}, PageID: pageID,
-			PostStateHash: hash(postState), Head: head, PostState: postState, Diff: createPageDiff(targetPath, postState),
+			PostStateHash: hash(postState), Head: head, PostState: postState, Diff: unifieddiff.Create(targetPath, postState),
 		}
 		return nil
 	})
 	return preview, err
+}
+
+func (repository *Repository) ReconcileCreatePage(ctx context.Context, request ReconcileCreatePageRequest) (ReconcileResult, error) {
+	var result ReconcileResult
+	err := repository.withLock(ctx, true, func() error {
+		if request.Preflight != nil {
+			if err := request.Preflight(); err != nil {
+				return err
+			}
+		}
+		targetPath, pageID, err := validateCreatePageRequest(request.CreatePageRequest)
+		if err != nil {
+			return err
+		}
+		postState, err := renderPage(pageID, request.Title, request.Body)
+		if err != nil || hash(postState) != request.PostStateHash {
+			return ErrDrift
+		}
+		if request.Validate != nil {
+			if err := request.Validate(postState); err != nil {
+				return err
+			}
+		}
+		head, err := repository.ensureGitTargetAbsent(ctx, targetPath)
+		if err != nil || head != request.Head {
+			return ErrDrift
+		}
+		result = ReconcileResult{Target: Target{Path: targetPath, SectionID: pageID + "-overview"}, PostState: postState}
+		var stat unix.Stat_t
+		statErr := unix.Fstatat(int(repository.root.Fd()), targetPath, &stat, unix.AT_SYMLINK_NOFOLLOW)
+		if statErr == nil {
+			_, current, _, readErr := repository.read(targetPath)
+			if readErr != nil || hash(current) != request.PostStateHash {
+				return ErrDrift
+			}
+			if err := syncParentDirectory(int(repository.root.Fd()), targetPath); err != nil {
+				return fmt.Errorf("sync created memory file: %w", err)
+			}
+			result.State = ReconcilePostState
+			return nil
+		}
+		if !errors.Is(statErr, unix.ENOENT) {
+			return ErrDrift
+		}
+		result.State = ReconcileBaseline
+		if request.Mode == ReconcileOnly {
+			return nil
+		}
+		confirmedHead, err := repository.ensureTargetAbsent(ctx, targetPath)
+		if err != nil || confirmedHead != request.Head {
+			return ErrDrift
+		}
+		if err := durableCreate(int(repository.root.Fd()), targetPath, postState, 0o644, repository.fault); err != nil {
+			return fmt.Errorf("write memory file: %w", err)
+		}
+		result.State = ReconcilePostState
+		return nil
+	})
+	return result, err
 }
 
 func validateCreatePageRequest(request CreatePageRequest) (string, string, error) {
@@ -257,17 +318,6 @@ func hasDisallowedControl(value string, allowLayout bool) bool {
 		}
 	}
 	return false
-}
-
-func createPageDiff(targetPath string, postState []byte) string {
-	var diff strings.Builder
-	fmt.Fprintf(&diff, "--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", targetPath, bytes.Count(postState, []byte("\n")))
-	for _, line := range strings.Split(strings.TrimSuffix(string(postState), "\n"), "\n") {
-		diff.WriteByte('+')
-		diff.WriteString(line)
-		diff.WriteByte('\n')
-	}
-	return diff.String()
 }
 
 func (repository *Repository) ReconcileApply(ctx context.Context, request ReconcileRequest) (ReconcileResult, error) {

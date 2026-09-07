@@ -28,6 +28,24 @@ func TestGuardAllowsOnlyCanonicalClosedCandidate(t *testing.T) {
 	}
 }
 
+func TestGuardAllowsClosedCreatePageCandidate(t *testing.T) {
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"operation":"create_page","target_path":"parcel-dispatch.md","title":"Parcel Dispatch","body":"Retries use backoff.\n","source_paths":["services/parcel/service.yaml"]}`)
+	allowed, err := guard.Inspect(intake.NewCandidate(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed.Operation() != "create_page" || allowed.TargetPath() != "parcel-dispatch.md" || allowed.Title() != "Parcel Dispatch" || allowed.Body() != "Retries use backoff.\n" {
+		t.Fatalf("Inspect() = operation %q, target %q, title %q, body %q", allowed.Operation(), allowed.TargetPath(), allowed.Title(), allowed.Body())
+	}
+	if allowed.SectionID() != "" || allowed.Replacement() != "" {
+		t.Fatal("create candidate retained replace fields")
+	}
+}
+
 func TestGuardRejectsUnknownDuplicateAndSensitiveFieldsWithoutEcho(t *testing.T) {
 	guard, err := intake.New()
 	if err != nil {

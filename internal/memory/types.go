@@ -81,6 +81,15 @@ type CreatePagePreview struct {
 	Diff          string
 }
 
+type ReconcileCreatePageRequest struct {
+	CreatePageRequest
+	PostStateHash string
+	Head          string
+	Preflight     func() error
+	Validate      func(postState []byte) error
+	Mode          ReconcileMode
+}
+
 type ReconcileRequest struct {
 	Target        Target
 	Replacement   string

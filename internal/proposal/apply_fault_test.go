@@ -122,6 +122,87 @@ func TestApplyRescansSensitiveContentAfterProposalWasSealedAgain(t *testing.T) {
 	}
 }
 
+func TestCreatePageApplyRescansSensitiveBodyAfterProposalWasSealedAgain(t *testing.T) {
+	workflow, view, memoryRoot, stateRoot := newCreatePageWorkflow(t)
+	view.Operation.Body = "Authorization: Bearer secret"
+	if err := sealProposal(&view); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateRoot, "proposals", view.ID+".json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("Apply() error = %v, want ErrIntegrity", err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "page.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("sensitive create body reached memory")
+	}
+}
+
+func TestCreatePageApplyRejectsResealedDerivedTargetBeforeMutation(t *testing.T) {
+	workflow, view, memoryRoot, stateRoot := newCreatePageWorkflow(t)
+	view.Operation.Target.SectionID = "wrong-overview"
+	if err := sealProposal(&view); err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateRoot, "proposals", view.ID+".json"), encoded, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, ErrIntegrity) {
+		t.Fatalf("Apply() error = %v, want ErrIntegrity", err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "page.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("invalid derived target created memory")
+	}
+}
+
+func newCreatePageWorkflow(t *testing.T) (*Workflow, View, string, string) {
+	t.Helper()
+	root := t.TempDir()
+	memoryRoot := filepath.Join(root, "memory")
+	codeRoot := filepath.Join(root, "code")
+	stateRoot := filepath.Join(root, "state")
+	if err := os.Mkdir(memoryRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(codeRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "--quiet"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}, {"commit", "--quiet", "--allow-empty", "-m", "initial"}} {
+		command := exec.Command("git", append([]string{"-C", memoryRoot}, args...)...)
+		if output, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, output)
+		}
+	}
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"operation":"create_page","target_path":"page.md","title":"Page","body":"safe","source_paths":[]}`)
+	allowed, err := guard.Inspect(intake.NewCandidate(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	workflow, err := New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return workflow, view, memoryRoot, stateRoot
+}
+
 func newFaultWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	t.Helper()
 	root := t.TempDir()

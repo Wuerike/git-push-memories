@@ -326,7 +326,8 @@ func (publisher *Publisher) injectFault(stage string) error {
 }
 
 func (publisher *Publisher) validateReceipt(receipt proposal.ApplyReceipt) error {
-	if receipt.SchemaVersion != 1 || receipt.Status != "applied_unpublished" || receipt.Revision != 1 || receipt.AppliedAt.IsZero() || receipt.MemoryRoot != publisher.rootPath ||
+	validVersion := receipt.SchemaVersion == 1 && receipt.Baseline.Exists == nil || receipt.SchemaVersion == 2 && receipt.Baseline.Exists != nil && *receipt.Baseline.Exists
+	if !validVersion || receipt.Status != "applied_unpublished" || receipt.Revision != 1 || receipt.AppliedAt.IsZero() || receipt.MemoryRoot != publisher.rootPath ||
 		!validProposalID.MatchString(receipt.ProposalID) || receipt.Target.Path == "" || receipt.Target.SectionID == "" || path.Ext(receipt.Target.Path) != ".md" ||
 		path.Clean(receipt.Target.Path) != receipt.Target.Path || path.IsAbs(receipt.Target.Path) || receipt.Target.Path == ".." || strings.HasPrefix(receipt.Target.Path, "../") || strings.Contains(receipt.Target.Path, "\\") || hasControl(receipt.Target.Path) ||
 		!validHash(receipt.Baseline.FileHash) || !validHash(receipt.PostState.FileHash) || receipt.Baseline.FileHash == receipt.PostState.FileHash ||

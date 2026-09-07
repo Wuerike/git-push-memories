@@ -199,9 +199,7 @@ func validateStoredState(name string, target any) error {
 	id := strings.TrimSuffix(name, ".json")
 	switch value := target.(type) {
 	case *View:
-		if value.SchemaVersion != 1 || value.ID != id || !validID.MatchString(value.Nonce) || value.Revision != 1 || value.Status != "pending" || value.CreatedAt.IsZero() ||
-			value.Operation.Type != "replace_section_content" || value.Operation.Target.Path == "" || value.Operation.Target.SectionID == "" ||
-			!validHash(value.Baseline.FileHash) || !validHash(value.PostState.FileHash) || value.Baseline.Head == "" || value.Baseline.Blob == "" || value.Diff == "" || value.SourcePaths == nil || !validHash(value.IntegrityHash) {
+		if !validView(*value, id) {
 			return errors.New("invalid proposal")
 		}
 		expectedIntegrity, err := proposalIntegrity(*value)
@@ -209,16 +207,14 @@ func validateStoredState(name string, target any) error {
 			return errors.New("invalid proposal")
 		}
 	case *DecisionReceipt:
-		if value.SchemaVersion != 1 || value.ProposalID != id || value.Revision != 1 || value.Status != "rejected" || value.DecidedAt.IsZero() {
+		if (value.SchemaVersion != 1 && value.SchemaVersion != 2) || value.ProposalID != id || value.Revision != 1 || value.Status != "rejected" || value.DecidedAt.IsZero() {
 			return errors.New("invalid decision")
 		}
 		if _, valid := rejectionReasons[value.Reason]; !valid {
 			return errors.New("invalid decision")
 		}
 	case *ApplyReceipt:
-		if value.SchemaVersion != 1 || value.ProposalID != id || value.Revision != 1 || value.Status != "applied_unpublished" ||
-			value.AppliedAt.IsZero() || value.MemoryRoot == "" || value.Target.Path == "" || value.Target.SectionID == "" ||
-			!validHash(value.Baseline.FileHash) || value.Baseline.Head == "" || value.Baseline.Blob == "" || !validHash(value.PostState.FileHash) {
+		if !validApplyReceipt(*value, id) {
 			return errors.New("invalid apply receipt")
 		}
 	case *PublicationReceipt:
@@ -230,6 +226,45 @@ func validateStoredState(name string, target any) error {
 		return errors.New("unsupported proposal state")
 	}
 	return nil
+}
+
+func validView(value View, id string) bool {
+	if value.ID != id || !validID.MatchString(value.Nonce) || value.Revision != 1 || value.Status != "pending" || value.CreatedAt.IsZero() ||
+		value.Operation.Target.Path == "" || value.Operation.Target.SectionID == "" || !validHash(value.PostState.FileHash) || value.Baseline.Head == "" || value.Diff == "" || value.SourcePaths == nil || !validHash(value.IntegrityHash) {
+		return false
+	}
+	switch value.SchemaVersion {
+	case 1:
+		return value.Operation.Type == "replace_section_content" && value.Operation.Title == "" && value.Operation.Body == "" &&
+			value.Baseline.Exists == nil && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
+	case 2:
+		if value.Baseline.Exists == nil {
+			return false
+		}
+		if value.Operation.Type == "create_page" {
+			return !*value.Baseline.Exists && value.Operation.Replacement == "" && value.Operation.Title != "" && value.Operation.Body != "" && value.Baseline.FileHash == "" && value.Baseline.Blob == ""
+		}
+		return value.Operation.Type == "replace_section_content" && *value.Baseline.Exists && value.Operation.Title == "" && value.Operation.Body == "" && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
+	default:
+		return false
+	}
+}
+
+func validApplyReceipt(value ApplyReceipt, id string) bool {
+	if value.ProposalID != id || value.Revision != 1 || value.Status != "applied_unpublished" || value.AppliedAt.IsZero() || value.MemoryRoot == "" ||
+		value.Target.Path == "" || value.Target.SectionID == "" || value.Baseline.Head == "" || !validHash(value.PostState.FileHash) {
+		return false
+	}
+	if value.SchemaVersion == 1 {
+		return value.Baseline.Exists == nil && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
+	}
+	if value.SchemaVersion != 2 || value.Baseline.Exists == nil {
+		return false
+	}
+	if *value.Baseline.Exists {
+		return validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
+	}
+	return value.Baseline.FileHash == "" && value.Baseline.Blob == ""
 }
 
 func sealProposal(view *View) error {

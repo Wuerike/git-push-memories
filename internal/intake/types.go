@@ -9,15 +9,21 @@ func NewCandidate(raw []byte) Candidate {
 }
 
 type AllowedCandidate struct {
+	operation   string
 	targetPath  string
 	sectionID   string
 	replacement string
+	title       string
+	body        string
 	sourcePaths []string
 }
 
+func (candidate AllowedCandidate) Operation() string   { return candidate.operation }
 func (candidate AllowedCandidate) TargetPath() string  { return candidate.targetPath }
 func (candidate AllowedCandidate) SectionID() string   { return candidate.sectionID }
 func (candidate AllowedCandidate) Replacement() string { return candidate.replacement }
+func (candidate AllowedCandidate) Title() string       { return candidate.title }
+func (candidate AllowedCandidate) Body() string        { return candidate.body }
 func (candidate AllowedCandidate) SourcePaths() []string {
 	result := make([]string, len(candidate.sourcePaths))
 	copy(result, candidate.sourcePaths)
