@@ -9,6 +9,8 @@ var (
 	ErrSectionNotLeaf  = errors.New("section is not a leaf")
 	ErrDrift           = errors.New("memory file drifted")
 	ErrTargetDirty     = errors.New("memory target has Git changes")
+	ErrTargetExists    = errors.New("memory target already exists")
+	ErrInvalidID       = errors.New("invalid generated memory ID")
 )
 
 type Scope struct {
@@ -62,6 +64,21 @@ type Preview struct {
 	Blob          string
 	Baseline      []byte
 	PostState     []byte
+}
+
+type CreatePageRequest struct {
+	TargetPath string
+	Title      string
+	Body       string
+}
+
+type CreatePagePreview struct {
+	Target        Target
+	PageID        string
+	PostStateHash string
+	Head          string
+	PostState     []byte
+	Diff          string
 }
 
 type ReconcileRequest struct {

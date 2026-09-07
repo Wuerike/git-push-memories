@@ -2,6 +2,7 @@ package memory_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -43,6 +44,158 @@ func TestInspectReturnsCanonicalSnapshotAndGitIdentity(t *testing.T) {
 	}
 	if operation.Body != "Timeout: 5 seconds.\n" {
 		t.Fatalf("operation body = %q", operation.Body)
+	}
+}
+
+func TestPreviewCreatePageRendersCanonicalDocumentWithoutWriting(t *testing.T) {
+	root := newEmptyMemoryRoot(t)
+	repository := openRepository(t, root)
+	before := fingerprint(t, root)
+
+	preview, err := repository.PreviewCreatePage(context.Background(), memory.CreatePageRequest{
+		TargetPath: "parcel-dispatch.md",
+		Title:      "Parcel Dispatch",
+		Body:       "Dispatch retries use exponential backoff.\r\nOwner: Fulfillment.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	wantPage := "# Parcel Dispatch\n<!-- @id: parcel-dispatch -->\n\n## Overview\n<!-- @id: parcel-dispatch-overview -->\nDispatch retries use exponential backoff.\nOwner: Fulfillment.\n"
+	if preview.Target != (memory.Target{Path: "parcel-dispatch.md", SectionID: "parcel-dispatch-overview"}) {
+		t.Fatalf("Target = %+v", preview.Target)
+	}
+	if preview.PageID != "parcel-dispatch" || preview.Head != gitOutput(t, root, "rev-parse", "HEAD") {
+		t.Fatalf("preview identity = %+v", preview)
+	}
+	if string(preview.PostState) != wantPage {
+		t.Fatalf("PostState mismatch\ngot:\n%s\nwant:\n%s", preview.PostState, wantPage)
+	}
+	if preview.PostStateHash != "sha256:10b8a1d74f0605c17708900c2750c3db78305afb067db81fc75a68426841dfb0" {
+		t.Fatalf("PostStateHash = %q", preview.PostStateHash)
+	}
+	wantDiff := "--- /dev/null\n+++ b/parcel-dispatch.md\n@@ -0,0 +1,7 @@\n+# Parcel Dispatch\n+<!-- @id: parcel-dispatch -->\n+\n+## Overview\n+<!-- @id: parcel-dispatch-overview -->\n+Dispatch retries use exponential backoff.\n+Owner: Fulfillment.\n"
+	if preview.Diff != wantDiff {
+		t.Fatalf("Diff mismatch\ngot:\n%s\nwant:\n%s", preview.Diff, wantDiff)
+	}
+	if got := fingerprint(t, root); got != before {
+		t.Fatal("PreviewCreatePage() modified the memory root")
+	}
+}
+
+func TestPreviewCreatePageRejectsExistingTargetInHeadIndexOrWorktree(t *testing.T) {
+	for _, location := range []string{"head", "index", "worktree"} {
+		t.Run(location, func(t *testing.T) {
+			root := newEmptyMemoryRoot(t)
+			pagePath := filepath.Join(root, "existing.md")
+			if err := os.WriteFile(pagePath, []byte(validPage), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			switch location {
+			case "head":
+				runGit(t, root, "add", "existing.md")
+				runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "existing")
+			case "index":
+				runGit(t, root, "add", "existing.md")
+			}
+			repository := openRepository(t, root)
+			_, err := repository.PreviewCreatePage(context.Background(), memory.CreatePageRequest{
+				TargetPath: "existing.md", Title: "Existing", Body: "Body.",
+			})
+			if !errors.Is(err, memory.ErrTargetExists) {
+				t.Fatalf("PreviewCreatePage() error = %v, want ErrTargetExists", err)
+			}
+		})
+	}
+}
+
+func TestPreviewCreatePageRejectsInvalidStructure(t *testing.T) {
+	tests := []struct {
+		name    string
+		request memory.CreatePageRequest
+		want    error
+	}{
+		{name: "nested path", request: memory.CreatePageRequest{TargetPath: "services/page.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
+		{name: "missing extension", request: memory.CreatePageRequest{TargetPath: "page", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
+		{name: "uppercase filename", request: memory.CreatePageRequest{TargetPath: "Page.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
+		{name: "reserved filename", request: memory.CreatePageRequest{TargetPath: "con.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
+		{name: "long generated ID", request: memory.CreatePageRequest{TargetPath: strings.Repeat("a", 56) + ".md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidID},
+		{name: "title control", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page\x00", Body: "Body."}, want: memory.ErrInvalidSchema},
+		{name: "title heading", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "# Page", Body: "Body."}, want: memory.ErrInvalidSchema},
+		{name: "title merge marker", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "<<<<<<< ours", Body: "Body."}, want: memory.ErrInvalidSchema},
+		{name: "title anchor", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "<!-- @id: page -->", Body: "Body."}, want: memory.ErrInvalidSchema},
+		{name: "title invalid UTF-8", request: memory.CreatePageRequest{TargetPath: "page.md", Title: string([]byte{0xff}), Body: "Body."}, want: memory.ErrInvalidSchema},
+		{name: "body control", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "Body\x00"}, want: memory.ErrInvalidSchema},
+		{name: "body invalid UTF-8", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: string([]byte{0xff})}, want: memory.ErrInvalidSchema},
+		{name: "ATX heading", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "## Body"}, want: memory.ErrInvalidSchema},
+		{name: "setext heading", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "Body\n===="}, want: memory.ErrInvalidSchema},
+		{name: "anchor", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "<!-- @id: body -->"}, want: memory.ErrInvalidSchema},
+		{name: "merge marker", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "<<<<<<< ours"}, want: memory.ErrInvalidSchema},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := newEmptyMemoryRoot(t)
+			repository := openRepository(t, root)
+			before := fingerprint(t, root)
+			_, err := repository.PreviewCreatePage(context.Background(), test.request)
+			if !errors.Is(err, test.want) {
+				t.Fatalf("PreviewCreatePage() error = %v, want %v", err, test.want)
+			}
+			if got := fingerprint(t, root); got != before {
+				t.Fatal("rejected preview modified the memory root")
+			}
+		})
+	}
+}
+
+func TestPreviewCreatePageIsDeterministicAcrossRepositories(t *testing.T) {
+	request := memory.CreatePageRequest{TargetPath: "stable.md", Title: "Stable", Body: "Stable body."}
+	firstRoot := newEmptyMemoryRoot(t)
+	secondRoot := newEmptyMemoryRoot(t)
+	first, err := openRepository(t, firstRoot).PreviewCreatePage(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultPath := filepath.Join(t.TempDir(), "preview.json")
+	command := exec.Command(os.Args[0], "-test.run=^TestPreviewCreatePageHelperProcess$")
+	command.Env = append(os.Environ(), "MEMORY_PREVIEW_HELPER=1", "MEMORY_PREVIEW_ROOT="+secondRoot, "MEMORY_PREVIEW_RESULT="+resultPath)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("helper process: %v: %s", err, output)
+	}
+	encoded, err := os.ReadFile(resultPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var second memory.CreatePagePreview
+	if err := json.Unmarshal(encoded, &second); err != nil {
+		t.Fatal(err)
+	}
+	if first.PageID != second.PageID || first.PostStateHash != second.PostStateHash || first.Diff != second.Diff || string(first.PostState) != string(second.PostState) {
+		t.Fatalf("previews differ\nfirst: %+v\nsecond: %+v", first, second)
+	}
+}
+
+func TestPreviewCreatePageHelperProcess(t *testing.T) {
+	if os.Getenv("MEMORY_PREVIEW_HELPER") != "1" {
+		return
+	}
+	repository, err := memory.New(os.Getenv("MEMORY_PREVIEW_ROOT"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	preview, err := repository.PreviewCreatePage(context.Background(), memory.CreatePageRequest{
+		TargetPath: "stable.md", Title: "Stable", Body: "Stable body.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(preview)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("MEMORY_PREVIEW_RESULT"), encoded, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -164,6 +317,14 @@ func newMemoryRoot(t *testing.T, page string) string {
 	runGit(t, root, "init", "--quiet")
 	runGit(t, root, "add", "services/checkout-api.md")
 	runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "initial")
+	return root
+}
+
+func newEmptyMemoryRoot(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	runGit(t, root, "init", "--quiet")
+	runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "initial")
 	return root
 }
 

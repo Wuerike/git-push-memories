@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 func (repository *Repository) ensureTargetClean(ctx context.Context, relativePath, expectedHead string) error {
@@ -32,6 +34,37 @@ func (repository *Repository) ensureTargetClean(ctx context.Context, relativePat
 		return ErrTargetDirty
 	}
 	return nil
+}
+
+func (repository *Repository) ensureTargetAbsent(ctx context.Context, relativePath string) (string, error) {
+	head, err := repository.gitOutput(ctx, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("read Git HEAD: %w", ErrInvalidSchema)
+	}
+	headID := strings.TrimSpace(string(head))
+	treeEntry, err := repository.gitOutput(ctx, "ls-tree", "-z", headID, "--", relativePath)
+	if err != nil {
+		return "", fmt.Errorf("inspect Git target: %w", ErrInvalidSchema)
+	}
+	if len(treeEntry) != 0 {
+		return "", ErrTargetExists
+	}
+	indexEntry, err := repository.gitOutput(ctx, "ls-files", "--stage", "--", relativePath)
+	if err != nil {
+		return "", fmt.Errorf("inspect Git index: %w", ErrInvalidSchema)
+	}
+	if len(indexEntry) != 0 {
+		return "", ErrTargetExists
+	}
+	var stat unix.Stat_t
+	err = unix.Fstatat(int(repository.root.Fd()), relativePath, &stat, unix.AT_SYMLINK_NOFOLLOW)
+	if err == nil {
+		return "", ErrTargetExists
+	}
+	if !errors.Is(err, unix.ENOENT) {
+		return "", fmt.Errorf("inspect memory target: %w", ErrInvalidPath)
+	}
+	return headID, nil
 }
 
 func (repository *Repository) confirmPreviewState(ctx context.Context, expected Snapshot) error {

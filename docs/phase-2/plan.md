@@ -1,6 +1,6 @@
 # Plano da Fase 2: fluxo vertical minimo
 
-Status do plano: **T1-T10 concluidas; Fase 2 reaberta para T11-T19; Fase 3 bloqueada**.
+Status do plano: **T1-T11 concluidas; T12-T19 pendentes; Fase 3 bloqueada**.
 
 ## Objetivo
 
@@ -62,7 +62,8 @@ Por decisao humana em 2026-09-06, T1-T10 permanecem concluidas e suas evidencias
 |---|---|---|
 | T1-T9 | concluida | gate tecnico original de replace reproduzivel |
 | T10 | concluida | decisao `revisar o fluxo`; somente 1/3 pares passou o limiar de tempo |
-| T11-T16 | pendente | primitives e experiencia explicita de bootstrap |
+| T11 | concluida | preview canonico de pagina nova, sem mutacao |
+| T12-T16 | pendente | lifecycle de criacao e experiencia explicita de bootstrap |
 | T17 | pendente | gate tecnico revisado partindo de zero Markdown |
 | T18 | pendente | diagnostico e refinamento mensurado de overhead |
 | T19 | pendente | novo gate autenticado de valor |

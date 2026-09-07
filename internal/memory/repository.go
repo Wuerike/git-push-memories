@@ -10,13 +10,23 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/Wuerike/git-push-memories/internal/markdown"
 	"golang.org/x/sys/unix"
 )
+
+var createPagePath = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
+
+var reservedPageNames = map[string]struct{}{
+	"aux": {}, "con": {}, "nul": {}, "prn": {},
+	"com1": {}, "com2": {}, "com3": {}, "com4": {}, "com5": {}, "com6": {}, "com7": {}, "com8": {}, "com9": {},
+	"lpt1": {}, "lpt2": {}, "lpt3": {}, "lpt4": {}, "lpt5": {}, "lpt6": {}, "lpt7": {}, "lpt8": {}, "lpt9": {},
+}
 
 type Repository struct {
 	root  *os.File
@@ -162,6 +172,102 @@ func (repository *Repository) Preview(ctx context.Context, request PreviewReques
 		return nil
 	})
 	return preview, err
+}
+
+func (repository *Repository) PreviewCreatePage(ctx context.Context, request CreatePageRequest) (CreatePagePreview, error) {
+	var preview CreatePagePreview
+	err := repository.withLock(ctx, false, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		targetPath, pageID, err := validateCreatePageRequest(request)
+		if err != nil {
+			return err
+		}
+		head, err := repository.ensureTargetAbsent(ctx, targetPath)
+		if err != nil {
+			return err
+		}
+		postState, err := renderPage(pageID, request.Title, request.Body)
+		if err != nil {
+			return err
+		}
+		confirmedHead, err := repository.ensureTargetAbsent(ctx, targetPath)
+		if err != nil {
+			return err
+		}
+		if confirmedHead != head {
+			return ErrTargetDirty
+		}
+		preview = CreatePagePreview{
+			Target: Target{Path: targetPath, SectionID: pageID + "-overview"}, PageID: pageID,
+			PostStateHash: hash(postState), Head: head, PostState: postState, Diff: createPageDiff(targetPath, postState),
+		}
+		return nil
+	})
+	return preview, err
+}
+
+func validateCreatePageRequest(request CreatePageRequest) (string, string, error) {
+	if !createPagePath.MatchString(request.TargetPath) {
+		return "", "", ErrInvalidPath
+	}
+	pageID := strings.TrimSuffix(request.TargetPath, ".md")
+	if _, reserved := reservedPageNames[pageID]; reserved {
+		return "", "", ErrInvalidPath
+	}
+	if len(pageID) > 64 || len(pageID+"-overview") > 64 {
+		return "", "", fmt.Errorf("%w: generated section ID exceeds limit", ErrInvalidID)
+	}
+	if request.Title == "" || len(request.Title) > 256 || !utf8.ValidString(request.Title) || hasDisallowedControl(request.Title, false) || strings.ContainsAny(request.Title, "\r\n") ||
+		strings.Contains(request.Title, "<!-- @id:") || hasUnresolvedMerge([]byte(request.Title)) {
+		return "", "", fmt.Errorf("%w: invalid page title", ErrInvalidSchema)
+	}
+	sections, err := markdown.ParseSections([]byte(request.Title))
+	if err != nil || len(sections) != 0 {
+		return "", "", fmt.Errorf("%w: page title contains heading", ErrInvalidSchema)
+	}
+	return request.TargetPath, pageID, nil
+}
+
+func renderPage(pageID, title, body string) ([]byte, error) {
+	normalizedBody := strings.ReplaceAll(body, "\r\n", "\n")
+	if normalizedBody == "" || !utf8.ValidString(normalizedBody) || hasDisallowedControl(normalizedBody, true) || strings.Contains(normalizedBody, "\r") ||
+		strings.Contains(normalizedBody, "<!-- @id:") || hasUnresolvedMerge([]byte(normalizedBody)) {
+		return nil, fmt.Errorf("%w: invalid page body", ErrInvalidSchema)
+	}
+	sections, err := markdown.ParseSections([]byte(normalizedBody))
+	if err != nil || len(sections) != 0 {
+		return nil, fmt.Errorf("%w: page body contains heading", ErrInvalidSchema)
+	}
+	document := markdown.RenderPage(pageID, title, normalizedBody)
+	if _, err := validateDocument(document); err != nil {
+		return nil, err
+	}
+	return document, nil
+}
+
+func hasDisallowedControl(value string, allowLayout bool) bool {
+	for _, character := range value {
+		if allowLayout && (character == '\t' || character == '\n') {
+			continue
+		}
+		if unicode.IsControl(character) {
+			return true
+		}
+	}
+	return false
+}
+
+func createPageDiff(targetPath string, postState []byte) string {
+	var diff strings.Builder
+	fmt.Fprintf(&diff, "--- /dev/null\n+++ b/%s\n@@ -0,0 +1,%d @@\n", targetPath, bytes.Count(postState, []byte("\n")))
+	for _, line := range strings.Split(strings.TrimSuffix(string(postState), "\n"), "\n") {
+		diff.WriteByte('+')
+		diff.WriteString(line)
+		diff.WriteByte('\n')
+	}
+	return diff.String()
 }
 
 func (repository *Repository) ReconcileApply(ctx context.Context, request ReconcileRequest) (ReconcileResult, error) {
