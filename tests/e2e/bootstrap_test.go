@@ -25,7 +25,8 @@ func TestBootstrapWorkflow(t *testing.T) {
 	configRoot := filepath.Join(runRoot, "config-a")
 	h.seedRepository(memoryRoot, nil)
 	h.git(memoryRoot, "commit", "--quiet", "--allow-empty", "-m", "empty memory")
-	h.seedRepository(codeRoot, map[string][]byte{"services/parcel/service.yaml": []byte("retry_limit: 3\nowner: fulfillment\n")})
+	codeFixture := []byte("retry_limit: 3\nowner: fulfillment\n")
+	h.seedRepository(codeRoot, map[string][]byte{"services/parcel/service.yaml": codeFixture})
 	for _, root := range []string{home, configRoot} {
 		if err := os.MkdirAll(root, 0o700); err != nil {
 			t.Fatal(err)
@@ -39,6 +40,10 @@ func TestBootstrapWorkflow(t *testing.T) {
 
 	environment := isolatedEnvironment(home, configRoot)
 	session := h.connectMCP("bootstrap MCP", memoryRoot, codeRoot, stateRoot, environment, "bootstrap-client")
+	initialBundle, initialBytes := h.callBundle(session, "bootstrap initial search", "memory_search", map[string]any{"query": "parcel dispatch retries", "budget_bytes": 2048})
+	if initialBytes > 2048 || len(initialBundle.Items) != 0 {
+		t.Fatalf("initial empty search = %+v, bytes=%d", initialBundle, initialBytes)
+	}
 	common := []string{"--memory-root", memoryRoot, "--code-root", codeRoot, "--state-root", stateRoot}
 	commits := make([]string, 0, 3)
 	proposeApplyPublish := func(tool string, arguments map[string]any, wantDiff string) proposal.PublicationReceipt {
@@ -111,6 +116,10 @@ func TestBootstrapWorkflow(t *testing.T) {
 	if bytes > 2048 || len(bundle.Items) == 0 || bundle.Items[0].Handle.SectionID != "parcel-dispatch-failure-modes" || !strings.Contains(bundle.Items[0].Content, "three failures") {
 		t.Fatalf("fresh retrieval = %+v, bytes=%d", bundle, bytes)
 	}
+	expanded, expandedBytes := h.callBundle(sessionB, "bootstrap final expand", "memory_expand", map[string]any{"handle": bundle.Items[0].Handle, "budget_bytes": 4096})
+	if expandedBytes > 4096 || len(expanded.Items) != 1 || !strings.Contains(expanded.Items[0].Content, "three failures") {
+		t.Fatalf("fresh expand = %+v, bytes=%d", expanded, expandedBytes)
+	}
 	if err := sessionB.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +134,8 @@ func TestBootstrapWorkflow(t *testing.T) {
 	}
 	h.writeJSON("bootstrap-manifest.json", map[string]any{
 		"schema_version": 1, "initial_markdown_files": 0, "operations": []string{"create_page", "create_section", "replace_section_content"},
-		"publication_commits": commits, "final_file_hash": hashBytes(final), "fresh_context_bytes": bytes,
+		"code_corpus_files": 1, "code_corpus_bytes": len(codeFixture),
+		"publication_commits": commits, "final_file_hash": hashBytes(final), "fresh_context_bytes": bytes, "fresh_expand_bytes": expandedBytes,
 		"privacy_marker_hits": privacyHits, "privacy_write_targets": privacyWrites, "commands": h.records,
 		"product_revision": strings.TrimSpace(h.commandOutput(h.repository, os.Environ(), "git", "rev-parse", "HEAD")),
 		"product_worktree": worktreeState(h.repository), "evaluated_source_hashes": sourceHashes, "binary_hash": hashFile(t, h.binary),

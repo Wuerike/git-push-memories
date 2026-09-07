@@ -1,6 +1,6 @@
 # Plano da Fase 2: fluxo vertical minimo
 
-Status do plano: **T1-T17 concluidas; T18-T19 pendentes; Fase 3 bloqueada**.
+Status do plano: **T1-T18 concluidas; T19 pendente; Fase 3 bloqueada**.
 
 ## Objetivo
 
@@ -69,7 +69,7 @@ Por decisao humana em 2026-09-06, T1-T10 permanecem concluidas e suas evidencias
 | T15 | concluida | tools MCP e skills explicitos para create page/section |
 | T16 | concluida | `/remember` pesquisa, apresenta escolha e confirma uma proposta |
 | T17 | concluida | gate tecnico revisado partindo de zero Markdown |
-| T18 | pendente | diagnostico e refinamento mensurado de overhead |
+| T18 | concluida | overhead local p50 158 ms; nenhuma otimizacao exigida |
 | T19 | pendente | novo gate autenticado de valor |
 
 Neste plano, **bootstrap de memoria** significa criar o primeiro arquivo Markdown duravel em um memory root que ja existe como Git worktree local, possui `HEAD` resolvivel, e distinto do code root e nao contem arquivos `*.md`. Um commit inicial vazio e suficiente. Inicializar, clonar ou configurar remotes Git, suportar repositorio unborn e criar paginas em diretorios aninhados nao bloqueiam este gate.
