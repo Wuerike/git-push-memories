@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -40,15 +41,15 @@ func (stage writeStage) String() string {
 	}
 }
 
-func durableReplace(rootFD int, relativePath string, content []byte, mode os.FileMode, fault writeFault) error {
-	return durableWrite(rootFD, relativePath, content, mode, false, fault)
+func durableReplace(rootFD int, relativePath string, content []byte, mode os.FileMode, expectedHash string, fault writeFault) error {
+	return durableWrite(rootFD, relativePath, content, mode, expectedHash, false, fault)
 }
 
 func durableCreate(rootFD int, relativePath string, content []byte, mode os.FileMode, fault writeFault) error {
-	return durableWrite(rootFD, relativePath, content, mode, true, fault)
+	return durableWrite(rootFD, relativePath, content, mode, "", true, fault)
 }
 
-func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileMode, create bool, fault writeFault) error {
+func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileMode, expectedHash string, create bool, fault writeFault) error {
 	parentPath, base := path.Split(relativePath)
 	parentPath = strings.TrimSuffix(parentPath, "/")
 	if parentPath == "" {
@@ -91,6 +92,22 @@ func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileM
 	}
 	if err := temporary.Close(); err != nil {
 		return err
+	}
+	if !create {
+		currentFD, err := unix.Openat(parentFD, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			return ErrDrift
+		}
+		current := os.NewFile(uintptr(currentFD), base)
+		if current == nil {
+			_ = unix.Close(currentFD)
+			return ErrDrift
+		}
+		contents, readErr := io.ReadAll(current)
+		closeErr := current.Close()
+		if readErr != nil || closeErr != nil || hash(contents) != expectedHash {
+			return ErrDrift
+		}
 	}
 	var renameErr error
 	if create {

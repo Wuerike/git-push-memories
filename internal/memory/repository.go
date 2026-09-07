@@ -269,6 +269,95 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 	return result, err
 }
 
+func (repository *Repository) PreviewCreateSection(ctx context.Context, request CreateSectionRequest) (Preview, error) {
+	var preview Preview
+	err := repository.withLock(ctx, false, func() error {
+		state, err := repository.load(ctx, request.TargetPath)
+		if err != nil {
+			return err
+		}
+		if err := repository.ensureTargetClean(ctx, state.snapshot.Path, state.snapshot.Head); err != nil {
+			return err
+		}
+		postState, sectionID, err := renderSection(state.source, state.parsed, request.Heading, request.Body)
+		if err != nil {
+			return err
+		}
+		if err := repository.confirmPreviewState(ctx, state.snapshot); err != nil {
+			return err
+		}
+		preview = Preview{
+			Target: Target{Path: state.snapshot.Path, SectionID: sectionID}, BaselineHash: state.snapshot.FileHash, PostStateHash: hash(postState),
+			Head: state.snapshot.Head, Blob: state.snapshot.Blob, Baseline: append([]byte(nil), state.source...), PostState: postState,
+			Diff: unifieddiff.Between(state.snapshot.Path, state.source, postState),
+		}
+		return nil
+	})
+	return preview, err
+}
+
+func (repository *Repository) ReconcileCreateSection(ctx context.Context, request ReconcileCreateSectionRequest) (ReconcileResult, error) {
+	var result ReconcileResult
+	err := repository.withLock(ctx, true, func() error {
+		if request.Preflight != nil {
+			if err := request.Preflight(); err != nil {
+				return err
+			}
+		}
+		canonicalPath, current, mode, err := repository.read(request.TargetPath)
+		if err != nil {
+			return err
+		}
+		head, blob, err := repository.gitIdentity(ctx, canonicalPath)
+		if err != nil || head != request.Head || blob != request.Blob {
+			return ErrDrift
+		}
+		baseline, err := repository.gitOutput(ctx, "cat-file", "blob", request.Blob)
+		if err != nil || hash(baseline) != request.BaselineHash {
+			return ErrDrift
+		}
+		parsed, err := validateDocument(baseline)
+		if err != nil {
+			return err
+		}
+		postState, sectionID, err := renderSection(baseline, parsed, request.Heading, request.Body)
+		if err != nil || sectionID != request.ExpectedSectionID || hash(postState) != request.PostStateHash {
+			return ErrDrift
+		}
+		result = ReconcileResult{Target: Target{Path: canonicalPath, SectionID: sectionID}, Baseline: append([]byte(nil), baseline...), PostState: postState}
+		if request.Validate != nil {
+			if err := request.Validate(result.Baseline, result.PostState); err != nil {
+				return err
+			}
+		}
+		switch hash(current) {
+		case request.PostStateHash:
+			result.State = ReconcilePostState
+			return nil
+		case request.BaselineHash:
+			result.State = ReconcileBaseline
+			if request.Mode == ReconcileOnly {
+				return nil
+			}
+			if err := repository.ensureTargetClean(ctx, canonicalPath, request.Head); err != nil {
+				return err
+			}
+			_, confirmed, _, err := repository.read(canonicalPath)
+			if err != nil || hash(confirmed) != request.BaselineHash {
+				return ErrDrift
+			}
+			if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, request.BaselineHash, repository.fault); err != nil {
+				return fmt.Errorf("write memory file: %w", err)
+			}
+			result.State = ReconcilePostState
+			return nil
+		default:
+			return ErrDrift
+		}
+	})
+	return result, err
+}
+
 func validateCreatePageRequest(request CreatePageRequest) (string, string, error) {
 	if !createPagePath.MatchString(request.TargetPath) {
 		return "", "", ErrInvalidPath
@@ -306,6 +395,74 @@ func renderPage(pageID, title, body string) ([]byte, error) {
 		return nil, err
 	}
 	return document, nil
+}
+
+func renderSection(source []byte, parsed []markdown.Section, heading, body string) ([]byte, string, error) {
+	if heading == "" || len(heading) > 256 || !utf8.ValidString(heading) || hasDisallowedControl(heading, false) || strings.ContainsAny(heading, "\r\n") ||
+		strings.Contains(heading, "<!-- @id:") || hasUnresolvedMerge([]byte(heading)) {
+		return nil, "", fmt.Errorf("%w: invalid section heading", ErrInvalidSchema)
+	}
+	headingSections, err := markdown.ParseSections([]byte(heading))
+	if err != nil || len(headingSections) != 0 {
+		return nil, "", fmt.Errorf("%w: section heading contains heading", ErrInvalidSchema)
+	}
+	normalizedBody := strings.ReplaceAll(body, "\r\n", "\n")
+	if normalizedBody == "" || !utf8.ValidString(normalizedBody) || hasDisallowedControl(normalizedBody, true) || strings.Contains(normalizedBody, "\r") ||
+		strings.Contains(normalizedBody, "<!-- @id:") || hasUnresolvedMerge([]byte(normalizedBody)) {
+		return nil, "", fmt.Errorf("%w: invalid section body", ErrInvalidSchema)
+	}
+	bodySections, err := markdown.ParseSections([]byte(normalizedBody))
+	if err != nil || len(bodySections) != 0 {
+		return nil, "", fmt.Errorf("%w: section body contains heading", ErrInvalidSchema)
+	}
+	pageID := ""
+	for _, section := range parsed {
+		if section.HeadingLevel == 1 {
+			pageID = section.AnchorID
+		}
+		if section.HeadingText == heading {
+			return nil, "", ErrSectionExists
+		}
+	}
+	slug := slugHeading(heading)
+	sectionID := pageID + "-" + slug
+	if slug == "" || len(sectionID) > 64 {
+		return nil, "", ErrInvalidID
+	}
+	for _, section := range parsed {
+		if section.AnchorID == sectionID {
+			return nil, "", ErrSectionExists
+		}
+	}
+	separator := "\n\n"
+	if bytes.HasSuffix(source, []byte("\n\n")) {
+		separator = ""
+	} else if bytes.HasSuffix(source, []byte("\n")) {
+		separator = "\n"
+	}
+	section := fmt.Sprintf("## %s\n<!-- @id: %s -->\n%s", heading, sectionID, strings.TrimSuffix(normalizedBody, "\n")+"\n")
+	postState := append(append(append([]byte(nil), source...), separator...), section...)
+	if _, err := validateDocument(postState); err != nil {
+		return nil, "", err
+	}
+	return postState, sectionID, nil
+}
+
+func slugHeading(heading string) string {
+	var slug strings.Builder
+	separator := false
+	for _, character := range strings.ToLower(heading) {
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
+			if separator && slug.Len() > 0 {
+				slug.WriteByte('-')
+			}
+			slug.WriteRune(character)
+			separator = false
+		} else if slug.Len() > 0 {
+			separator = true
+		}
+	}
+	return slug.String()
 }
 
 func hasDisallowedControl(value string, allowLayout bool) bool {
@@ -376,7 +533,7 @@ func (repository *Repository) ReconcileApply(ctx context.Context, request Reconc
 			if err != nil || hash(confirmed) != request.BaselineHash {
 				return ErrDrift
 			}
-			if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, repository.fault); err != nil {
+			if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, request.BaselineHash, repository.fault); err != nil {
 				return fmt.Errorf("write memory file: %w", err)
 			}
 			result.State = ReconcilePostState
@@ -412,7 +569,7 @@ func (repository *Repository) apply(ctx context.Context, change ChangeSet) (Rece
 	if err != nil {
 		return Receipt{}, err
 	}
-	if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, repository.fault); err != nil {
+	if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, baselineHash, repository.fault); err != nil {
 		return Receipt{}, fmt.Errorf("write memory file: %w", err)
 	}
 	return Receipt{

@@ -72,6 +72,7 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 		SectionID   string
 		Replacement string
 		Title       string
+		Heading     string
 		Body        string
 		SourcePaths []string
 	}
@@ -80,13 +81,13 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 			return AllowedCandidate{}, err
 		}
 	} else {
-		decoded.Operation = "replace_section_content"
+		decoded.Operation = OperationReplaceSection
 	}
 	if err := decodeField(fields, "target_path", &decoded.TargetPath); err != nil {
 		return AllowedCandidate{}, err
 	}
 	switch decoded.Operation {
-	case "replace_section_content":
+	case OperationReplaceSection:
 		if !hasExactly(fields, "target_path", "section_id", "replacement", "source_paths") && !hasExactly(fields, "operation", "target_path", "section_id", "replacement", "source_paths") {
 			return AllowedCandidate{}, rejection("schema", "invalid_candidate")
 		}
@@ -96,11 +97,21 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 		if err := decodeField(fields, "replacement", &decoded.Replacement); err != nil {
 			return AllowedCandidate{}, err
 		}
-	case "create_page":
+	case OperationCreatePage:
 		if !hasExactly(fields, "operation", "target_path", "title", "body", "source_paths") {
 			return AllowedCandidate{}, rejection("schema", "invalid_candidate")
 		}
 		if err := decodeField(fields, "title", &decoded.Title); err != nil {
+			return AllowedCandidate{}, err
+		}
+		if err := decodeField(fields, "body", &decoded.Body); err != nil {
+			return AllowedCandidate{}, err
+		}
+	case OperationCreateSection:
+		if !hasExactly(fields, "operation", "target_path", "heading", "body", "source_paths") {
+			return AllowedCandidate{}, rejection("schema", "invalid_candidate")
+		}
+		if err := decodeField(fields, "heading", &decoded.Heading); err != nil {
 			return AllowedCandidate{}, err
 		}
 		if err := decodeField(fields, "body", &decoded.Body); err != nil {
@@ -112,7 +123,7 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 	if err := decodeField(fields, "source_paths", &decoded.SourcePaths); err != nil {
 		return AllowedCandidate{}, err
 	}
-	if len(decoded.TargetPath) > maxPathBytes || len(decoded.Replacement) > maxReplacementBytes || len(decoded.Body) > maxReplacementBytes || len(decoded.Title) > maxHeadingBytes || len(decoded.SourcePaths) > maxSourcePaths {
+	if len(decoded.TargetPath) > maxPathBytes || len(decoded.Replacement) > maxReplacementBytes || len(decoded.Body) > maxReplacementBytes || len(decoded.Title) > maxHeadingBytes || len(decoded.Heading) > maxHeadingBytes || len(decoded.SourcePaths) > maxSourcePaths {
 		return AllowedCandidate{}, rejection("limits", "limit_exceeded")
 	}
 	for _, sourcePath := range decoded.SourcePaths {
@@ -120,7 +131,7 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 			return AllowedCandidate{}, rejection("limits", "limit_exceeded")
 		}
 	}
-	if invalidControls(decoded.Operation, false) || invalidControls(decoded.TargetPath, false) || invalidControls(decoded.SectionID, false) || invalidControls(decoded.Replacement, true) || invalidControls(decoded.Title, false) || invalidControls(decoded.Body, true) {
+	if invalidControls(decoded.Operation, false) || invalidControls(decoded.TargetPath, false) || invalidControls(decoded.SectionID, false) || invalidControls(decoded.Replacement, true) || invalidControls(decoded.Title, false) || invalidControls(decoded.Heading, false) || invalidControls(decoded.Body, true) {
 		return AllowedCandidate{}, rejection("privacy", "control_character")
 	}
 	for _, sourcePath := range decoded.SourcePaths {
@@ -128,7 +139,7 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 			return AllowedCandidate{}, rejection("privacy", "control_character")
 		}
 	}
-	rawValues := []string{decoded.Operation, decoded.TargetPath, decoded.SectionID, decoded.Replacement, decoded.Title, decoded.Body}
+	rawValues := []string{decoded.Operation, decoded.TargetPath, decoded.SectionID, decoded.Replacement, decoded.Title, decoded.Heading, decoded.Body}
 	rawValues = append(rawValues, decoded.SourcePaths...)
 	for _, value := range rawValues {
 		if guard.sensitive(value) {
@@ -151,12 +162,12 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 			return AllowedCandidate{}, rejection("privacy", "sensitive_content")
 		}
 	}
-	if decoded.Operation == "replace_section_content" && (!sectionIDPattern.MatchString(decoded.SectionID) || len(decoded.SectionID) > 64) {
+	if decoded.Operation == OperationReplaceSection && (!sectionIDPattern.MatchString(decoded.SectionID) || len(decoded.SectionID) > 64) {
 		return AllowedCandidate{}, rejection("schema", "invalid_section_id")
 	}
 	return AllowedCandidate{
 		operation: decoded.Operation, targetPath: canonicalTarget, sectionID: decoded.SectionID,
-		replacement: decoded.Replacement, title: decoded.Title, body: decoded.Body, sourcePaths: canonicalSources,
+		replacement: decoded.Replacement, title: decoded.Title, heading: decoded.Heading, body: decoded.Body, sourcePaths: canonicalSources,
 	}, nil
 }
 
@@ -167,7 +178,7 @@ func decodeClosedObject(raw []byte) (map[string]json.RawMessage, error) {
 		return nil, rejection("schema", "invalid_candidate")
 	}
 	fields := make(map[string]json.RawMessage, 7)
-	allowed := map[string]bool{"operation": true, "target_path": true, "section_id": true, "replacement": true, "title": true, "body": true, "source_paths": true}
+	allowed := map[string]bool{"operation": true, "target_path": true, "section_id": true, "replacement": true, "title": true, "heading": true, "body": true, "source_paths": true}
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {

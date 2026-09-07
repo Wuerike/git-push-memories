@@ -18,6 +18,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/proposal"
 	gitpublisher "github.com/Wuerike/git-push-memories/internal/publisher"
+	"github.com/Wuerike/git-push-memories/internal/retrieval"
 )
 
 const initialPage = `# checkout-api
@@ -260,6 +261,158 @@ func TestCreatePagePublicationIsRecordedAndIdempotent(t *testing.T) {
 	repeated, err := workflow.RecordPublication(context.Background(), publication)
 	if err != nil || !reflect.DeepEqual(repeated, publication) {
 		t.Fatalf("repeated RecordPublication() = %+v, %v", repeated, err)
+	}
+}
+
+func TestCreateSectionProposalAppliesPublishesAndRetrievesGeneratedID(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCreateSectionCandidate(t, "Circuit breaker opens."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Operation.Type != "create_section" || view.Operation.Target.SectionID != "checkout-api-failure-modes" || view.Operation.Heading != "Failure Modes" {
+		t.Fatalf("Prepare() operation = %+v", view.Operation)
+	}
+	receipt, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeatedApply, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil || !reflect.DeepEqual(repeatedApply, receipt) {
+		t.Fatalf("repeated Apply() = %+v, %v", repeatedApply, err)
+	}
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(contents), "## Failure Modes\n<!-- @id: checkout-api-failure-modes -->\nCircuit breaker opens.\n") {
+		t.Fatalf("created section missing: %s", contents)
+	}
+	publisher, err := gitpublisher.New(memoryRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer publisher.Close()
+	publication, err := publisher.Publish(context.Background(), receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repeatedPublication, err := publisher.Publish(context.Background(), receipt)
+	if err != nil || !reflect.DeepEqual(repeatedPublication, publication) {
+		t.Fatalf("repeated Publish() = %+v, %v", repeatedPublication, err)
+	}
+	if _, err := workflow.RecordPublication(context.Background(), publication); err != nil {
+		t.Fatal(err)
+	}
+	retriever, err := retrieval.New(memoryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer retriever.Close()
+	bundle, err := retriever.Retrieve(context.Background(), "circuit breaker failures", retrieval.Scope{}, 4096)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, item := range bundle.Items {
+		found = found || item.Handle.SectionID == "checkout-api-failure-modes" && strings.Contains(item.Content, "Circuit breaker opens.")
+	}
+	if !found {
+		t.Fatalf("generated section not retrievable: %+v", bundle.Items)
+	}
+}
+
+func TestCreateSectionApplyRejectsWholeFileDrift(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCreateSectionCandidate(t, "Circuit breaker opens."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	drift := []byte(initialPage + "drift\n")
+	if err := os.WriteFile(pagePath, drift, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, memory.ErrDrift) {
+		t.Fatalf("Apply() error = %v, want ErrDrift", err)
+	}
+	got, err := os.ReadFile(pagePath)
+	if err != nil || !bytes.Equal(got, drift) {
+		t.Fatalf("drifted page = %q, %v", got, err)
+	}
+}
+
+func TestCreateSectionStartupRecoversPostState(t *testing.T) {
+	memoryRoot := newMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	view, err := workflow.Prepare(context.Background(), allowedCreateSectionCandidate(t, "Circuit breaker opens."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workflow.Close(); err != nil {
+		t.Fatal(err)
+	}
+	postState := initialPage + "\n## Failure Modes\n<!-- @id: checkout-api-failure-modes -->\nCircuit breaker opens.\n"
+	if err := os.WriteFile(filepath.Join(memoryRoot, "services", "checkout-api.md"), []byte(postState), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close()
+	receipt, err := restarted.Applied(view.ID)
+	if err != nil || receipt.Target.SectionID != "checkout-api-failure-modes" {
+		t.Fatalf("startup Applied() = %+v, %v", receipt, err)
+	}
+}
+
+func TestCreateSectionConcurrentApplyReturnsOneDurableResult(t *testing.T) {
+	workflow, err := proposal.New(newMemoryRoot(t), newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workflow.Close()
+	view, err := workflow.Prepare(context.Background(), allowedCreateSectionCandidate(t, "Circuit breaker opens."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	results := make(chan struct {
+		receipt proposal.ApplyReceipt
+		err     error
+	}, 2)
+	for range 2 {
+		go func() {
+			<-start
+			receipt, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+			results <- struct {
+				receipt proposal.ApplyReceipt
+				err     error
+			}{receipt, err}
+		}()
+	}
+	close(start)
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil || !reflect.DeepEqual(first.receipt, second.receipt) {
+		t.Fatalf("concurrent Apply() = (%+v, %v), (%+v, %v)", first.receipt, first.err, second.receipt, second.err)
 	}
 }
 
@@ -834,6 +987,26 @@ func allowedCreatePageCandidate(t *testing.T, body string) intake.AllowedCandida
 	raw, err := json.Marshal(map[string]any{
 		"operation": "create_page", "target_path": "parcel-dispatch.md", "title": "Parcel Dispatch",
 		"body": body, "source_paths": []string{"services/parcel/service.yaml"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := guard.Inspect(intake.NewCandidate(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return allowed
+}
+
+func allowedCreateSectionCandidate(t *testing.T, body string) intake.AllowedCandidate {
+	t.Helper()
+	raw, err := json.Marshal(map[string]any{
+		"operation": "create_section", "target_path": "services/checkout-api.md", "heading": "Failure Modes",
+		"body": body, "source_paths": []string{"services/checkout-api/service.yaml"},
 	})
 	if err != nil {
 		t.Fatal(err)

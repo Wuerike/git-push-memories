@@ -113,6 +113,35 @@ func TestApplyTreatsRenameAsCommitPointWhenLaterStepFails(t *testing.T) {
 	}
 }
 
+func TestApplyDoesNotOverwriteEditMadeImmediatelyBeforeRename(t *testing.T) {
+	root := t.TempDir()
+	filePath := filepath.Join(root, "page.md")
+	source := []byte("# Page\n<!-- @id: page -->\n## Leaf\n<!-- @id: leaf -->\nold\n")
+	if err := os.WriteFile(filePath, source, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := New(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer repository.Close()
+	concurrent := []byte("# Page\n<!-- @id: page -->\n## Leaf\n<!-- @id: leaf -->\nconcurrent\n")
+	repository.fault = func(stage writeStage) error {
+		if stage == writeSynced {
+			return os.WriteFile(filePath, concurrent, 0o644)
+		}
+		return nil
+	}
+	_, err = repository.Apply(context.Background(), ChangeSet{Target: Target{Path: "page.md", SectionID: "leaf"}, BaselineHash: hash(source), Replacement: "new\n"})
+	if !errors.Is(err, ErrDrift) {
+		t.Fatalf("Apply() error = %v, want ErrDrift", err)
+	}
+	got, err := os.ReadFile(filePath)
+	if err != nil || string(got) != string(concurrent) {
+		t.Fatalf("concurrent edit = %q, %v", got, err)
+	}
+}
+
 func TestCreatePageFaultsPreserveAbsenceOrRecoverPostState(t *testing.T) {
 	for _, stage := range []writeStage{writeCreated, writeWritten, writeSynced, writeRenamed} {
 		t.Run(stage.String(), func(t *testing.T) {

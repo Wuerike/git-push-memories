@@ -11,6 +11,7 @@ var (
 	ErrTargetDirty     = errors.New("memory target has Git changes")
 	ErrTargetExists    = errors.New("memory target already exists")
 	ErrInvalidID       = errors.New("invalid generated memory ID")
+	ErrSectionExists   = errors.New("memory section already exists")
 )
 
 type Scope struct {
@@ -64,6 +65,7 @@ type Preview struct {
 	Blob          string
 	Baseline      []byte
 	PostState     []byte
+	Diff          string
 }
 
 type CreatePageRequest struct {
@@ -88,6 +90,24 @@ type ReconcileCreatePageRequest struct {
 	Preflight     func() error
 	Validate      func(postState []byte) error
 	Mode          ReconcileMode
+}
+
+type CreateSectionRequest struct {
+	TargetPath string
+	Heading    string
+	Body       string
+}
+
+type ReconcileCreateSectionRequest struct {
+	CreateSectionRequest
+	ExpectedSectionID string
+	BaselineHash      string
+	PostStateHash     string
+	Head              string
+	Blob              string
+	Preflight         func() error
+	Validate          func(baseline, postState []byte) error
+	Mode              ReconcileMode
 }
 
 type ReconcileRequest struct {

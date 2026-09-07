@@ -235,16 +235,19 @@ func validView(value View, id string) bool {
 	}
 	switch value.SchemaVersion {
 	case 1:
-		return value.Operation.Type == "replace_section_content" && value.Operation.Title == "" && value.Operation.Body == "" &&
+		return value.Operation.Type == OperationReplaceSection && value.Operation.Title == "" && value.Operation.Heading == "" && value.Operation.Body == "" &&
 			value.Baseline.Exists == nil && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
 	case 2:
 		if value.Baseline.Exists == nil {
 			return false
 		}
-		if value.Operation.Type == "create_page" {
-			return !*value.Baseline.Exists && value.Operation.Replacement == "" && value.Operation.Title != "" && value.Operation.Body != "" && value.Baseline.FileHash == "" && value.Baseline.Blob == ""
+		if value.Operation.Type == OperationCreatePage {
+			return !*value.Baseline.Exists && value.Operation.Replacement == "" && value.Operation.Title != "" && value.Operation.Heading == "" && value.Operation.Body != "" && value.Baseline.FileHash == "" && value.Baseline.Blob == ""
 		}
-		return value.Operation.Type == "replace_section_content" && *value.Baseline.Exists && value.Operation.Title == "" && value.Operation.Body == "" && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
+		if value.Operation.Type == OperationCreateSection {
+			return *value.Baseline.Exists && value.Operation.Replacement == "" && value.Operation.Title == "" && value.Operation.Heading != "" && value.Operation.Body != "" && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
+		}
+		return value.Operation.Type == OperationReplaceSection && *value.Baseline.Exists && value.Operation.Title == "" && value.Operation.Heading == "" && value.Operation.Body == "" && validHash(value.Baseline.FileHash) && value.Baseline.Blob != ""
 	default:
 		return false
 	}

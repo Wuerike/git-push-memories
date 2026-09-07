@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -196,6 +197,88 @@ func TestPreviewCreatePageHelperProcess(t *testing.T) {
 	}
 	if err := os.WriteFile(os.Getenv("MEMORY_PREVIEW_RESULT"), encoded, 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPreviewCreateSectionAppendsCanonicalH2WithoutWriting(t *testing.T) {
+	root := newMemoryRoot(t, validPage)
+	repository := openRepository(t, root)
+	before := fingerprint(t, root)
+	preview, err := repository.PreviewCreateSection(context.Background(), memory.CreateSectionRequest{
+		TargetPath: "services/checkout-api.md", Heading: "Failure Modes", Body: "Circuit breaker opens after five failures.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantSuffix := "\n## Failure Modes\n<!-- @id: checkout-api-failure-modes -->\nCircuit breaker opens after five failures.\n"
+	if preview.Target != (memory.Target{Path: "services/checkout-api.md", SectionID: "checkout-api-failure-modes"}) {
+		t.Fatalf("Target = %+v", preview.Target)
+	}
+	if string(preview.Baseline) != validPage || string(preview.PostState) != validPage+wantSuffix {
+		t.Fatalf("preview changed baseline unexpectedly\nbaseline:\n%s\npost-state:\n%s", preview.Baseline, preview.PostState)
+	}
+	if !strings.Contains(preview.Diff, "+## Failure Modes\n+<!-- @id: checkout-api-failure-modes -->") {
+		t.Fatalf("Diff = %q", preview.Diff)
+	}
+	if got := fingerprint(t, root); got != before {
+		t.Fatal("PreviewCreateSection() modified memory")
+	}
+}
+
+func TestPreviewCreateSectionRejectsCollisionInvalidContentAndDirtyTarget(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		heading string
+		body    string
+		want    error
+	}{
+		{name: "existing heading", heading: "Operation", body: "Body.", want: memory.ErrSectionExists},
+		{name: "generated ID collision", heading: "Operation!", body: "Body.", want: memory.ErrSectionExists},
+		{name: "empty slug", heading: "---", body: "Body.", want: memory.ErrInvalidID},
+		{name: "generated ID over limit", heading: strings.Repeat("a", 60), body: "Body.", want: memory.ErrInvalidID},
+		{name: "body heading", heading: "New", body: "## Nested", want: memory.ErrInvalidSchema},
+		{name: "body anchor", heading: "New", body: "<!-- @id: new -->", want: memory.ErrInvalidSchema},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			root := newMemoryRoot(t, validPage)
+			repository := openRepository(t, root)
+			before := fingerprint(t, root)
+			_, err := repository.PreviewCreateSection(context.Background(), memory.CreateSectionRequest{
+				TargetPath: "services/checkout-api.md", Heading: test.heading, Body: test.body,
+			})
+			if !errors.Is(err, test.want) {
+				t.Fatalf("PreviewCreateSection() error = %v, want %v", err, test.want)
+			}
+			if got := fingerprint(t, root); got != before {
+				t.Fatal("rejected section preview modified memory")
+			}
+		})
+	}
+
+	for _, staged := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dirty staged=%v", staged), func(t *testing.T) {
+			root := newMemoryRoot(t, validPage)
+			pagePath := filepath.Join(root, "services", "checkout-api.md")
+			if err := os.WriteFile(pagePath, []byte(validPage+"dirty\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if staged {
+				runGit(t, root, "add", "services/checkout-api.md")
+			}
+			repository := openRepository(t, root)
+			_, err := repository.PreviewCreateSection(context.Background(), memory.CreateSectionRequest{
+				TargetPath: "services/checkout-api.md", Heading: "New", Body: "Body.",
+			})
+			if !errors.Is(err, memory.ErrTargetDirty) {
+				t.Fatalf("PreviewCreateSection() error = %v, want ErrTargetDirty", err)
+			}
+		})
+	}
+
+	root := newMemoryRoot(t, validPage)
+	repository := openRepository(t, root)
+	if _, err := repository.PreviewCreateSection(context.Background(), memory.CreateSectionRequest{TargetPath: "missing.md", Heading: "New", Body: "Body."}); err == nil {
+		t.Fatal("PreviewCreateSection() accepted missing page")
 	}
 }
 

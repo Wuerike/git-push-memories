@@ -1,6 +1,6 @@
 # Plano da Fase 2: fluxo vertical minimo
 
-Status do plano: **T1-T13 concluidas; T14-T19 pendentes; Fase 3 bloqueada**.
+Status do plano: **T1-T14 concluidas; T15-T19 pendentes; Fase 3 bloqueada**.
 
 ## Objetivo
 
@@ -65,7 +65,8 @@ Por decisao humana em 2026-09-06, T1-T10 permanecem concluidas e suas evidencias
 | T11 | concluida | preview canonico de pagina nova, sem mutacao |
 | T12 | concluida | proposal/apply/recovery v2 para `create_page`, com reader v1 compativel |
 | T13 | concluida | publicacao path-scoped de arquivo novo com baseline ausente |
-| T14-T16 | pendente | criacao de secao e experiencia explicita de bootstrap |
+| T14 | concluida | lifecycle de `create_section` com ID gerado e publicacao existente |
+| T15-T16 | pendente | tools MCP e experiencia explicita de bootstrap |
 | T17 | pendente | gate tecnico revisado partindo de zero Markdown |
 | T18 | pendente | diagnostico e refinamento mensurado de overhead |
 | T19 | pendente | novo gate autenticado de valor |

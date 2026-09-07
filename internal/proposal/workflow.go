@@ -114,8 +114,11 @@ func (workflow *Workflow) Close() error {
 }
 
 func (workflow *Workflow) Prepare(ctx context.Context, candidate intake.AllowedCandidate) (View, error) {
-	if candidate.Operation() == "create_page" {
+	if candidate.Operation() == intake.OperationCreatePage {
 		return workflow.prepareCreatePage(ctx, candidate)
+	}
+	if candidate.Operation() == intake.OperationCreateSection {
+		return workflow.prepareCreateSection(ctx, candidate)
 	}
 	preview, err := workflow.repository.Preview(ctx, memory.PreviewRequest{
 		Target:      memory.Target{Path: candidate.TargetPath(), SectionID: candidate.SectionID()},
@@ -130,11 +133,37 @@ func (workflow *Workflow) Prepare(ctx context.Context, candidate intake.AllowedC
 	}
 	view := View{
 		SchemaVersion: 2, Nonce: nonce, Revision: 1, Status: "pending", CreatedAt: workflow.now().UTC(),
-		Operation:   Operation{Type: "replace_section_content", Target: Target{Path: preview.Target.Path, SectionID: preview.Target.SectionID}, Replacement: candidate.Replacement()},
+		Operation:   Operation{Type: OperationReplaceSection, Target: Target{Path: preview.Target.Path, SectionID: preview.Target.SectionID}, Replacement: candidate.Replacement()},
 		Baseline:    Baseline{Exists: boolPointer(true), FileHash: preview.BaselineHash, Head: preview.Head, Blob: preview.Blob},
 		PostState:   PostState{FileHash: preview.PostStateHash},
 		Diff:        unifiedDiff(preview.Target.Path, preview.Baseline, preview.PostState),
 		SourcePaths: candidate.SourcePaths(),
+	}
+	if err := sealProposal(&view); err != nil {
+		return View{}, fmt.Errorf("seal proposal")
+	}
+	if err := workflow.store.writeProposal(view); err != nil {
+		return View{}, err
+	}
+	return view, nil
+}
+
+func (workflow *Workflow) prepareCreateSection(ctx context.Context, candidate intake.AllowedCandidate) (View, error) {
+	preview, err := workflow.repository.PreviewCreateSection(ctx, memory.CreateSectionRequest{
+		TargetPath: candidate.TargetPath(), Heading: candidate.Heading(), Body: candidate.Body(),
+	})
+	if err != nil {
+		return View{}, err
+	}
+	nonce, err := proposalNonce()
+	if err != nil {
+		return View{}, fmt.Errorf("create proposal nonce")
+	}
+	view := View{
+		SchemaVersion: 2, Nonce: nonce, Revision: 1, Status: "pending", CreatedAt: workflow.now().UTC(),
+		Operation: Operation{Type: OperationCreateSection, Target: Target{Path: preview.Target.Path, SectionID: preview.Target.SectionID}, Heading: candidate.Heading(), Body: candidate.Body()},
+		Baseline:  Baseline{Exists: boolPointer(true), FileHash: preview.BaselineHash, Head: preview.Head, Blob: preview.Blob}, PostState: PostState{FileHash: preview.PostStateHash},
+		Diff: preview.Diff, SourcePaths: candidate.SourcePaths(),
 	}
 	if err := sealProposal(&view); err != nil {
 		return View{}, fmt.Errorf("seal proposal")
@@ -159,7 +188,7 @@ func (workflow *Workflow) prepareCreatePage(ctx context.Context, candidate intak
 	absent := false
 	view := View{
 		SchemaVersion: 2, Nonce: nonce, Revision: 1, Status: "pending", CreatedAt: workflow.now().UTC(),
-		Operation: Operation{Type: "create_page", Target: Target{Path: preview.Target.Path, SectionID: preview.Target.SectionID}, Title: candidate.Title(), Body: candidate.Body()},
+		Operation: Operation{Type: OperationCreatePage, Target: Target{Path: preview.Target.Path, SectionID: preview.Target.SectionID}, Title: candidate.Title(), Body: candidate.Body()},
 		Baseline:  Baseline{Exists: &absent, Head: preview.Head}, PostState: PostState{FileHash: preview.PostStateHash},
 		Diff: preview.Diff, SourcePaths: candidate.SourcePaths(),
 	}
@@ -393,9 +422,15 @@ func (workflow *Workflow) reconcileView(ctx context.Context, view View, mode mem
 		if err != nil || allowed.Operation() != view.Operation.Type || allowed.TargetPath() != view.Operation.Target.Path {
 			return ErrIntegrity
 		}
-		if view.Operation.Type == "create_page" {
+		if view.Operation.Type == OperationCreatePage {
 			expectedSectionID := strings.TrimSuffix(view.Operation.Target.Path, ".md") + "-overview"
 			if view.Operation.Target.SectionID != expectedSectionID || allowed.Title() != view.Operation.Title || allowed.Body() != view.Operation.Body {
+				return ErrIntegrity
+			}
+			return nil
+		}
+		if view.Operation.Type == OperationCreateSection {
+			if allowed.Heading() != view.Operation.Heading || allowed.Body() != view.Operation.Body {
 				return ErrIntegrity
 			}
 			return nil
@@ -405,12 +440,25 @@ func (workflow *Workflow) reconcileView(ctx context.Context, view View, mode mem
 		}
 		return nil
 	}
-	if view.Operation.Type == "create_page" {
+	if view.Operation.Type == OperationCreatePage {
 		return workflow.repository.ReconcileCreatePage(ctx, memory.ReconcileCreatePageRequest{
 			CreatePageRequest: memory.CreatePageRequest{TargetPath: view.Operation.Target.Path, Title: view.Operation.Title, Body: view.Operation.Body},
 			PostStateHash:     view.PostState.FileHash, Head: view.Baseline.Head, Preflight: preflight,
 			Validate: func(postState []byte) error {
 				if createPageDiff(view.Operation.Target.Path, postState) != view.Diff {
+					return ErrIntegrity
+				}
+				return nil
+			}, Mode: mode,
+		})
+	}
+	if view.Operation.Type == OperationCreateSection {
+		return workflow.repository.ReconcileCreateSection(ctx, memory.ReconcileCreateSectionRequest{
+			CreateSectionRequest: memory.CreateSectionRequest{TargetPath: view.Operation.Target.Path, Heading: view.Operation.Heading, Body: view.Operation.Body},
+			ExpectedSectionID:    view.Operation.Target.SectionID, BaselineHash: view.Baseline.FileHash, PostStateHash: view.PostState.FileHash, Head: view.Baseline.Head, Blob: view.Baseline.Blob,
+			Preflight: preflight,
+			Validate: func(baseline, postState []byte) error {
+				if unifiedDiff(view.Operation.Target.Path, baseline, postState) != view.Diff {
 					return ErrIntegrity
 				}
 				return nil
@@ -471,7 +519,7 @@ func (workflow *Workflow) reconcileStartup(ctx context.Context) error {
 
 func inspectStoredCandidate(view View) (intake.AllowedCandidate, error) {
 	var candidate any
-	if view.Operation.Type == "create_page" {
+	if view.Operation.Type == OperationCreatePage {
 		candidate = struct {
 			Operation   string   `json:"operation"`
 			TargetPath  string   `json:"target_path"`
@@ -479,6 +527,14 @@ func inspectStoredCandidate(view View) (intake.AllowedCandidate, error) {
 			Body        string   `json:"body"`
 			SourcePaths []string `json:"source_paths"`
 		}{view.Operation.Type, view.Operation.Target.Path, view.Operation.Title, view.Operation.Body, view.SourcePaths}
+	} else if view.Operation.Type == OperationCreateSection {
+		candidate = struct {
+			Operation   string   `json:"operation"`
+			TargetPath  string   `json:"target_path"`
+			Heading     string   `json:"heading"`
+			Body        string   `json:"body"`
+			SourcePaths []string `json:"source_paths"`
+		}{view.Operation.Type, view.Operation.Target.Path, view.Operation.Heading, view.Operation.Body, view.SourcePaths}
 	} else {
 		candidate = struct {
 			TargetPath  string   `json:"target_path"`

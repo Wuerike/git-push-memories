@@ -1,5 +1,11 @@
 package intake
 
+const (
+	OperationReplaceSection = "replace_section_content"
+	OperationCreatePage     = "create_page"
+	OperationCreateSection  = "create_section"
+)
+
 type Candidate struct {
 	raw []byte
 }
@@ -14,6 +20,7 @@ type AllowedCandidate struct {
 	sectionID   string
 	replacement string
 	title       string
+	heading     string
 	body        string
 	sourcePaths []string
 }
@@ -23,6 +30,7 @@ func (candidate AllowedCandidate) TargetPath() string  { return candidate.target
 func (candidate AllowedCandidate) SectionID() string   { return candidate.sectionID }
 func (candidate AllowedCandidate) Replacement() string { return candidate.replacement }
 func (candidate AllowedCandidate) Title() string       { return candidate.title }
+func (candidate AllowedCandidate) Heading() string     { return candidate.heading }
 func (candidate AllowedCandidate) Body() string        { return candidate.body }
 func (candidate AllowedCandidate) SourcePaths() []string {
 	result := make([]string, len(candidate.sourcePaths))

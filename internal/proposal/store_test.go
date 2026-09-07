@@ -115,7 +115,7 @@ func TestStoreReadsPersistedV1StateWithoutV2Fields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{`"exists"`, `"title"`, `"body"`} {
+	for _, forbidden := range []string{`"exists"`, `"title"`, `"heading"`, `"body"`} {
 		if bytes.Contains(encoded, []byte(forbidden)) {
 			t.Fatalf("v1 fixture contains v2 field %s: %s", forbidden, encoded)
 		}

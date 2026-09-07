@@ -14,6 +14,12 @@ var (
 	ErrIntegrity     = errors.New("proposal integrity check failed")
 )
 
+const (
+	OperationReplaceSection = "replace_section_content"
+	OperationCreatePage     = "create_page"
+	OperationCreateSection  = "create_section"
+)
+
 type Target struct {
 	Path      string `json:"path"`
 	SectionID string `json:"section_id"`
@@ -24,6 +30,7 @@ type Operation struct {
 	Target      Target `json:"target"`
 	Replacement string `json:"replacement,omitempty"`
 	Title       string `json:"title,omitempty"`
+	Heading     string `json:"heading,omitempty"`
 	Body        string `json:"body,omitempty"`
 }
 

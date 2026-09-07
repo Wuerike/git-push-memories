@@ -46,6 +46,21 @@ func TestGuardAllowsClosedCreatePageCandidate(t *testing.T) {
 	}
 }
 
+func TestGuardAllowsClosedCreateSectionCandidate(t *testing.T) {
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"operation":"create_section","target_path":"services/checkout-api.md","heading":"Failure Modes","body":"Circuit breaker opens.","source_paths":[]}`)
+	allowed, err := guard.Inspect(intake.NewCandidate(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed.Operation() != "create_section" || allowed.Heading() != "Failure Modes" || allowed.Body() != "Circuit breaker opens." || allowed.SectionID() != "" {
+		t.Fatalf("Inspect() = %+v", allowed)
+	}
+}
+
 func TestGuardRejectsUnknownDuplicateAndSensitiveFieldsWithoutEcho(t *testing.T) {
 	guard, err := intake.New()
 	if err != nil {
