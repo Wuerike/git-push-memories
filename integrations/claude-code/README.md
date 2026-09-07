@@ -40,6 +40,8 @@ Instale da mesma forma `skills/propose-memory-page/SKILL.md` e `skills/propose-m
 
 `/propose-memory` continua sendo o caminho de replace compativel. `/propose-memory-page` e `/propose-memory-section` existem para uso explicito e diagnostico; o fluxo orientado por pesquisa sera fornecido por `/remember`.
 
+O caminho principal e `skills/remember/SKILL.md`. Instale-o como `.claude/skills/remember/SKILL.md` e invoque `/remember <fato>`. Ele pesquisa primeiro, expande no maximo tres candidatos, oferece somente operacoes aplicaveis e exige confirmacao antes de criar uma proposta. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
+
 Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nao deve repetir a chamada, inferir o target de texto livre, nem gravar o candidato em arquivo, log, spool ou ferramenta alternativa.
 
 Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.

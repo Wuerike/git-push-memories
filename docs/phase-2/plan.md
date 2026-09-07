@@ -1,6 +1,6 @@
 # Plano da Fase 2: fluxo vertical minimo
 
-Status do plano: **T1-T15 concluidas; T16-T19 pendentes; Fase 3 bloqueada**.
+Status do plano: **T1-T16 concluidas; T17-T19 pendentes; Fase 3 bloqueada**.
 
 ## Objetivo
 
@@ -67,7 +67,7 @@ Por decisao humana em 2026-09-06, T1-T10 permanecem concluidas e suas evidencias
 | T13 | concluida | publicacao path-scoped de arquivo novo com baseline ausente |
 | T14 | concluida | lifecycle de `create_section` com ID gerado e publicacao existente |
 | T15 | concluida | tools MCP e skills explicitos para create page/section |
-| T16 | pendente | experiencia `/remember` orientada por pesquisa |
+| T16 | concluida | `/remember` pesquisa, apresenta escolha e confirma uma proposta |
 | T17 | pendente | gate tecnico revisado partindo de zero Markdown |
 | T18 | pendente | diagnostico e refinamento mensurado de overhead |
 | T19 | pendente | novo gate autenticado de valor |
@@ -592,7 +592,7 @@ O ponto de linearizacao do conteudo e a captura do blob: depois de adquirir o in
 
 **Escopo:** criar uma skill/comando `/remember` que recebe o fato, executa `memory_search`, expande no maximo os candidatos necessarios dentro do budget e apresenta uma escolha concreta: substituir uma secao encontrada, criar secao em pagina encontrada ou criar pagina raiz. Antes da tool de proposta, mostrar operacao, target, titulo/heading e fontes e exigir confirmacao humana. Se a busca falhar ou for ambigua, nao persistir fallback.
 
-**Artefatos:** skill Claude Code, decision table, mensagens compactas, harness para memory root vazio e populado e guia de uso.
+**Artefatos:** skill Claude Code, decision table, mensagens compactas, contract harness MCP para memory root vazio e populado e guia de uso. A obediencia da skill pelo modelo e observada de forma autenticada em T19, nao simulada como teste deterministico.
 
 **Criterios de conclusao:**
 
