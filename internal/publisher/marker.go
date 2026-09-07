@@ -38,6 +38,7 @@ type publicationMarker struct {
 	MemoryRoot     string           `json:"memory_root"`
 	Target         proposal.Target  `json:"target"`
 	PostStateHash  string           `json:"post_state_hash"`
+	BaselineExists *bool            `json:"baseline_exists,omitempty"`
 	BaselineHead   string           `json:"baseline_head"`
 	BaselineBlob   string           `json:"baseline_blob"`
 	IndexPath      string           `json:"index_path"`
@@ -61,7 +62,7 @@ func newPublicationMarker(receipt proposal.ApplyReceipt, indexPath, authorName, 
 	return publicationMarker{
 		SchemaVersion: 1, ProposalID: receipt.ProposalID, Revision: receipt.Revision, Phase: publicationIntent,
 		Token: token, MemoryRoot: receipt.MemoryRoot, Target: receipt.Target,
-		PostStateHash: receipt.PostState.FileHash, BaselineHead: receipt.Baseline.Head, BaselineBlob: receipt.Baseline.Blob,
+		PostStateHash: receipt.PostState.FileHash, BaselineExists: receipt.Baseline.Exists, BaselineHead: receipt.Baseline.Head, BaselineBlob: receipt.Baseline.Blob,
 		IndexPath:      indexPath,
 		LockTemporary:  filepath.Join(filepath.Dir(indexPath), ".git-push-memories-index-lock-"+token+".tmp"),
 		FinalTemporary: filepath.Join(filepath.Dir(indexPath), ".git-push-memories-index-final-"+token+".tmp"),
@@ -142,8 +143,9 @@ func (publisher *Publisher) readMarker(id string) (publicationMarker, error) {
 		return marker, proposal.ErrIntegrity
 	}
 	_, tokenErr := hex.DecodeString(marker.Token)
+	validBaseline := markerBaselineExists(marker) && validGitObject.MatchString(marker.BaselineBlob) || !markerBaselineExists(marker) && marker.BaselineBlob == ""
 	if marker.SchemaVersion != 1 || marker.ProposalID != id || marker.Revision != 1 || len(marker.Token) != 32 || tokenErr != nil || marker.MemoryRoot == "" || marker.Target.Path == "" ||
-		!validHash(marker.PostStateHash) || !validGitObject.MatchString(marker.BaselineHead) || !validGitObject.MatchString(marker.BaselineBlob) || !filepath.IsAbs(marker.IndexPath) ||
+		!validHash(marker.PostStateHash) || !validGitObject.MatchString(marker.BaselineHead) || !validBaseline || !filepath.IsAbs(marker.IndexPath) ||
 		marker.LockTemporary != filepath.Join(filepath.Dir(marker.IndexPath), ".git-push-memories-index-lock-"+marker.Token+".tmp") ||
 		marker.FinalTemporary != filepath.Join(filepath.Dir(marker.IndexPath), ".git-push-memories-index-final-"+marker.Token+".tmp") || marker.PublishedAt.IsZero() ||
 		marker.AuthorName == "" || marker.AuthorEmail == "" || hasControl(marker.AuthorName) || hasControl(marker.AuthorEmail) || (marker.Phase != publicationIntent && marker.Phase != publicationPrepared) {
@@ -215,7 +217,7 @@ func bytesHash(contents []byte) string {
 }
 
 func (publisher *Publisher) recover(ctx context.Context, apply proposal.ApplyReceipt, marker publicationMarker, gitDirectory, indexPath string) (proposal.PublicationReceipt, bool, error) {
-	if marker.ProposalID != apply.ProposalID || marker.Revision != apply.Revision || marker.MemoryRoot != publisher.rootPath || marker.Target != apply.Target ||
+	if marker.ProposalID != apply.ProposalID || marker.Revision != apply.Revision || marker.MemoryRoot != publisher.rootPath || marker.Target != apply.Target || markerBaselineExists(marker) != receiptBaselineExists(apply.Baseline) ||
 		marker.PostStateHash != apply.PostState.FileHash || marker.BaselineHead != apply.Baseline.Head || marker.BaselineBlob != apply.Baseline.Blob || marker.IndexPath != indexPath {
 		return proposal.PublicationReceipt{}, false, proposal.ErrIntegrity
 	}
@@ -337,9 +339,15 @@ func (publisher *Publisher) resumePrepared(ctx context.Context, marker publicati
 	if err != nil {
 		return proposal.PublicationReceipt{}, false, ErrDrift
 	}
-	entryMode, entryBlob, err := publisher.targetEntry(ctx, marker.Target.Path, nil)
-	if err != nil || entryBlob != marker.BaselineBlob {
-		return proposal.PublicationReceipt{}, false, ErrDrift
+	entryMode := "100644"
+	if markerBaselineExists(marker) {
+		var entryBlob string
+		entryMode, entryBlob, err = publisher.targetEntry(ctx, marker.Target.Path, nil)
+		if err != nil || entryBlob != marker.BaselineBlob {
+			return proposal.PublicationReceipt{}, false, ErrDrift
+		}
+	} else if err := publisher.ensureTargetAbsent(ctx, marker.BaselineHead, marker.Target.Path, nil); err != nil {
+		return proposal.PublicationReceipt{}, false, err
 	}
 	if err := removeOwnedTemporary(marker.FinalTemporary); err != nil {
 		return proposal.PublicationReceipt{}, false, err
@@ -385,8 +393,8 @@ func (publisher *Publisher) resumePrepared(ctx context.Context, marker publicati
 		return proposal.PublicationReceipt{}, false, err
 	}
 	return publisher.recover(ctx, proposal.ApplyReceipt{
-		SchemaVersion: 1, ProposalID: marker.ProposalID, Revision: marker.Revision, Status: "applied_unpublished", AppliedAt: marker.PublishedAt,
-		MemoryRoot: marker.MemoryRoot, Target: marker.Target, Baseline: proposal.Baseline{Head: marker.BaselineHead, Blob: marker.BaselineBlob}, PostState: proposal.PostState{FileHash: marker.PostStateHash},
+		SchemaVersion: 2, ProposalID: marker.ProposalID, Revision: marker.Revision, Status: "applied_unpublished", AppliedAt: marker.PublishedAt,
+		MemoryRoot: marker.MemoryRoot, Target: marker.Target, Baseline: proposal.Baseline{Exists: marker.BaselineExists, Head: marker.BaselineHead, Blob: marker.BaselineBlob}, PostState: proposal.PostState{FileHash: marker.PostStateHash},
 	}, marker, gitDirectory, indexPath)
 }
 
@@ -448,7 +456,7 @@ func (publisher *Publisher) recognizeExisting(ctx context.Context, apply proposa
 	}
 	marker := publicationMarker{
 		SchemaVersion: 1, ProposalID: apply.ProposalID, Revision: apply.Revision, Phase: publicationPrepared, MemoryRoot: apply.MemoryRoot,
-		Target: apply.Target, PostStateHash: apply.PostState.FileHash, BaselineHead: apply.Baseline.Head, BaselineBlob: apply.Baseline.Blob,
+		Target: apply.Target, PostStateHash: apply.PostState.FileHash, BaselineExists: apply.Baseline.Exists, BaselineHead: apply.Baseline.Head, BaselineBlob: apply.Baseline.Blob,
 		Branch: branch, Commit: commit, Blob: blob, PublishedAt: publishedAt,
 	}
 	if err := publisher.validatePreparedCommit(ctx, marker); err != nil {
@@ -464,4 +472,8 @@ func (publisher *Publisher) recognizeExisting(ctx context.Context, apply proposa
 		return proposal.PublicationReceipt{}, ErrDrift
 	}
 	return marker.receipt(), nil
+}
+
+func markerBaselineExists(marker publicationMarker) bool {
+	return marker.BaselineExists == nil || *marker.BaselineExists
 }

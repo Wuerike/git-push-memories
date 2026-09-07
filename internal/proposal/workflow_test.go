@@ -227,6 +227,42 @@ func TestCreatePageConcurrentApplyReturnsOneDurableResult(t *testing.T) {
 	}
 }
 
+func TestCreatePagePublicationIsRecordedAndIdempotent(t *testing.T) {
+	memoryRoot := newEmptyMemoryRoot(t)
+	codeRoot := newCodeRoot(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = workflow.Close() })
+	view, err := workflow.Prepare(context.Background(), allowedCreatePageCandidate(t, "Current state."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	apply, err := workflow.Apply(context.Background(), view.ID, view.Revision)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publisher, err := gitpublisher.New(memoryRoot, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer publisher.Close()
+	publication, err := publisher.Publish(context.Background(), apply)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored, err := workflow.RecordPublication(context.Background(), publication)
+	if err != nil || !reflect.DeepEqual(stored, publication) {
+		t.Fatalf("RecordPublication() = %+v, %v", stored, err)
+	}
+	repeated, err := workflow.RecordPublication(context.Background(), publication)
+	if err != nil || !reflect.DeepEqual(repeated, publication) {
+		t.Fatalf("repeated RecordPublication() = %+v, %v", repeated, err)
+	}
+}
+
 func TestPrepareRejectsDirtyTarget(t *testing.T) {
 	for _, staged := range []bool{false, true} {
 		t.Run(fmt.Sprintf("staged=%v", staged), func(t *testing.T) {

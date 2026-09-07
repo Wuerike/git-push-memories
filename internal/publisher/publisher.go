@@ -27,6 +27,7 @@ var (
 
 var validProposalID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var validGitObject = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
+var validCreatedPage = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
 type Publisher struct {
 	root      *os.File
@@ -169,13 +170,19 @@ func (publisher *Publisher) publishLocked(ctx context.Context, apply proposal.Ap
 	if err != nil || branch == "" {
 		return proposal.PublicationReceipt{}, ErrDrift
 	}
-	entryMode, entryBlob, err := publisher.targetEntry(ctx, apply.Target.Path, nil)
-	if err != nil || entryBlob != apply.Baseline.Blob {
-		return proposal.PublicationReceipt{}, ErrDrift
-	}
-	treeMode, treeBlob, err := publisher.treeEntry(ctx, head, apply.Target.Path)
-	if err != nil || treeBlob != apply.Baseline.Blob || treeMode != entryMode {
-		return proposal.PublicationReceipt{}, ErrDrift
+	entryMode := "100644"
+	entryBlob := ""
+	if receiptBaselineExists(apply.Baseline) {
+		entryMode, entryBlob, err = publisher.targetEntry(ctx, apply.Target.Path, nil)
+		if err != nil || entryBlob != apply.Baseline.Blob {
+			return proposal.PublicationReceipt{}, ErrDrift
+		}
+		treeMode, treeBlob, err := publisher.treeEntry(ctx, head, apply.Target.Path)
+		if err != nil || treeBlob != apply.Baseline.Blob || treeMode != entryMode {
+			return proposal.PublicationReceipt{}, ErrDrift
+		}
+	} else if err := publisher.ensureTargetAbsent(ctx, head, apply.Target.Path, nil); err != nil {
+		return proposal.PublicationReceipt{}, err
 	}
 	if _, err := publisher.readPostState(apply); err != nil {
 		return proposal.PublicationReceipt{}, err
@@ -187,9 +194,13 @@ func (publisher *Publisher) publishLocked(ctx context.Context, apply proposal.Ap
 	if err != nil || confirmedHead != head {
 		return proposal.PublicationReceipt{}, ErrDrift
 	}
-	confirmedMode, confirmedBlob, err := publisher.targetEntry(ctx, apply.Target.Path, nil)
-	if err != nil || confirmedMode != entryMode || confirmedBlob != entryBlob {
-		return proposal.PublicationReceipt{}, ErrDrift
+	if receiptBaselineExists(apply.Baseline) {
+		confirmedMode, confirmedBlob, err := publisher.targetEntry(ctx, apply.Target.Path, nil)
+		if err != nil || confirmedMode != entryMode || confirmedBlob != entryBlob {
+			return proposal.PublicationReceipt{}, ErrDrift
+		}
+	} else if err := publisher.ensureTargetAbsent(ctx, head, apply.Target.Path, nil); err != nil {
+		return proposal.PublicationReceipt{}, err
 	}
 	captured, err := publisher.readPostState(apply)
 	if err != nil {
@@ -326,13 +337,31 @@ func (publisher *Publisher) injectFault(stage string) error {
 }
 
 func (publisher *Publisher) validateReceipt(receipt proposal.ApplyReceipt) error {
-	validVersion := receipt.SchemaVersion == 1 && receipt.Baseline.Exists == nil || receipt.SchemaVersion == 2 && receipt.Baseline.Exists != nil && *receipt.Baseline.Exists
+	validVersion := receipt.SchemaVersion == 1 && receipt.Baseline.Exists == nil || receipt.SchemaVersion == 2 && receipt.Baseline.Exists != nil
+	validBaseline := receiptBaselineExists(receipt.Baseline) && validHash(receipt.Baseline.FileHash) && validGitObject.MatchString(receipt.Baseline.Blob) && receipt.Baseline.FileHash != receipt.PostState.FileHash ||
+		!receiptBaselineExists(receipt.Baseline) && receipt.SchemaVersion == 2 && receipt.Baseline.FileHash == "" && receipt.Baseline.Blob == ""
+	validCreatedTarget := receiptBaselineExists(receipt.Baseline) || validCreatedPage.MatchString(receipt.Target.Path) && receipt.Target.SectionID == strings.TrimSuffix(receipt.Target.Path, ".md")+"-overview"
 	if !validVersion || receipt.Status != "applied_unpublished" || receipt.Revision != 1 || receipt.AppliedAt.IsZero() || receipt.MemoryRoot != publisher.rootPath ||
 		!validProposalID.MatchString(receipt.ProposalID) || receipt.Target.Path == "" || receipt.Target.SectionID == "" || path.Ext(receipt.Target.Path) != ".md" ||
 		path.Clean(receipt.Target.Path) != receipt.Target.Path || path.IsAbs(receipt.Target.Path) || receipt.Target.Path == ".." || strings.HasPrefix(receipt.Target.Path, "../") || strings.Contains(receipt.Target.Path, "\\") || hasControl(receipt.Target.Path) ||
-		!validHash(receipt.Baseline.FileHash) || !validHash(receipt.PostState.FileHash) || receipt.Baseline.FileHash == receipt.PostState.FileHash ||
-		!validGitObject.MatchString(receipt.Baseline.Head) || !validGitObject.MatchString(receipt.Baseline.Blob) {
+		!validBaseline || !validCreatedTarget || !validHash(receipt.PostState.FileHash) || !validGitObject.MatchString(receipt.Baseline.Head) {
 		return proposal.ErrIntegrity
+	}
+	return nil
+}
+
+func receiptBaselineExists(baseline proposal.Baseline) bool {
+	return baseline.Exists == nil || *baseline.Exists
+}
+
+func (publisher *Publisher) ensureTargetAbsent(ctx context.Context, head, target string, environment map[string]string) error {
+	index, err := publisher.gitInput(ctx, environment, nil, "ls-files", "--stage", "-z", "--", target)
+	if err != nil || len(index) != 0 {
+		return ErrDrift
+	}
+	tree, err := publisher.gitInput(ctx, environment, nil, "ls-tree", "-z", head, "--", target)
+	if err != nil || len(tree) != 0 {
+		return ErrDrift
 	}
 	return nil
 }

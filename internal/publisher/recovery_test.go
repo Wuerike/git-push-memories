@@ -135,6 +135,64 @@ func TestPublishRecoveryAfterIndexInstallReturnsSameReceipt(t *testing.T) {
 	}
 }
 
+func TestPublishNewTargetRecoversSameCommitAfterRefUpdate(t *testing.T) {
+	root, receipt, postState := createdPublisherFixture(t)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	interrupted := errors.New("interrupted after ref update")
+	first, err := New(root, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first.fault = func(stage string) error {
+		if stage == "after_ref_update" {
+			return interrupted
+		}
+		return nil
+	}
+	if _, err := first.Publish(context.Background(), receipt); !errors.Is(err, interrupted) {
+		t.Fatalf("Publish() error = %v, want interruption", err)
+	}
+	commit := gitText(t, root, "rev-parse", "HEAD")
+	_ = first.Close()
+	second, err := New(root, stateRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	publication, err := second.Publish(context.Background(), receipt)
+	if err != nil || publication.Commit != commit {
+		t.Fatalf("recovered Publish() = %+v, %v", publication, err)
+	}
+	if got := gitOutputBytes(t, root, "show", commit+":"+receipt.Target.Path); string(got) != string(postState) {
+		t.Fatalf("recovered contents = %q", got)
+	}
+}
+
+func TestPublishNewTargetPreservesEditAfterCapture(t *testing.T) {
+	root, receipt, postState := createdPublisherFixture(t)
+	publisher, err := New(root, filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer publisher.Close()
+	publisher.fault = func(stage string) error {
+		if stage == "after_capture" {
+			return os.WriteFile(filepath.Join(root, receipt.Target.Path), []byte("edited after capture\n"), 0o644)
+		}
+		return nil
+	}
+	publication, err := publisher.Publish(context.Background(), receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := gitOutputBytes(t, root, "show", publication.Commit+":"+receipt.Target.Path); string(got) != string(postState) {
+		t.Fatalf("captured contents = %q, want %q", got, postState)
+	}
+	if got := gitOutputBytes(t, root, "diff", "--", receipt.Target.Path); len(got) == 0 {
+		t.Fatal("edit after capture was not preserved as unstaged")
+	}
+}
+
 func TestPublishRetryReusesCommitCreatedBeforePreparedMarker(t *testing.T) {
 	root, receipt, _ := publisherFixture(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
@@ -389,6 +447,28 @@ func publisherFixture(t *testing.T) (string, proposal.ApplyReceipt, []byte) {
 		SchemaVersion: 1, ProposalID: "0123456789abcdef0123456789abcdef", Revision: 1, Status: "applied_unpublished", AppliedAt: time.Now().UTC(),
 		MemoryRoot: root, Target: proposal.Target{Path: "memory.md", SectionID: "memory"},
 		Baseline: proposal.Baseline{FileHash: publisherHash(baseline), Head: head, Blob: blob}, PostState: proposal.PostState{FileHash: publisherHash(postState)},
+	}, postState
+}
+
+func createdPublisherFixture(t *testing.T) (string, proposal.ApplyReceipt, []byte) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "memory")
+	if err := os.Mkdir(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "--quiet"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}, {"commit", "--quiet", "--allow-empty", "-m", "initial"}} {
+		gitCommand(t, root, args...)
+	}
+	head := gitText(t, root, "rev-parse", "HEAD")
+	postState := []byte("# Page\n<!-- @id: page -->\n\n## Overview\n<!-- @id: page-overview -->\nBody.\n")
+	if err := os.WriteFile(filepath.Join(root, "page.md"), postState, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	absent := false
+	return root, proposal.ApplyReceipt{
+		SchemaVersion: 2, ProposalID: "0123456789abcdef0123456789abcdef", Revision: 1, Status: "applied_unpublished", AppliedAt: time.Now().UTC(),
+		MemoryRoot: root, Target: proposal.Target{Path: "page.md", SectionID: "page-overview"},
+		Baseline: proposal.Baseline{Exists: &absent, Head: head}, PostState: proposal.PostState{FileHash: publisherHash(postState)},
 	}, postState
 }
 
