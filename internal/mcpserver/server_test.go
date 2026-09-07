@@ -156,6 +156,58 @@ func TestMemoryProposeReplace(t *testing.T) {
 	}
 }
 
+func TestMemoryProposeCreatePageAndSection(t *testing.T) {
+	tests := []struct {
+		name      string
+		files     map[string]string
+		tool      string
+		arguments map[string]any
+		operation string
+		target    proposal.Target
+	}{
+		{
+			name: "page", tool: "memory_propose_create_page", operation: "create_page",
+			arguments: map[string]any{"target_path": "parcel-dispatch.md", "title": "Parcel Dispatch", "body": "Retries use backoff.", "source_paths": []string{"services/parcel.go"}},
+			target:    proposal.Target{Path: "parcel-dispatch.md", SectionID: "parcel-dispatch-overview"},
+		},
+		{
+			name: "section", files: map[string]string{"services/checkout-api.md": memoryPage}, tool: "memory_propose_create_section", operation: "create_section",
+			arguments: map[string]any{"target_path": "services/checkout-api.md", "heading": "Failure Modes", "body": "Circuit breaker opens.", "source_paths": []string{}},
+			target:    proposal.Target{Path: "services/checkout-api.md", SectionID: "checkout-api-failure-modes"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			memoryRoot := newGitRoot(t, test.files)
+			codeRoot := newGitRoot(t, nil)
+			stateRoot := filepath.Join(t.TempDir(), "state")
+			before := gitOutput(t, memoryRoot, "status", "--porcelain=v1", "--untracked-files=all")
+			session, stop := startServer(t, memoryRoot, codeRoot, stateRoot)
+			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: test.tool, Arguments: test.arguments})
+			if err != nil {
+				t.Fatal(err)
+			}
+			response := decodeProposalResponse(t, result)
+			if result.IsError || response.Data == nil || response.Data.Operation != test.operation || response.Data.Target != test.target || response.Data.ID == "" {
+				t.Fatalf("%s result = %+v, response = %+v", test.tool, result, response)
+			}
+			if after := gitOutput(t, memoryRoot, "status", "--porcelain=v1", "--untracked-files=all"); after != before {
+				t.Fatalf("proposal changed memory/Git: before %q, after %q", before, after)
+			}
+			stop()
+			workflow, err := proposal.OpenReadOnly(memoryRoot, codeRoot, stateRoot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			review, err := workflow.Review(response.Data.ID)
+			_ = workflow.Close()
+			if err != nil || review.Proposal == nil || review.Proposal.Operation.Type != test.operation {
+				t.Fatalf("Review() = %+v, %v", review, err)
+			}
+		})
+	}
+}
+
 func TestInvalidAndSensitiveProposalsAreRejectedWithoutStateOrBlockingSession(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
 	codeRoot := newGitRoot(t, nil)
@@ -210,6 +262,7 @@ type proposalResponse struct {
 	Data          *struct {
 		ID          string          `json:"id"`
 		Revision    int             `json:"revision"`
+		Operation   string          `json:"operation"`
 		Target      proposal.Target `json:"target"`
 		DiffSummary struct {
 			AddedLines   int `json:"added_lines"`
@@ -307,6 +360,8 @@ func newGitRoot(t *testing.T, files map[string]string) string {
 	if len(files) > 0 {
 		runGit(t, root, "add", ".")
 		runGit(t, root, "commit", "--quiet", "-m", "initial")
+	} else {
+		runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial")
 	}
 	return root
 }
@@ -317,4 +372,14 @@ func runGit(t *testing.T, root string, arguments ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", arguments, err, output)
 	}
+}
+
+func gitOutput(t *testing.T, root string, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", arguments, err)
+	}
+	return string(output)
 }

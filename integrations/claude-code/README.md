@@ -1,6 +1,6 @@
 # Claude Code
 
-Esta integracao usa somente MCP sobre stdio e o skill explicito `propose-memory`. Ela nao instala hooks, nao captura sessoes e nao concede ao Claude Code autoridade para apply ou publish.
+Esta integracao usa somente MCP sobre stdio e skills explicitos de proposta. Ela nao instala hooks, nao captura sessoes e nao concede ao Claude Code autoridade para apply ou publish.
 
 ## Configurar o servidor MCP
 
@@ -20,6 +20,8 @@ O servidor registrado expoe somente:
 
 - `memory_search`;
 - `memory_expand`;
+- `memory_propose_create_page`;
+- `memory_propose_create_section`;
 - `memory_propose_replace`.
 
 Apply e publish continuam disponiveis somente na CLI para execucao humana.
@@ -34,7 +36,9 @@ install -D -m 0644 \
   /absolute/path/code-repository/.claude/skills/propose-memory/SKILL.md
 ```
 
-Sua invocacao manual com `/propose-memory` coleta os quatro campos estruturados e chama `memory_propose_replace` uma unica vez. O frontmatter limita as tools concedidas ao skill a essa operacao de proposta.
+Instale da mesma forma `skills/propose-memory-page/SKILL.md` e `skills/propose-memory-section/SKILL.md` para disponibilizar as operacoes explicitas de baixo nivel. Cada skill recebe intencao e conteudo, deixa schema/anchors a cargo do produto e chama exatamente uma tool de proposta. O frontmatter limita cada skill a sua operacao.
+
+`/propose-memory` continua sendo o caminho de replace compativel. `/propose-memory-page` e `/propose-memory-section` existem para uso explicito e diagnostico; o fluxo orientado por pesquisa sera fornecido por `/remember`.
 
 Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nao deve repetir a chamada, inferir o target de texto livre, nem gravar o candidato em arquivo, log, spool ou ferramenta alternativa.
 

@@ -61,6 +61,14 @@ func New(cfg config.Config, stateRoot, version string) (*Server, error) {
 		Name:        "memory_propose_replace",
 		Description: "Explicitly propose replacing one current memory section without applying or publishing it.",
 	}, server.proposeReplace)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_propose_create_page",
+		Description: "Explicitly propose creating one root memory page with product-generated schema and anchors.",
+	}, server.proposeCreatePage)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_propose_create_section",
+		Description: "Explicitly propose appending one generated H2 section to an existing memory page.",
+	}, server.proposeCreateSection)
 	return server, nil
 }
 
@@ -92,6 +100,20 @@ type proposeInput struct {
 	SourcePaths []string `json:"source_paths" jsonschema:"canonical relative code paths supporting the proposal"`
 }
 
+type proposeCreatePageInput struct {
+	TargetPath  string   `json:"target_path" jsonschema:"canonical root Markdown filename for the new memory page"`
+	Title       string   `json:"title" jsonschema:"H1 title rendered by the product"`
+	Body        string   `json:"body" jsonschema:"initial Overview section body without headings or anchors"`
+	SourcePaths []string `json:"source_paths" jsonschema:"canonical relative code paths supporting the proposal"`
+}
+
+type proposeCreateSectionInput struct {
+	TargetPath  string   `json:"target_path" jsonschema:"canonical relative path of an existing memory page"`
+	Heading     string   `json:"heading" jsonschema:"H2 heading rendered by the product"`
+	Body        string   `json:"body" jsonschema:"new section body without headings or anchors"`
+	SourcePaths []string `json:"source_paths" jsonschema:"canonical relative code paths supporting the proposal"`
+}
+
 type toolError struct {
 	Code string `json:"code"`
 }
@@ -111,6 +133,7 @@ type proposalToolResponse struct {
 type proposalToolData struct {
 	ID          string          `json:"id"`
 	Revision    int             `json:"revision"`
+	Operation   string          `json:"operation"`
 	Target      proposal.Target `json:"target"`
 	DiffSummary diffSummary     `json:"diff_summary"`
 }
@@ -131,6 +154,32 @@ func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expan
 }
 
 func (s *Server) proposeReplace(ctx context.Context, _ *mcp.CallToolRequest, input proposeInput) (*mcp.CallToolResult, proposalToolResponse, error) {
+	return s.propose(ctx, input)
+}
+
+func (s *Server) proposeCreatePage(ctx context.Context, _ *mcp.CallToolRequest, input proposeCreatePageInput) (*mcp.CallToolResult, proposalToolResponse, error) {
+	candidate := struct {
+		Operation   string   `json:"operation"`
+		TargetPath  string   `json:"target_path"`
+		Title       string   `json:"title"`
+		Body        string   `json:"body"`
+		SourcePaths []string `json:"source_paths"`
+	}{intake.OperationCreatePage, input.TargetPath, input.Title, input.Body, input.SourcePaths}
+	return s.propose(ctx, candidate)
+}
+
+func (s *Server) proposeCreateSection(ctx context.Context, _ *mcp.CallToolRequest, input proposeCreateSectionInput) (*mcp.CallToolResult, proposalToolResponse, error) {
+	candidate := struct {
+		Operation   string   `json:"operation"`
+		TargetPath  string   `json:"target_path"`
+		Heading     string   `json:"heading"`
+		Body        string   `json:"body"`
+		SourcePaths []string `json:"source_paths"`
+	}{intake.OperationCreateSection, input.TargetPath, input.Heading, input.Body, input.SourcePaths}
+	return s.propose(ctx, candidate)
+}
+
+func (s *Server) propose(ctx context.Context, input any) (*mcp.CallToolResult, proposalToolResponse, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
 		return proposalFailure("invalid_candidate")
@@ -154,7 +203,7 @@ func (s *Server) proposeReplace(ctx context.Context, _ *mcp.CallToolRequest, inp
 	return nil, proposalToolResponse{
 		SchemaVersion: 1,
 		Data: &proposalToolData{
-			ID: view.ID, Revision: view.Revision, Target: view.Operation.Target,
+			ID: view.ID, Revision: view.Revision, Operation: view.Operation.Type, Target: view.Operation.Target,
 			DiffSummary: summarizeDiff(view.Diff),
 		},
 	}, nil

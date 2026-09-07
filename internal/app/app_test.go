@@ -231,8 +231,8 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 3 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_propose_replace" || result.Tools[2].Name != "memory_search" {
-		t.Fatalf("ListTools() = %+v, want only memory_expand, memory_propose_replace, and memory_search", result.Tools)
+	if len(result.Tools) != 5 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_propose_create_page" || result.Tools[2].Name != "memory_propose_create_section" || result.Tools[3].Name != "memory_propose_replace" || result.Tools[4].Name != "memory_search" {
+		t.Fatalf("ListTools() = %+v, want only read and proposal tools", result.Tools)
 	}
 	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_search",
