@@ -89,7 +89,7 @@ func TestSyntheticWorkflow(t *testing.T) {
 	privacyHits, privacyWrites := h.runPrivacy()
 	result.PrivacyMarkerHits = privacyHits
 	result.PrivacyWriteTargets = privacyWrites
-	result.PrivacyCases = 4
+	result.PrivacyCases = 6
 	result.Commands = h.records
 	h.writeJSON("manifest.json", result)
 }
@@ -380,17 +380,20 @@ func (h *harness) runPrivacy() (int, int) {
 	}
 	t.Cleanup(func() { _ = session.Close() })
 	privacyCases := []struct {
+		tool         string
 		arguments    map[string]any
 		expectedCode string
 	}{
-		{arguments: map[string]any{"text": "unstructured candidate"}},
-		{arguments: map[string]any{"target_path": targetPath, "section_id": targetSectionID, "replacement": strings.Repeat("x", 128*1024+1), "source_paths": []string{}}, expectedCode: "limits_limit_exceeded"},
-		{arguments: map[string]any{"target_path": targetPath, "section_id": targetSectionID, "replacement": string(markers), "source_paths": []string{}}, expectedCode: "privacy_sensitive_content"},
-		{arguments: map[string]any{"target_path": targetPath, "section_id": targetSectionID, "replacement": replacement, "source_paths": markerLines(markers)}, expectedCode: "privacy_sensitive_content"},
+		{tool: proposalToolName, arguments: map[string]any{"text": "unstructured candidate"}},
+		{tool: proposalToolName, arguments: map[string]any{"target_path": targetPath, "section_id": targetSectionID, "replacement": strings.Repeat("x", 128*1024+1), "source_paths": []string{}}, expectedCode: "limits_limit_exceeded"},
+		{tool: proposalToolName, arguments: map[string]any{"target_path": targetPath, "section_id": targetSectionID, "replacement": string(markers), "source_paths": []string{}}, expectedCode: "privacy_sensitive_content"},
+		{tool: proposalToolName, arguments: map[string]any{"target_path": targetPath, "section_id": targetSectionID, "replacement": replacement, "source_paths": markerLines(markers)}, expectedCode: "privacy_sensitive_content"},
+		{tool: "memory_propose_create_page", arguments: map[string]any{"target_path": "private.md", "title": "Private", "body": string(markers), "source_paths": []string{}}, expectedCode: "privacy_sensitive_content"},
+		{tool: "memory_propose_create_section", arguments: map[string]any{"target_path": targetPath, "heading": "Contact person@example.invalid", "body": "Body", "source_paths": []string{}}, expectedCode: "privacy_sensitive_content"},
 	}
 	for index, testCase := range privacyCases {
 		caseStarted := time.Now()
-		result, err := session.CallTool(h.ctx, &mcp.CallToolParams{Name: proposalToolName, Arguments: testCase.arguments})
+		result, err := session.CallTool(h.ctx, &mcp.CallToolParams{Name: testCase.tool, Arguments: testCase.arguments})
 		if err != nil {
 			t.Fatal("privacy proposal call failed")
 		}
@@ -409,7 +412,7 @@ func (h *harness) runPrivacy() (int, int) {
 			}
 		}
 		h.records = append(h.records, commandRecord{
-			Name: fmt.Sprintf("privacy rejection %d", index+1), Command: "MCP tool memory_propose_replace <redacted structured input>",
+			Name: fmt.Sprintf("privacy rejection %d", index+1), Command: "MCP proposal tool <redacted structured input>",
 			ExitCode: 0, DurationMS: time.Since(caseStarted).Milliseconds(),
 		})
 	}
@@ -431,8 +434,8 @@ func (h *harness) runPrivacy() (int, int) {
 	hits := scanMarkerHits(t, []string{runRoot, traceDirectory, h.evidenceRoot}, markerSource, markerValues)
 	writeTargets := tracedWriteTargets(t, tracePrefix)
 	h.writeFile("privacy-summary.txt", []byte(fmt.Sprintf(
-		"trace=strace trace=%%file\nprivacy_cases_rejected=4\nmarker_hits_outside_source=%d\nfile_write_targets=%d\nstate_root_created=false\n",
-		hits, len(writeTargets),
+		"trace=strace trace=%%file\nprivacy_cases_rejected=%d\nmarker_hits_outside_source=%d\nfile_write_targets=%d\nstate_root_created=false\n",
+		len(privacyCases), hits, len(writeTargets),
 	)))
 	if hits != 0 || len(writeTargets) != 0 {
 		t.Fatalf("privacy boundary failed: marker hits=%d, write target count=%d", hits, len(writeTargets))
