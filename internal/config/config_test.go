@@ -8,56 +8,91 @@ import (
 	"testing"
 )
 
-func TestLoadRequiresValidDistinctGitRoots(t *testing.T) {
+func TestSaveAndLoadGlobalConfiguration(t *testing.T) {
+	configHome := t.TempDir()
+	stateHome := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("XDG_STATE_HOME", stateHome)
 	memoryRoot := newGitRoot(t, "memory")
-	codeRoot := newGitRoot(t, "code")
 
-	tests := []struct {
-		name       string
-		memoryRoot string
-		codeRoot   string
-		wantError  string
-	}{
-		{name: "valid", memoryRoot: memoryRoot, codeRoot: codeRoot},
-		{name: "memory missing", codeRoot: codeRoot, wantError: "memory root is required"},
-		{name: "code missing", memoryRoot: memoryRoot, wantError: "code root is required"},
-		{name: "same root", memoryRoot: memoryRoot, codeRoot: memoryRoot, wantError: "must be different"},
-		{name: "memory is not git", memoryRoot: t.TempDir(), codeRoot: codeRoot, wantError: "memory root is not a Git worktree root"},
-		{name: "code is below git root", memoryRoot: memoryRoot, codeRoot: filepath.Join(codeRoot, ".git"), wantError: "code root is not a Git worktree root"},
+	saved, err := Save(memoryRoot)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := Load(test.memoryRoot, test.codeRoot)
-			if test.wantError != "" {
-				if err == nil || !strings.Contains(err.Error(), test.wantError) {
-					t.Fatalf("Load() error = %v, want containing %q", err, test.wantError)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("Load() error = %v", err)
-			}
-			if got.MemoryRoot != memoryRoot || got.CodeRoot != codeRoot {
-				t.Fatalf("Load() = %+v, want roots %q and %q", got, memoryRoot, codeRoot)
-			}
-		})
+	loaded, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantState, err := StatePath(memoryRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded != saved || loaded.MemoryRoot != memoryRoot || loaded.StateRoot != wantState {
+		t.Fatalf("Load() = %+v, want memory %q and state %q", loaded, memoryRoot, wantState)
+	}
+	info, err := os.Stat(filepath.Join(configHome, "git-push-memories", "config.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("config mode = %o, want 600", info.Mode().Perm())
 	}
 }
 
-func TestLoadIgnoresRepositorySelectionEnvironment(t *testing.T) {
+func TestLoadRequiresSetup(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	if _, err := Load(); err == nil || !strings.Contains(err.Error(), "run setup first") {
+		t.Fatalf("Load() error = %v, want setup instruction", err)
+	}
+}
+
+func TestResolveRequiresCommittedGitRoot(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if _, err := Resolve(""); err == nil || !strings.Contains(err.Error(), "memory root is required") {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+	if _, err := Resolve(t.TempDir()); err == nil || !strings.Contains(err.Error(), "with a commit") {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+}
+
+func TestResolveRejectsStateInsideGitWorktree(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
-	codeRoot := newGitRoot(t, "code")
+	otherRoot := newGitRoot(t, "other")
+	t.Setenv("XDG_STATE_HOME", filepath.Join(otherRoot, "private-state"))
+	if _, err := Resolve(memoryRoot); err == nil || !strings.Contains(err.Error(), "outside Git worktrees") {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+}
+
+func TestResolveIsolatesStateByMemoryRepository(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	first, err := Resolve(newGitRoot(t, "first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := Resolve(newGitRoot(t, "second"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StateRoot == second.StateRoot {
+		t.Fatalf("memory repositories share state root %q", first.StateRoot)
+	}
+}
+
+func TestResolveIgnoresRepositorySelectionEnvironment(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	memoryRoot := newGitRoot(t, "memory")
 	otherRoot := newGitRoot(t, "other")
 	t.Setenv("GIT_DIR", filepath.Join(otherRoot, ".git"))
 	t.Setenv("GIT_WORK_TREE", otherRoot)
 
-	got, err := Load(memoryRoot, codeRoot)
+	got, err := Resolve(memoryRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.MemoryRoot != memoryRoot || got.CodeRoot != codeRoot {
-		t.Fatalf("Load() = %+v, want explicit roots", got)
+	if got.MemoryRoot != memoryRoot {
+		t.Fatalf("Resolve() = %+v, want explicit memory root", got)
 	}
 }
 
@@ -67,9 +102,17 @@ func newGitRoot(t *testing.T, name string) string {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command("git", "init", "--quiet", root)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, output)
-	}
+	runGit(t, root, "init", "--quiet")
+	runGit(t, root, "config", "user.name", "Test")
+	runGit(t, root, "config", "user.email", "test@example.com")
+	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial "+name)
 	return root
+}
+
+func runGit(t *testing.T, root string, arguments ...string) {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", arguments, err, output)
+	}
 }

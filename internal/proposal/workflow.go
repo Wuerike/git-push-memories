@@ -23,15 +23,15 @@ type Workflow struct {
 	now        func() time.Time
 }
 
-func New(memoryRoot, codeRoot, stateRoot string) (*Workflow, error) {
-	return openWorkflow(memoryRoot, codeRoot, stateRoot, true)
+func New(memoryRoot, stateRoot string) (*Workflow, error) {
+	return openWorkflow(memoryRoot, stateRoot, true)
 }
 
-func OpenReadOnly(memoryRoot, codeRoot, stateRoot string) (*Workflow, error) {
-	return openWorkflow(memoryRoot, codeRoot, stateRoot, false)
+func OpenReadOnly(memoryRoot, stateRoot string) (*Workflow, error) {
+	return openWorkflow(memoryRoot, stateRoot, false)
 }
 
-func openWorkflow(memoryRoot, codeRoot, stateRoot string, cleanup bool) (*Workflow, error) {
+func openWorkflow(memoryRoot, stateRoot string, cleanup bool) (*Workflow, error) {
 	if stateRoot == "" {
 		return nil, fmt.Errorf("state root is required")
 	}
@@ -39,10 +39,9 @@ func openWorkflow(memoryRoot, codeRoot, stateRoot string, cleanup bool) (*Workfl
 	if err != nil {
 		return nil, fmt.Errorf("invalid memory root")
 	}
-	codeAbsolute, codeErr := filepath.EvalSymlinks(codeRoot)
 	stateAbsolute, err := canonicalFuturePath(stateRoot)
-	if err != nil || codeErr != nil || pathsOverlap(stateAbsolute, memoryAbsolute) || pathsOverlap(stateAbsolute, codeAbsolute) {
-		return nil, fmt.Errorf("state root must be outside configured repositories")
+	if err != nil || pathsOverlap(stateAbsolute, memoryAbsolute) {
+		return nil, fmt.Errorf("state root must be outside the memory repository")
 	}
 	var repository *memory.Repository
 	if cleanup {

@@ -168,12 +168,8 @@ func newCreatePageWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	t.Helper()
 	root := t.TempDir()
 	memoryRoot := filepath.Join(root, "memory")
-	codeRoot := filepath.Join(root, "code")
 	stateRoot := filepath.Join(root, "state")
 	if err := os.Mkdir(memoryRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(codeRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "--quiet"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}, {"commit", "--quiet", "--allow-empty", "-m", "initial"}} {
@@ -191,7 +187,7 @@ func newCreatePageWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,12 +203,8 @@ func newFaultWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	t.Helper()
 	root := t.TempDir()
 	memoryRoot := filepath.Join(root, "memory")
-	codeRoot := filepath.Join(root, "code")
 	stateRoot := filepath.Join(root, "state")
 	if err := os.MkdirAll(memoryRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(codeRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	page := "# Memory\n<!-- @id: memory -->\n\n## State\n<!-- @id: state -->\n\nold\n"
@@ -237,7 +229,7 @@ func newFaultWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	workflow, err := New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}

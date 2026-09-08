@@ -123,38 +123,49 @@ O [experimento controlado de valor](docs/phase-2/value-experiment-protocol.md) u
 
 O [relatorio do experimento](docs/phase-2/value-experiment-report.md) registra a decisao pre-registrada `revisar o fluxo`: correcao foi preservada, mas o limiar por pares nao foi atingido com consistencia suficiente para iniciar a Fase 3.
 
-O servidor MCP exige dois worktrees Git distintos e explícitos:
+## Instalacao
+
+O primeiro release suporta Linux em `amd64` e `arm64`. A CLI pode ser instalada sem Go:
 
 ```bash
-go run ./cmd/git-push-memories mcp --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
+curl -fsSL https://raw.githubusercontent.com/Wuerike/git-push-memories/master/install.sh | sh
 ```
 
-O servidor publica tres tools:
+Configure uma unica vez um repositorio de memoria ja clonado e com pelo menos um commit:
+
+```bash
+git-push-memories setup /path/to/memory-repository
+```
+
+O setup registra o MCP e instala `/remember` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode executar `/remember <fato>`.
+
+O servidor publica cinco tools:
 
 - `memory_search`, para buscar excerpts Markdown dentro de um orçamento em bytes;
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto.
-- `memory_propose_replace`, para criar explicitamente uma proposta estruturada sem aplicar Markdown ou executar Git.
+- `memory_propose_create_page`, `memory_propose_create_section` e `memory_propose_replace`, para criar propostas estruturadas sem aplicar Markdown ou executar Git.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
 
-O [material de integracao com Claude Code](integrations/claude-code/README.md) configura esse servidor e fornece um skill de proposta exclusivamente manual. Nenhum hook de sessao e instalado; apply e publish permanecem comandos humanos da CLI.
+O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado; apply e publish permanecem comandos humanos da CLI.
 
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
 ```bash
-go run ./cmd/git-push-memories retrieve "checkout timeout team" --memory-root /path/to/memory --code-root /path/to/code --budget-bytes 2048
+git-push-memories retrieve "checkout timeout team" --budget-bytes 2048
 ```
 
-Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `proposal show`, `proposal reject` e `proposal apply`. Esses comandos exigem `--memory-root`, `--code-root` e um `--state-root` privado fora dos dois repositórios. Apply exige a revisão exata, por exemplo:
+Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `proposal show`, `proposal reject` e `proposal apply`. Apply exige a revisão exata, por exemplo:
 
 ```bash
-go run ./cmd/git-push-memories proposal apply <proposal-id> --revision 1 --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
+git-push-memories proposal show <proposal-id>
+git-push-memories proposal apply <proposal-id> --revision 1
 ```
 
 O apply deixa a atualização como `applied_unpublished`. A publicação local cria um commit limitado ao target sem consumir staging alheio:
 
 ```bash
-go run ./cmd/git-push-memories proposal publish <proposal-id> --memory-root /path/to/memory --code-root /path/to/code --state-root /path/to/private-state
+git-push-memories proposal publish <proposal-id>
 ```
 
 O Publisher não acessa remotos. O commit recebe o trailer `Git-Push-Memories-Proposal: <id>/<revision>` e falhas recuperáveis preservam o estado `applied_unpublished`.

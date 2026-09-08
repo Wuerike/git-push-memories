@@ -5,6 +5,7 @@ disable-model-invocation: true
 allowed-tools: mcp__git-push-memories__memory_search, mcp__git-push-memories__memory_expand, mcp__git-push-memories__memory_propose_create_page, mcp__git-push-memories__memory_propose_create_section, mcp__git-push-memories__memory_propose_replace
 argument-hint: "[fact to remember]"
 ---
+<!-- managed-by: git-push-memories -->
 
 Handle one fact only because the user explicitly invoked `/remember`.
 
@@ -24,12 +25,12 @@ Search is guidance, not authoritative duplicate or contradiction detection. When
 4. Prepare the selected operation in memory. For replace, include the complete resulting body of the existing leaf section. For create page, use a root-level lowercase kebab-case filename, title, and body. For create section, use the existing page path, heading, and body. Include only canonical code `source_paths` that support the fact. Never construct anchors or section IDs.
 5. Show the operation, target path, existing section ID for replace, title or heading for create, body, and source paths. Require an explicit confirmation to create the proposal.
 6. After confirmation, call exactly one matching proposal tool. A cancellation, ambiguity, insufficient budget, missing MCP server, or tool error ends the flow without another proposal call or fallback write.
-7. Return the proposal ID, revision, operation, target, and diff summary. Use absolute roots already supplied explicitly in the invocation context; if any root is unavailable, ask the user and do not infer it. Then give the human these next steps with those roots substituted:
+7. Return the proposal ID, revision, operation, target, and diff summary. Then give the human these next steps:
 
 ```bash
-git-push-memories proposal show <proposal-id> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
-git-push-memories proposal apply <proposal-id> --revision <revision> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
-git-push-memories proposal publish <proposal-id> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
+git-push-memories proposal show <proposal-id>
+git-push-memories proposal apply <proposal-id> --revision <revision>
+git-push-memories proposal publish <proposal-id>
 ```
 
 Apply and publish remain human CLI actions. The proposal call receives only its closed operation fields; prompt, response, transcript, session ID, and private reasoning remain outside tool arguments and durable evidence.

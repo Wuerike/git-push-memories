@@ -28,8 +28,8 @@ Os estados usados sao:
 |---|---|---|
 | Runtime local | Executar como um unico programa Go, sem daemon, worker ou backend obrigatorio. | **Implementado.** Existe um executavel local e o servidor MCP e transitorio sobre stdio. |
 | Markdown e Git canonicos | Manter a memoria legivel e integra sem banco, indice ou processo da ferramenta. | **Implementado.** O Markdown e o historico Git sao a unica autoridade duravel. |
-| Roots separados | Tratar `memory_root`, `code_root` e estado operacional privado como locais distintos. | **Implementado.** Os dois repositorios Git sao explicitos e distintos; o state root deve ficar fora de ambos. |
-| Um memory root para varios code roots | Permitir que repositorios de codigo diferentes consumam a mesma memoria sem cross-talk. | **Implementado.** A recuperacao recebe um code root explicito e nao escreve nele. |
+| Configuracao global | Permitir que qualquer sessao use a mesma memoria sem configuracao por repositorio de codigo. | **Implementado.** `setup` registra memory root, MCP e skill uma unica vez no escopo do usuario. |
+| Estado privado | Manter propostas fora da memoria e de worktrees Git. | **Implementado.** O state root e derivado de XDG e rejeitado quando sobrepoe um worktree Git. |
 | Indice local derivado | Se um indice for necessario, torna-lo descartavel e reconstruivel somente do Markdown. | **Nao aplicavel.** A implementacao atual nao possui indice persistente e percorre os arquivos diretamente. |
 | Runtime, banco e store de sessao adicionais | Nao introduzir Python, banco autoritativo, daemon, grafo, vector DB ou store de sessao no primeiro ciclo. | **Implementado como restricao.** Nenhum desses componentes faz parte do produto atual. |
 
@@ -103,7 +103,7 @@ Os estados usados sao:
 | Orcamento de contexto | Nunca ultrapassar silenciosamente o limite de bytes informado. | **Implementado.** Budget insuficiente retorna erro tipado. |
 | Handles expandiveis | Retornar path, section ID e hash para expansao posterior e deteccao de conteudo obsoleto. | **Implementado.** `memory_expand` rejeita handles stale. |
 | Recuperacao progressiva | Retornar excerpts compactos primeiro e carregar o conteudo integral somente sob demanda. | **Parcial.** Search e expand existem, mas a busca ainda retorna o corpo integral de cada secao selecionada, e nao um excerpt separado. |
-| Recuperacao em nova sessao | Encontrar o estado publicado sem acessar proposta, state root ou sessao que originou a descoberta. | **Implementado tecnicamente.** O E2E inicia um novo processo, cliente, HOME, code root e state root. |
+| Recuperacao em nova sessao | Encontrar o estado publicado sem acessar proposta, state root ou sessao que originou a descoberta. | **Implementado tecnicamente.** O E2E inicia um novo processo, cliente, HOME, configuracao e state root. |
 | Busca semantica e FTS | Melhorar ranking somente depois de falha medida da busca textual. | **Adiado.** Nao ha justificativa atual para introduzir indice, vetores ou grafo. |
 
 ## Integracao com Claude Code
@@ -111,6 +111,7 @@ Os estados usados sao:
 | Funcionalidade | Comportamento esperado | Estado atual |
 |---|---|---|
 | MCP por stdio | Expor captura e recuperacao sem daemon ou porta local. | **Implementado.** O servidor publica `memory_search`, `memory_expand` e tres tools de proposta. |
+| Setup global | Instalar MCP e `/remember` sem copia manual ou configuracao por projeto. | **Implementado.** `git-push-memories setup <memory-root>` registra o MCP no escopo `user` e instala o skill embutido. |
 | Adapter sem autoridade propria | Reutilizar Intake Guard, Proposal Workflow e Retrieval sem criar stores ou escrita paralela. | **Implementado.** Os handlers MCP apenas traduzem entrada e saida dos modulos centrais. |
 | Restricao de autoridade | Nao expor apply ou publish ao agente. | **Implementado.** Essas operacoes existem somente na CLI. |
 | Fluxo `/remember` | Pesquisar, expandir candidatos, apresentar uma operacao e pedir confirmacao antes de propor. | **Parcial.** O skill e os harnesses deterministas existem, mas o experimento autenticado T19 abortou antes da proposta. |

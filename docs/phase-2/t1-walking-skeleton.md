@@ -1,5 +1,7 @@
 # T1: protocolo executavel e walking skeleton
 
+> Documento historico da interface validada na Fase 2. A interface atual usa configuracao global e nao possui `code-root`; consulte o README.
+
 ## Fixed point e seams
 
 - Fixed point: `91c1a877f36f30e02e5ec9983a8277aaec95310f`.

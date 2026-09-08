@@ -1,0 +1,16 @@
+git-push-memories includes software from these projects:
+
+- agent-memory, Apache License 2.0. See third_party/agent-memory/LICENSE.
+- Goldmark, MIT License. See third_party/goldmark/LICENSE.
+- Model Context Protocol Go SDK, Apache License 2.0 and MIT.
+- google/jsonschema-go, MIT License.
+- segmentio/asm, MIT License.
+- segmentio/encoding, MIT License.
+- yosida95/uritemplate, BSD 3-Clause License.
+- golang.org/x/oauth2, BSD 3-Clause License.
+- golang.org/x/sync, BSD 3-Clause License.
+- golang.org/x/sys, BSD 3-Clause License.
+- golang.org/x/time, BSD 3-Clause License.
+
+Exact versions are recorded in go.mod and go.sum. Adapted source provenance is
+recorded in third_party/README.md.

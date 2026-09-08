@@ -116,7 +116,6 @@ func (h *harness) runBehavioral() manifest {
 	runRoot := t.TempDir()
 	memoryRoot := filepath.Join(runRoot, "memory")
 	codeRoot := filepath.Join(runRoot, "code")
-	stateRoot := filepath.Join(runRoot, "state-a")
 	home := filepath.Join(runRoot, "home-a")
 	configRoot := filepath.Join(runRoot, "config-a")
 	for _, root := range []string{memoryRoot, codeRoot, home, configRoot} {
@@ -135,6 +134,7 @@ func (h *harness) runBehavioral() manifest {
 	h.seedRepository(codeRoot, map[string][]byte{
 		"services/checkout-api/service.yaml": h.fixture("code-repo", "services/checkout-api/service.yaml"),
 	})
+	stateRoot := stateRootFor(t, configRoot, memoryRoot)
 	if err := os.WriteFile(filepath.Join(memoryRoot, "notes/staged.txt"), []byte("user staged change\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func (h *harness) runBehavioral() manifest {
 	h.writeFile("inventory-before.txt", []byte(h.inventory(runRoot)))
 
 	environment := isolatedEnvironment(home, configRoot)
-	session := h.connectMCP("MCP process A", memoryRoot, codeRoot, stateRoot, environment, "client-a")
+	session := h.connectMCP("MCP process A", memoryRoot, environment, "client-a")
 	initialBundle, initialBytes := h.callBundle(session, "memory_search initial", "memory_search", map[string]any{
 		"query": query, "budget_bytes": searchBudget,
 	})
@@ -202,8 +202,7 @@ func (h *harness) runBehavioral() manifest {
 		t.Fatal("proposal changed index")
 	}
 
-	common := []string{"--memory-root", memoryRoot, "--code-root", codeRoot, "--state-root", stateRoot}
-	showOutput := h.cli(environment, "proposal show", append([]string{"proposal", "show", proposed.Data.ID}, common...)...)
+	showOutput := h.cli(environment, "proposal show", "proposal", "show", proposed.Data.ID)
 	var review protocol.Envelope[proposal.Review]
 	decodeJSON(t, showOutput, &review)
 	if review.Data.Proposal == nil || review.Data.Proposal.Diff == "" {
@@ -214,7 +213,7 @@ func (h *harness) runBehavioral() manifest {
 	}
 	h.writeFile("proposal.diff", []byte(review.Data.Proposal.Diff))
 
-	applyArgs := append([]string{"proposal", "apply", proposed.Data.ID, "--revision", "1"}, common...)
+	applyArgs := []string{"proposal", "apply", proposed.Data.ID, "--revision", "1"}
 	applyOutput := h.cli(environment, "proposal apply", applyArgs...)
 	applyAgain := h.cli(environment, "proposal apply repeat", applyArgs...)
 	var applied, appliedAgain protocol.Envelope[proposal.ApplyReceipt]
@@ -224,7 +223,7 @@ func (h *harness) runBehavioral() manifest {
 		t.Fatal("apply retry changed its receipt")
 	}
 
-	publishArgs := append([]string{"proposal", "publish", proposed.Data.ID}, common...)
+	publishArgs := []string{"proposal", "publish", proposed.Data.ID}
 	publishOutput := h.cli(environment, "proposal publish", publishArgs...)
 	publishAgain := h.cli(environment, "proposal publish repeat", publishArgs...)
 	var published, publishedAgain protocol.Envelope[proposal.PublicationReceipt]
@@ -277,14 +276,14 @@ func (h *harness) runBehavioral() manifest {
 	codeRootB := filepath.Join(runRoot, "code-b")
 	homeB := filepath.Join(runRoot, "home-b")
 	configB := filepath.Join(runRoot, "config-b")
-	stateB := filepath.Join(runRoot, "state-b")
+	stateB := stateRootFor(t, configB, memoryRoot)
 	for _, root := range []string{homeB, configB} {
 		if err := os.MkdirAll(root, 0o700); err != nil {
 			t.Fatal(err)
 		}
 	}
 	h.seedRepository(codeRootB, nil)
-	sessionB := h.connectMCP("MCP process B", memoryRoot, codeRootB, stateB, isolatedEnvironment(homeB, configB), "client-b")
+	sessionB := h.connectMCP("MCP process B", memoryRoot, isolatedEnvironment(homeB, configB), "client-b")
 	finalBundle, finalBytes := h.callBundle(sessionB, "memory_search final", "memory_search", map[string]any{
 		"query": query, "budget_bytes": searchBudget,
 	})
@@ -321,10 +320,10 @@ func (h *harness) runBehavioral() manifest {
 		MCPSDKVersion:     h.binaryDependencyVersion("github.com/modelcontextprotocol/go-sdk"),
 		Offline:           os.Getenv("GOPROXY") == "off",
 		Configuration: map[string]string{
-			"memory_root": "<run-root>/memory", "code_root_a": "<run-root>/code", "state_root_a": "<run-root>/state-a",
+			"memory_root": "<run-root>/memory", "workspace_a": "<run-root>/code", "state_root_a": "<run-root>/state-a",
 			"home_a": "<run-root>/home-a", "config_a": "<run-root>/config-a",
-			"code_root_b": "<run-root>/code-b", "state_root_b": "<run-root>/state-b", "home_b": "<run-root>/home-b", "config_b": "<run-root>/config-b",
-			"privacy_memory_root": "<privacy-root>/memory", "privacy_code_root": "<privacy-root>/code", "privacy_state_root": "<privacy-root>/state",
+			"workspace_b": "<run-root>/code-b", "state_root_b": "<run-root>/state-b", "home_b": "<run-root>/home-b", "config_b": "<run-root>/config-b",
+			"privacy_memory_root": "<privacy-root>/memory", "privacy_workspace": "<privacy-root>/code", "privacy_state_root": "<privacy-root>/state",
 			"privacy_home": "<privacy-root>/home", "privacy_config": "<privacy-root>/config",
 		},
 		RankingCriterion:    "distinct query-token matches descending; path, section order, and section ID ascending",
@@ -347,7 +346,6 @@ func (h *harness) runPrivacy() (int, int) {
 	runRoot := t.TempDir()
 	memoryRoot := filepath.Join(runRoot, "memory")
 	codeRoot := filepath.Join(runRoot, "code")
-	stateRoot := filepath.Join(runRoot, "state")
 	home := filepath.Join(runRoot, "home")
 	configRoot := filepath.Join(runRoot, "config")
 	for _, root := range []string{home, configRoot} {
@@ -356,6 +354,7 @@ func (h *harness) runPrivacy() (int, int) {
 		}
 	}
 	h.seedRepository(memoryRoot, map[string][]byte{targetPath: h.fixture("memory-initial", targetPath)})
+	stateRoot := stateRootFor(t, configRoot, memoryRoot)
 	h.seedRepository(codeRoot, map[string][]byte{
 		"services/checkout-api/service.yaml": h.fixture("code-repo", "services/checkout-api/service.yaml"),
 	})
@@ -367,11 +366,13 @@ func (h *harness) runPrivacy() (int, int) {
 
 	traceDirectory := t.TempDir()
 	tracePrefix := filepath.Join(traceDirectory, "privacy.trace")
+	environment := isolatedEnvironment(home, configRoot)
+	writeRuntimeConfig(t, memoryRoot, environment)
 	command := exec.CommandContext(h.ctx, "strace", "-ff", "-qq", "-e", "trace=%file", "-o", tracePrefix,
-		h.binary, "mcp", "--memory-root", memoryRoot, "--code-root", codeRoot, "--state-root", stateRoot,
+		h.binary, "mcp",
 	)
 	command.Dir = runRoot
-	command.Env = isolatedEnvironment(home, configRoot)
+	command.Env = environment
 	client := mcp.NewClient(&mcp.Implementation{Name: "privacy-client", Version: "test"}, nil)
 	started := time.Now()
 	session, err := client.Connect(h.ctx, &mcp.CommandTransport{Command: command}, nil)
@@ -443,9 +444,10 @@ func (h *harness) runPrivacy() (int, int) {
 	return hits, len(writeTargets)
 }
 
-func (h *harness) connectMCP(name, memoryRoot, codeRoot, stateRoot string, environment []string, clientName string) *mcp.ClientSession {
+func (h *harness) connectMCP(name, memoryRoot string, environment []string, clientName string) *mcp.ClientSession {
 	h.t.Helper()
-	command := exec.CommandContext(h.ctx, h.binary, "mcp", "--memory-root", memoryRoot, "--code-root", codeRoot, "--state-root", stateRoot)
+	writeRuntimeConfig(h.t, memoryRoot, environment)
+	command := exec.CommandContext(h.ctx, h.binary, "mcp")
 	command.Env = environment
 	client := mcp.NewClient(&mcp.Implementation{Name: clientName, Version: "test"}, nil)
 	started := time.Now()
@@ -454,7 +456,7 @@ func (h *harness) connectMCP(name, memoryRoot, codeRoot, stateRoot string, envir
 	if err != nil {
 		exitCode = 1
 	}
-	h.records = append(h.records, commandRecord{Name: name, Command: "git-push-memories mcp <isolated-roots>", ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()})
+	h.records = append(h.records, commandRecord{Name: name, Command: "git-push-memories mcp", ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -664,10 +666,44 @@ func isolatedEnvironment(home, configRoot string) []string {
 		"PATH=" + path,
 		"HOME=" + home,
 		"XDG_CONFIG_HOME=" + configRoot,
+		"XDG_STATE_HOME=" + filepath.Join(configRoot, "state-home"),
 		"CLAUDE_CONFIG_DIR=" + filepath.Join(configRoot, "claude"),
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_CONFIG_GLOBAL=/dev/null",
 		"LANG=C",
+	}
+}
+
+func stateRootFor(t *testing.T, configRoot, memoryRoot string) string {
+	t.Helper()
+	command := exec.Command("git", "--no-optional-locks", "-C", memoryRoot, "rev-list", "--max-parents=0", "HEAD")
+	output, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	identity := fmt.Sprintf("%x", sha256.Sum256(bytes.TrimSpace(output)))[:16]
+	return filepath.Join(configRoot, "state-home", "git-push-memories", identity)
+}
+
+func writeRuntimeConfig(t *testing.T, memoryRoot string, environment []string) {
+	t.Helper()
+	var configRoot string
+	for _, entry := range environment {
+		if strings.HasPrefix(entry, "XDG_CONFIG_HOME=") {
+			configRoot = strings.TrimPrefix(entry, "XDG_CONFIG_HOME=")
+			break
+		}
+	}
+	directory := filepath.Join(configRoot, "git-push-memories")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(map[string]any{"schema_version": 1, "memory_root": memoryRoot})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(directory, "config.json"), payload, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -855,12 +891,6 @@ func sanitizedCommand(executable string, arguments []string) string {
 			switch sanitized[index-1] {
 			case "-o":
 				sanitized[index] = "<output>"
-			case "--memory-root":
-				sanitized[index] = "<memory-root>"
-			case "--code-root":
-				sanitized[index] = "<code-root>"
-			case "--state-root":
-				sanitized[index] = "<state-root>"
 			}
 		}
 		if len(sanitized[index]) == 32 {

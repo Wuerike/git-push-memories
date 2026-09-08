@@ -1,22 +1,35 @@
 # Claude Code
 
-Esta integracao usa somente MCP sobre stdio e skills explicitos de proposta. Ela nao instala hooks, nao captura sessoes e nao concede ao Claude Code autoridade para apply ou publish.
+Esta integracao usa MCP sobre stdio e o skill explicito `/remember`. Ela nao instala hooks, nao captura sessoes e nao concede ao Claude Code autoridade para apply ou publish.
 
-## Configurar o servidor MCP
+## Configurar
 
-Compile `git-push-memories` e registre o processo local no projeto consumidor com paths absolutos:
+Depois de instalar a CLI, execute uma vez:
 
 ```bash
-claude mcp add --transport stdio --scope project git-push-memories -- \
-  /absolute/path/git-push-memories mcp \
-  --memory-root /absolute/path/memory-repository \
-  --code-root /absolute/path/code-repository \
-  --state-root /absolute/path/private-state
+git-push-memories setup /absolute/path/memory-repository
 ```
 
-Memory root e code root devem ser worktrees Git distintos. State root deve ser privado, ficar fora dos dois repositorios e nao conter estado compartilhado ou dados de sessao.
+O repositorio deve ser um worktree Git ja clonado e possuir pelo menos um commit. O comando:
 
-O servidor registrado expoe somente:
+- salva o memory root na configuracao global do usuario;
+- deriva um state root privado em `$XDG_STATE_HOME/git-push-memories` ou `~/.local/state/git-push-memories`;
+- registra `git-push-memories mcp` no escopo `user` do Claude Code;
+- instala o skill global em `~/.claude/skills/remember/SKILL.md`.
+
+O setup e idempotente. Execute-o novamente depois de mover o binario ou para selecionar outro repositorio de memoria.
+
+## Usar
+
+Em qualquer sessao do Claude Code:
+
+```text
+/remember <fato>
+```
+
+O fluxo pesquisa a memoria, expande ate tres candidatos, oferece somente operacoes aplicaveis e exige confirmacao antes de criar uma proposta. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
+
+O servidor expoe somente:
 
 - `memory_search`;
 - `memory_expand`;
@@ -24,24 +37,12 @@ O servidor registrado expoe somente:
 - `memory_propose_create_section`;
 - `memory_propose_replace`.
 
-Apply e publish continuam disponiveis somente na CLI para execucao humana.
-
-## Habilitar a instrucao explicita
-
-Instale o skill no code root do projeto consumidor:
+Apply e publish continuam disponiveis somente na CLI:
 
 ```bash
-install -D -m 0644 \
-  /absolute/path/git-push-memories/integrations/claude-code/skills/propose-memory/SKILL.md \
-  /absolute/path/code-repository/.claude/skills/propose-memory/SKILL.md
+git-push-memories proposal show <proposal-id>
+git-push-memories proposal apply <proposal-id> --revision <revision>
+git-push-memories proposal publish <proposal-id>
 ```
 
-Instale da mesma forma `skills/propose-memory-page/SKILL.md` e `skills/propose-memory-section/SKILL.md` para disponibilizar as operacoes explicitas de baixo nivel. Cada skill recebe intencao e conteudo, deixa schema/anchors a cargo do produto e chama exatamente uma tool de proposta. O frontmatter limita cada skill a sua operacao.
-
-`/propose-memory` continua sendo o caminho de replace compativel. `/propose-memory-page` e `/propose-memory-section` existem para uso explicito e diagnostico; o fluxo orientado por pesquisa sera fornecido por `/remember`.
-
-O caminho principal e `skills/remember/SKILL.md`. Instale-o como `.claude/skills/remember/SKILL.md` e invoque `/remember <fato>`. Ele pesquisa primeiro, expande no maximo tres candidatos, oferece somente operacoes aplicaveis e exige confirmacao antes de criar uma proposta. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
-
-Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nao deve repetir a chamada, inferir o target de texto livre, nem gravar o candidato em arquivo, log, spool ou ferramenta alternativa.
-
-Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.
+Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.

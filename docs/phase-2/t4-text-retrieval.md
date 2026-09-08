@@ -1,5 +1,7 @@
 # T4: recuperacao textual
 
+> Documento historico da interface validada na Fase 2. A interface atual carrega o memory root da configuracao global e nao possui `code-root`; consulte o README.
+
 ## Fixed point e seams
 
 O fixed point de T4 e `1c6a8b82a63f9e204adbbbf7cb0f5f5ac974068b`. O modulo fica sob `internal/retrieval`, consome somente paths canonicos e snapshots de `Memory Repository` e expoe `Retrieve` e `Expand`. O adapter MCP traduz somente `memory_search` e `memory_expand`; parser, offsets, filesystem interno e Git nao atravessam essas interfaces.

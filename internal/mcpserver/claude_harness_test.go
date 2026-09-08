@@ -9,21 +9,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
-	codeRoot := newGitRoot(t, nil)
-	stateRoot := filepath.Join(t.TempDir(), "state")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if _, err := config.Save(memoryRoot); err != nil {
+		t.Fatal(err)
+	}
 	binary := buildBinary(t)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-harness", Version: "test"}, nil)
-	serverCommand := exec.Command(binary, "mcp",
-		"--memory-root", memoryRoot,
-		"--code-root", codeRoot,
-		"--state-root", stateRoot,
-	)
+	serverCommand := exec.Command(binary, "mcp")
 	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: serverCommand}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -48,11 +48,7 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	show := exec.Command(binary, "proposal", "show", response.Data.ID,
-		"--memory-root", memoryRoot,
-		"--code-root", codeRoot,
-		"--state-root", stateRoot,
-	)
+	show := exec.Command(binary, "proposal", "show", response.Data.ID)
 	output, err := show.CombinedOutput()
 	if err != nil {
 		t.Fatalf("proposal show: %v: %s", err, output)
@@ -73,9 +69,7 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 func TestMissingClaudeMCPIsVisibleWithoutPersistingPayload(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-harness", Version: "test"}, nil)
-	command := exec.Command(filepath.Join(t.TempDir(), "missing-git-push-memories"),
-		"mcp", "--state-root", stateRoot,
-	)
+	command := exec.Command(filepath.Join(t.TempDir(), "missing-git-push-memories"), "mcp")
 	if _, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: command}, nil); err == nil {
 		t.Fatal("Connect() succeeded without the MCP executable")
 	}

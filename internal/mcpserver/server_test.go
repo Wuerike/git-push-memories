@@ -30,8 +30,7 @@ const memoryPage = `# checkout-api
 
 func TestMemorySearchAndExpand(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
-	codeRoot := newGitRoot(t, nil)
-	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, CodeRoot: codeRoot}, filepath.Join(t.TempDir(), "state"), "test")
+	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, StateRoot: filepath.Join(t.TempDir(), "state")}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,14 +104,13 @@ func TestMemorySearchAndExpand(t *testing.T) {
 
 func TestMemoryProposeReplace(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
-	codeRoot := newGitRoot(t, nil)
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	before, err := os.ReadFile(filepath.Join(memoryRoot, "services/checkout-api.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	session, stop := startServer(t, memoryRoot, codeRoot, stateRoot)
+	session, stop := startServer(t, memoryRoot, stateRoot)
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose_replace",
 		Arguments: map[string]any{
@@ -145,7 +143,7 @@ func TestMemoryProposeReplace(t *testing.T) {
 	}
 	stop()
 
-	workflow, err := proposal.OpenReadOnly(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.OpenReadOnly(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,10 +177,9 @@ func TestMemoryProposeCreatePageAndSection(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			memoryRoot := newGitRoot(t, test.files)
-			codeRoot := newGitRoot(t, nil)
 			stateRoot := filepath.Join(t.TempDir(), "state")
 			before := gitOutput(t, memoryRoot, "status", "--porcelain=v1", "--untracked-files=all")
-			session, stop := startServer(t, memoryRoot, codeRoot, stateRoot)
+			session, stop := startServer(t, memoryRoot, stateRoot)
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: test.tool, Arguments: test.arguments})
 			if err != nil {
 				t.Fatal(err)
@@ -195,7 +192,7 @@ func TestMemoryProposeCreatePageAndSection(t *testing.T) {
 				t.Fatalf("proposal changed memory/Git: before %q, after %q", before, after)
 			}
 			stop()
-			workflow, err := proposal.OpenReadOnly(memoryRoot, codeRoot, stateRoot)
+			workflow, err := proposal.OpenReadOnly(memoryRoot, stateRoot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -210,9 +207,8 @@ func TestMemoryProposeCreatePageAndSection(t *testing.T) {
 
 func TestInvalidAndSensitiveProposalsAreRejectedWithoutStateOrBlockingSession(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
-	codeRoot := newGitRoot(t, nil)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	session, stop := startServer(t, memoryRoot, codeRoot, stateRoot)
+	session, stop := startServer(t, memoryRoot, stateRoot)
 	defer stop()
 
 	unstructured, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -287,9 +283,9 @@ func decodeProposalResponse(t *testing.T, result *mcp.CallToolResult) proposalRe
 	return decoded
 }
 
-func startServer(t *testing.T, memoryRoot, codeRoot, stateRoot string) (*mcp.ClientSession, func()) {
+func startServer(t *testing.T, memoryRoot, stateRoot string) (*mcp.ClientSession, func()) {
 	t.Helper()
-	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, CodeRoot: codeRoot}, stateRoot, "test")
+	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, StateRoot: stateRoot}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}

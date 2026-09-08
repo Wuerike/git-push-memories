@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/Wuerike/git-push-memories/internal/claudecode"
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
 	"github.com/Wuerike/git-push-memories/internal/proposal"
@@ -17,12 +18,13 @@ import (
 )
 
 const usage = `Usage:
-  git-push-memories mcp --memory-root <path> --code-root <path> --state-root <path>
-  git-push-memories retrieve <query> --memory-root <path> --code-root <path> --budget-bytes <n>
-  git-push-memories proposal show <proposal-id> --memory-root <path> --code-root <path> --state-root <path>
-  git-push-memories proposal reject <proposal-id> --reason <reason> --memory-root <path> --code-root <path> --state-root <path>
-  git-push-memories proposal apply <proposal-id> --revision <n> --memory-root <path> --code-root <path> --state-root <path>
-  git-push-memories proposal publish <proposal-id> --memory-root <path> --code-root <path> --state-root <path>
+  git-push-memories setup <memory-root>
+  git-push-memories mcp
+  git-push-memories retrieve <query> --budget-bytes <n>
+  git-push-memories proposal show <proposal-id>
+  git-push-memories proposal reject <proposal-id> --reason <reason>
+  git-push-memories proposal apply <proposal-id> --revision <n>
+  git-push-memories proposal publish <proposal-id>
   git-push-memories version
   git-push-memories help
 `
@@ -40,6 +42,8 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	case "version", "--version":
 		fmt.Fprintf(stdout, "git-push-memories %s\n", version)
 		return 0
+	case "setup":
+		return runSetup(ctx, args[1:], stdout, stderr)
 	case "mcp":
 		return runMCP(ctx, args[1:], stdin, stdout, stderr, version)
 	case "retrieve":
@@ -52,6 +56,20 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
+func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) != 1 || args[0] == "" {
+		fmt.Fprintln(stderr, "setup requires exactly one memory repository path")
+		return 2
+	}
+	result, err := claudecode.Setup(ctx, args[0])
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Configured memory at %s. Use /remember <fact> in any Claude Code session.\n", result.MemoryRoot)
+	return 0
+}
+
 func runProposal(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if len(args) < 2 || (args[0] != "show" && args[0] != "reject" && args[0] != "apply" && args[0] != "publish") {
 		fmt.Fprintln(stderr, "proposal requires show, reject, apply, or publish and a proposal ID")
@@ -60,9 +78,6 @@ func runProposal(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	action, id := args[0], args[1]
 	flags := flag.NewFlagSet("proposal "+action, flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	memoryRoot := flags.String("memory-root", "", "path to the memory Git worktree root")
-	codeRoot := flags.String("code-root", "", "path to the code Git worktree root")
-	stateRoot := flags.String("state-root", "", "path to private proposal state")
 	reason := flags.String("reason", "", "closed rejection reason")
 	revision := flags.Int("revision", 0, "exact proposal revision to apply")
 	if err := flags.Parse(args[2:]); err != nil {
@@ -73,16 +88,16 @@ func runProposal(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, "invalid proposal arguments")
 		return 2
 	}
-	cfg, err := config.Load(*memoryRoot, *codeRoot)
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
 	var workflow *proposal.Workflow
 	if action == "show" {
-		workflow, err = proposal.OpenReadOnly(cfg.MemoryRoot, cfg.CodeRoot, *stateRoot)
+		workflow, err = proposal.OpenReadOnly(cfg.MemoryRoot, cfg.StateRoot)
 	} else {
-		workflow, err = proposal.New(cfg.MemoryRoot, cfg.CodeRoot, *stateRoot)
+		workflow, err = proposal.New(cfg.MemoryRoot, cfg.StateRoot)
 	}
 	if err != nil {
 		fmt.Fprintln(stderr, "proposal workflow could not initialize")
@@ -97,7 +112,7 @@ func runProposal(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	} else if action == "apply" {
 		response, err = workflow.Apply(ctx, id, *revision)
 	} else {
-		response, err = publishProposal(ctx, workflow, cfg.MemoryRoot, *stateRoot, id)
+		response, err = publishProposal(ctx, workflow, cfg.MemoryRoot, cfg.StateRoot, id)
 	}
 	if err != nil {
 		switch {
@@ -157,8 +172,6 @@ func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) i
 	query := args[0]
 	flags := flag.NewFlagSet("retrieve", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	memoryRoot := flags.String("memory-root", "", "path to the memory Git worktree root")
-	codeRoot := flags.String("code-root", "", "path to the code Git worktree root")
 	budget := flags.Int("budget-bytes", 0, "maximum UTF-8 bytes for the ContextBundle JSON")
 	pathPrefix := flags.String("path-prefix", "", "optional canonical relative path scope")
 	if err := flags.Parse(args[1:]); err != nil {
@@ -168,7 +181,7 @@ func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, "retrieve accepts exactly one query")
 		return 2
 	}
-	cfg, err := config.Load(*memoryRoot, *codeRoot)
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -194,9 +207,6 @@ func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) i
 func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, version string) int {
 	flags := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	memoryRoot := flags.String("memory-root", "", "path to the memory Git worktree root")
-	codeRoot := flags.String("code-root", "", "path to the code Git worktree root")
-	stateRoot := flags.String("state-root", "", "path to private proposal state")
 	if err := flags.Parse(args); err != nil {
 		return 2
 	}
@@ -205,12 +215,12 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 		return 2
 	}
 
-	cfg, err := config.Load(*memoryRoot, *codeRoot)
+	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	server, err := mcpserver.New(cfg, *stateRoot, version)
+	server, err := mcpserver.New(cfg, version)
 	if err != nil {
 		fmt.Fprintln(stderr, "MCP server could not initialize")
 		return 1

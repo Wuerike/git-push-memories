@@ -21,9 +21,8 @@ func TestApplyAndRejectAcrossProcessesPublishOneTerminalReceipt(t *testing.T) {
 
 func testApplyAndRejectAcrossProcesses(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,8 +34,8 @@ func testApplyAndRejectAcrossProcesses(t *testing.T) {
 		t.Fatal(err)
 	}
 	commands := []*exec.Cmd{
-		proposalHelperCommand("apply", memoryRoot, codeRoot, stateRoot, view.ID),
-		proposalHelperCommand("reject", memoryRoot, codeRoot, stateRoot, view.ID),
+		proposalHelperCommand("apply", memoryRoot, stateRoot, view.ID),
+		proposalHelperCommand("reject", memoryRoot, stateRoot, view.ID),
 	}
 	outputs := make([]strings.Builder, len(commands))
 	for index, command := range commands {
@@ -83,7 +82,7 @@ func TestProposalDecisionHelperProcess(t *testing.T) {
 	if os.Getenv("GPM_PROPOSAL_HELPER") != "1" {
 		return
 	}
-	workflow, err := proposal.New(os.Getenv("GPM_MEMORY_ROOT"), os.Getenv("GPM_CODE_ROOT"), os.Getenv("GPM_STATE_ROOT"))
+	workflow, err := proposal.New(os.Getenv("GPM_MEMORY_ROOT"), os.Getenv("GPM_STATE_ROOT"))
 	if workflow != nil {
 		defer workflow.Close()
 	}
@@ -107,13 +106,12 @@ func TestProposalDecisionHelperProcess(t *testing.T) {
 	os.Exit(0)
 }
 
-func proposalHelperCommand(action, memoryRoot, codeRoot, stateRoot, id string) *exec.Cmd {
+func proposalHelperCommand(action, memoryRoot, stateRoot, id string) *exec.Cmd {
 	command := exec.Command(os.Args[0], "-test.run=^TestProposalDecisionHelperProcess$")
 	command.Env = append(os.Environ(),
 		"GPM_PROPOSAL_HELPER=1",
 		"GPM_ACTION="+action,
 		"GPM_MEMORY_ROOT="+memoryRoot,
-		"GPM_CODE_ROOT="+codeRoot,
 		"GPM_STATE_ROOT="+stateRoot,
 		"GPM_PROPOSAL_ID="+id,
 	)

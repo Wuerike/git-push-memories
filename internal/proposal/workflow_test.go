@@ -33,10 +33,9 @@ const initialPage = `# checkout-api
 
 func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	before := treeFingerprint(t, memoryRoot)
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +69,7 @@ func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.
 		t.Fatal(err)
 	}
 
-	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	restarted, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,9 +85,8 @@ func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.
 
 func TestCreatePageProposalAppliesOnceFromAbsentBaseline(t *testing.T) {
 	memoryRoot := newEmptyMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +131,7 @@ func TestCreatePageProposalAppliesOnceFromAbsentBaseline(t *testing.T) {
 
 func TestCreatePageApplyRejectsTargetCreatedAfterPrepare(t *testing.T) {
 	memoryRoot := newEmptyMemoryRoot(t)
-	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	workflow, err := proposal.New(memoryRoot, filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,9 +159,8 @@ func TestCreatePageApplyRejectsTargetCreatedAfterPrepare(t *testing.T) {
 
 func TestCreatePageStartupRecoversPostStateWithoutApplyReceipt(t *testing.T) {
 	memoryRoot := newEmptyMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +175,7 @@ func TestCreatePageStartupRecoversPostStateWithoutApplyReceipt(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(memoryRoot, "parcel-dispatch.md"), []byte(postState), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	restarted, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,7 +191,7 @@ func TestCreatePageStartupRecoversPostStateWithoutApplyReceipt(t *testing.T) {
 
 func TestCreatePageConcurrentApplyReturnsOneDurableResult(t *testing.T) {
 	memoryRoot := newEmptyMemoryRoot(t)
-	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	workflow, err := proposal.New(memoryRoot, filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,9 +227,8 @@ func TestCreatePageConcurrentApplyReturnsOneDurableResult(t *testing.T) {
 
 func TestCreatePagePublicationIsRecordedAndIdempotent(t *testing.T) {
 	memoryRoot := newEmptyMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,9 +262,8 @@ func TestCreatePagePublicationIsRecordedAndIdempotent(t *testing.T) {
 
 func TestCreateSectionProposalAppliesPublishesAndRetrievesGeneratedID(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +326,7 @@ func TestCreateSectionProposalAppliesPublishesAndRetrievesGeneratedID(t *testing
 
 func TestCreateSectionApplyRejectsWholeFileDrift(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	workflow, err := proposal.New(memoryRoot, filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -356,9 +351,8 @@ func TestCreateSectionApplyRejectsWholeFileDrift(t *testing.T) {
 
 func TestCreateSectionStartupRecoversPostState(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -373,7 +367,7 @@ func TestCreateSectionStartupRecoversPostState(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(memoryRoot, "services", "checkout-api.md"), []byte(postState), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	restarted, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +379,7 @@ func TestCreateSectionStartupRecoversPostState(t *testing.T) {
 }
 
 func TestCreateSectionConcurrentApplyReturnsOneDurableResult(t *testing.T) {
-	workflow, err := proposal.New(newMemoryRoot(t), newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	workflow, err := proposal.New(newMemoryRoot(t), filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -428,8 +422,7 @@ func TestPrepareRejectsDirtyTarget(t *testing.T) {
 				runGit(t, memoryRoot, "add", "services/checkout-api.md")
 			}
 			stateRoot := filepath.Join(t.TempDir(), "state")
-			codeRoot := newCodeRoot(t)
-			workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			workflow, err := proposal.New(memoryRoot, stateRoot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -447,9 +440,8 @@ func TestPrepareRejectsDirtyTarget(t *testing.T) {
 
 func TestRejectIsClosedDurableAndIdempotent(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,9 +478,8 @@ func TestRejectIsClosedDurableAndIdempotent(t *testing.T) {
 
 func TestApplyExactRevisionIsDurableAndIdempotent(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -577,9 +568,8 @@ func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			memoryRoot := newMemoryRoot(t)
-			codeRoot := newCodeRoot(t)
 			stateRoot := filepath.Join(t.TempDir(), "state")
-			workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			workflow, err := proposal.New(memoryRoot, stateRoot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -607,7 +597,7 @@ func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T)
 	}
 
 	memoryRoot := newMemoryRoot(t)
-	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	workflow, err := proposal.New(memoryRoot, filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -645,9 +635,8 @@ func editStoredProposal(t *testing.T, stateRoot, id string, edit func(*proposal.
 func TestApplyAndRejectRaceHasOneTerminalReceipt(t *testing.T) {
 	for iteration := range 64 {
 		memoryRoot := newMemoryRoot(t)
-		codeRoot := newCodeRoot(t)
 		stateRoot := filepath.Join(t.TempDir(), "state")
-		workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+		workflow, err := proposal.New(memoryRoot, stateRoot)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -695,9 +684,8 @@ func TestApplyAndRejectRaceHasOneTerminalReceipt(t *testing.T) {
 
 func TestStartupReconcilesPostStateWithoutApplyReceipt(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -722,7 +710,7 @@ func TestStartupReconcilesPostStateWithoutApplyReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	restarted, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -751,9 +739,8 @@ func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			memoryRoot := newMemoryRoot(t)
-			codeRoot := newCodeRoot(t)
 			stateRoot := filepath.Join(t.TempDir(), "state")
-			workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			workflow, err := proposal.New(memoryRoot, stateRoot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -769,7 +756,7 @@ func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+			restarted, err := proposal.New(memoryRoot, stateRoot)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -790,7 +777,7 @@ func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
 
 func TestBaselineRestoredAfterInterruptedApplyRemainsEligible(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	workflow, err := proposal.New(memoryRoot, newCodeRoot(t), filepath.Join(t.TempDir(), "state"))
+	workflow, err := proposal.New(memoryRoot, filepath.Join(t.TempDir(), "state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -829,9 +816,8 @@ func TestBaselineRestoredAfterInterruptedApplyRemainsEligible(t *testing.T) {
 
 func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -853,7 +839,7 @@ func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
 	if err := os.WriteFile(proposalPath, payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	restarted, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -865,9 +851,8 @@ func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
 
 func TestPublishPersistsReceiptAndIsIdempotent(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,12 +900,11 @@ func TestPublishPersistsReceiptAndIsIdempotent(t *testing.T) {
 
 func TestWorkflowRejectsStateRootResolvedInsideRepository(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	link := filepath.Join(t.TempDir(), "linked-memory")
 	if err := os.Symlink(memoryRoot, link); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := proposal.New(memoryRoot, codeRoot, filepath.Join(link, "state")); err == nil {
+	if _, err := proposal.New(memoryRoot, filepath.Join(link, "state")); err == nil {
 		t.Fatal("New() accepted state root resolving inside memory root")
 	}
 	if _, err := os.Stat(filepath.Join(memoryRoot, "state")); !errors.Is(err, os.ErrNotExist) {
@@ -930,9 +914,8 @@ func TestWorkflowRejectsStateRootResolvedInsideRepository(t *testing.T) {
 
 func TestReadOnlyReviewDoesNotCleanState(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
-	codeRoot := newCodeRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	workflow, err := proposal.New(memoryRoot, codeRoot, stateRoot)
+	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -947,7 +930,7 @@ func TestReadOnlyReviewDoesNotCleanState(t *testing.T) {
 	if err := os.WriteFile(temporary, []byte("partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	reader, err := proposal.OpenReadOnly(memoryRoot, codeRoot, stateRoot)
+	reader, err := proposal.OpenReadOnly(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1050,15 +1033,6 @@ func newEmptyMemoryRoot(t *testing.T) string {
 	runGit(t, root, "config", "user.name", "Test")
 	runGit(t, root, "config", "user.email", "test@example.com")
 	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial")
-	return root
-}
-
-func newCodeRoot(t *testing.T) string {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), "code")
-	if err := os.Mkdir(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
 	return root
 }
 

@@ -127,7 +127,7 @@ func TestBootstrapValueExperimentProtocolIsFrozenAndSelfConsistent(t *testing.T)
 		"session_a":        "testdata/phase-2/bootstrap-value-experiment/session-a.md",
 		"session_a_system": "testdata/phase-2/bootstrap-value-experiment/session-a-system.md",
 		"memory_expected":  "testdata/phase-2/bootstrap-value-experiment/memory-expected/parcel-dispatch.md",
-		"remember_skill":   "integrations/claude-code/skills/remember/SKILL.md",
+		"remember_skill":   "testdata/phase-2/bootstrap-value-experiment/remember-skill.md",
 		"task":             "testdata/phase-2/value-experiment/task.md", "task_system": "testdata/phase-2/value-experiment/task-system.md",
 		"rubric": "testdata/phase-2/value-experiment/rubric.json", "code_go_mod": "testdata/phase-2/value-experiment/code-seed/go.mod",
 		"policy_initial": "testdata/phase-2/value-experiment/code-seed/dispatch/policy.go", "policy_public_test": "testdata/phase-2/value-experiment/code-seed/dispatch/policy_test.go",

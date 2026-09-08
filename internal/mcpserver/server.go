@@ -26,8 +26,8 @@ type Server struct {
 	workflowMu sync.Mutex
 }
 
-func New(cfg config.Config, stateRoot, version string) (*Server, error) {
-	if stateRoot == "" {
+func New(cfg config.Config, version string) (*Server, error) {
+	if cfg.StateRoot == "" {
 		return nil, fmt.Errorf("state root is required")
 	}
 	retriever, err := retrieval.New(cfg.MemoryRoot)
@@ -43,7 +43,7 @@ func New(cfg config.Config, stateRoot, version string) (*Server, error) {
 		retriever: retriever,
 		guard:     guard,
 		cfg:       cfg,
-		stateRoot: stateRoot,
+		stateRoot: cfg.StateRoot,
 		inner: mcp.NewServer(&mcp.Implementation{
 			Name:    "git-push-memories",
 			Version: version,
@@ -97,21 +97,21 @@ type proposeInput struct {
 	TargetPath  string   `json:"target_path" jsonschema:"canonical relative Markdown path in the memory repository"`
 	SectionID   string   `json:"section_id" jsonschema:"stable section anchor ID"`
 	Replacement string   `json:"replacement" jsonschema:"complete replacement body for the target section"`
-	SourcePaths []string `json:"source_paths" jsonschema:"canonical relative code paths supporting the proposal"`
+	SourcePaths []string `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
 }
 
 type proposeCreatePageInput struct {
 	TargetPath  string   `json:"target_path" jsonschema:"canonical root Markdown filename for the new memory page"`
 	Title       string   `json:"title" jsonschema:"H1 title rendered by the product"`
 	Body        string   `json:"body" jsonschema:"initial Overview section body without headings or anchors"`
-	SourcePaths []string `json:"source_paths" jsonschema:"canonical relative code paths supporting the proposal"`
+	SourcePaths []string `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
 }
 
 type proposeCreateSectionInput struct {
 	TargetPath  string   `json:"target_path" jsonschema:"canonical relative path of an existing memory page"`
 	Heading     string   `json:"heading" jsonschema:"H2 heading rendered by the product"`
 	Body        string   `json:"body" jsonschema:"new section body without headings or anchors"`
-	SourcePaths []string `json:"source_paths" jsonschema:"canonical relative code paths supporting the proposal"`
+	SourcePaths []string `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
 }
 
 type toolError struct {
@@ -215,7 +215,7 @@ func (s *Server) proposalWorkflow() (*proposal.Workflow, error) {
 	if s.workflow != nil {
 		return s.workflow, nil
 	}
-	workflow, err := proposal.New(s.cfg.MemoryRoot, s.cfg.CodeRoot, s.stateRoot)
+	workflow, err := proposal.New(s.cfg.MemoryRoot, s.stateRoot)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,8 @@
 
 Status do plano: **T1-T19 concluidas; decisao final `revisar o fluxo`; Fase 3 bloqueada**.
 
+> Este plano preserva a interface e as evidencias historicas da Fase 2. A interface atual usa configuracao global e removeu `code-root`; consulte o README.
+
 ## Objetivo
 
 Demonstrar de ponta a ponta que conhecimento descoberto em uma sessao pode ser capturado explicitamente, consolidado como estado atual em Markdown, publicado em Git e recuperado em uma sessao posterior, melhorando uma tarefa real sem acesso a sessao original.

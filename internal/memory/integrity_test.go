@@ -13,11 +13,11 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/memory"
 )
 
-func TestApplyDoesNotWriteCodeRootGitIndexOrObjects(t *testing.T) {
+func TestApplyDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 	memoryRoot := newMemoryRoot(t, validPage)
-	codeRoot := newMemoryRoot(t, validPage)
+	outsideRoot := newMemoryRoot(t, validPage)
 	repository := openRepository(t, memoryRoot)
-	codeBefore := fingerprint(t, codeRoot)
+	outsideBefore := fingerprint(t, outsideRoot)
 	indexBefore := fingerprint(t, filepath.Join(memoryRoot, ".git", "index"))
 	objectsBefore := fingerprint(t, filepath.Join(memoryRoot, ".git", "objects"))
 	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"})
@@ -39,8 +39,8 @@ func TestApplyDoesNotWriteCodeRootGitIndexOrObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := fingerprint(t, codeRoot); got != codeBefore {
-		t.Fatal("Apply() modified code root")
+	if got := fingerprint(t, outsideRoot); got != outsideBefore {
+		t.Fatal("Apply() modified an unrelated worktree")
 	}
 	if got := fingerprint(t, filepath.Join(memoryRoot, ".git", "index")); got != indexBefore {
 		t.Fatal("Apply() modified Git index")

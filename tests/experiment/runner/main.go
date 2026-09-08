@@ -373,7 +373,11 @@ func (r *runner) execute() error {
 		return errors.New("capture initial exported API")
 	}
 
-	sessionAConfig, sessionAEnv, cleanup, err := r.sessionConfig("session-a", codeRoot, memoryRoot, filepath.Join(r.temporary, "state-a"), true)
+	stateRoot, err := memoryStateRoot(filepath.Join(r.temporary, "state-a"), memoryRoot)
+	if err != nil {
+		return err
+	}
+	sessionAConfig, sessionAEnv, cleanup, err := r.sessionConfig("session-a", codeRoot, memoryRoot, stateRoot, true)
 	if err != nil {
 		return err
 	}
@@ -397,11 +401,11 @@ func (r *runner) execute() error {
 	if dirty := mustOutput(r.ctx, codeRoot, nil, "git", "status", "--porcelain=v1"); dirty != "" {
 		return errors.New("discovery session changed code repository")
 	}
-	proposalID, err := onlyProposalID(filepath.Join(r.temporary, "state-a", "proposals"))
+	proposalID, err := onlyProposalID(filepath.Join(stateRoot, "proposals"))
 	if err != nil {
 		return err
 	}
-	if err := r.approveProposal(memoryRoot, codeRoot, filepath.Join(r.temporary, "state-a"), proposalID); err != nil {
+	if err := r.approveProposal(memoryRoot, stateRoot, proposalID); err != nil {
 		return err
 	}
 	memoryCommit := mustOutput(r.ctx, memoryRoot, nil, "git", "rev-parse", "HEAD")
@@ -409,7 +413,7 @@ func (r *runner) execute() error {
 	memoryIndexAfter := hashFile(filepath.Join(memoryRoot, ".git", "index"))
 	memoryCommitPaths := strings.Fields(mustOutput(r.ctx, memoryRoot, nil, "git", "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"))
 	memoryDiff := mustOutput(r.ctx, memoryRoot, nil, "git", "show", "--format=", "--no-ext-diff", "HEAD")
-	contextBytes, err := r.validatePublishedContext(memoryRoot, codeRoot)
+	contextBytes, err := r.validatePublishedContext(memoryRoot)
 	if err != nil {
 		return err
 	}
@@ -511,7 +515,7 @@ func (r *runner) verifyFixtureHashes() error {
 				return fmt.Errorf("fixture hash mismatch: %s", name)
 			}
 		}
-		if hashFile(filepath.Join(r.repository, "integrations", "claude-code", "skills", "remember", "SKILL.md")) != r.protocol.FixtureHashes["remember_skill"] {
+		if hashFile(filepath.Join(r.repository, "testdata", "phase-2", "bootstrap-value-experiment", "remember-skill.md")) != r.protocol.FixtureHashes["remember_skill"] {
 			return errors.New("fixture hash mismatch: remember_skill")
 		}
 	}
@@ -538,7 +542,7 @@ func (r *runner) sessionConfig(name, codeRoot, memoryRoot, stateRoot string, wit
 	}
 	if name == "session-a" && r.protocol.Bootstrap {
 		skillTarget := filepath.Join(configRoot, "skills", "remember", "SKILL.md")
-		if err := copyFile(filepath.Join(r.repository, "integrations", "claude-code", "skills", "remember", "SKILL.md"), skillTarget); err != nil {
+		if err := copyFile(filepath.Join(r.repository, "testdata", "phase-2", "bootstrap-value-experiment", "remember-skill.md"), skillTarget); err != nil {
 			return "", nil, nil, err
 		}
 	}
@@ -553,11 +557,15 @@ func (r *runner) sessionConfig(name, codeRoot, memoryRoot, stateRoot string, wit
 		credentials[index] = 0
 	}
 	mcpConfig := filepath.Join(configRoot, "mcp.json")
+	productConfig := filepath.Join(configRoot, "xdg", "git-push-memories", "config.json")
+	if err := writeJSON(productConfig, map[string]any{"schema_version": 1, "memory_root": "/memory"}); err != nil {
+		return "", nil, nil, err
+	}
 	servers := map[string]any{}
 	if withMemory {
 		servers["git-push-memories"] = map[string]any{
 			"type": "stdio", "command": "/opt/git-push-memories",
-			"args": []string{"mcp", "--memory-root", "/memory", "--code-root", "/workspace", "--state-root", "/state"},
+			"args": []string{"mcp"},
 		}
 	}
 	if err := writeJSON(mcpConfig, map[string]any{"mcpServers": servers}); err != nil {
@@ -597,14 +605,15 @@ func (r *runner) runClaude(runID, workspace string, environment []string, mcpCon
 	configRoot := environmentValue(environment, "GPM_HOST_CONFIG")
 	home := environmentValue(environment, "GPM_HOST_HOME")
 	stateRoot := environmentValue(environment, "GPM_HOST_STATE")
+	sandboxState := "/state-home/git-push-memories/" + filepath.Base(stateRoot)
 	memoryRoot := environmentValue(environment, "GPM_HOST_MEMORY")
 	withMemory := environmentValue(environment, "GPM_WITH_MEMORY") == "true"
 	bwrap := []string{
 		"--clearenv", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts", "--unshare-ipc",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
 		"--ro-bind", "/etc/ssl", "/etc/ssl", "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind", "/etc/hosts", "/etc/hosts",
-		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input",
-		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, "/state",
+		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input", "--dir", "/state-home", "--dir", "/state-home/git-push-memories", "--dir", sandboxState,
+		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, sandboxState,
 		"--ro-bind", r.binary, "/opt/git-push-memories", "--ro-bind", r.claudeBinary, "/opt/claude",
 		"--ro-bind", systemPath, "/input/system.md",
 	}
@@ -622,7 +631,7 @@ func (r *runner) runClaude(runID, workspace string, environment []string, mcpCon
 	}
 	bwrap = append(bwrap,
 		"--chdir", "/workspace", "--setenv", "PATH", "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
-		"--setenv", "HOME", "/home/experiment", "--setenv", "CLAUDE_CONFIG_DIR", "/config", "--setenv", "XDG_CONFIG_HOME", "/config/xdg",
+		"--setenv", "HOME", "/home/experiment", "--setenv", "CLAUDE_CONFIG_DIR", "/config", "--setenv", "XDG_CONFIG_HOME", "/config/xdg", "--setenv", "XDG_STATE_HOME", "/state-home",
 		"--setenv", "TMPDIR", "/tmp", "--setenv", "GOPROXY", "off", "--setenv", "GOTOOLCHAIN", "go1.25.12",
 		"--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_CONFIG_GLOBAL", "/dev/null", "--", "/opt/claude",
 	)
@@ -669,17 +678,18 @@ func (r *runner) runRememberSession(workspace string, environment []string, mcpC
 	configRoot := environmentValue(environment, "GPM_HOST_CONFIG")
 	home := environmentValue(environment, "GPM_HOST_HOME")
 	stateRoot := environmentValue(environment, "GPM_HOST_STATE")
+	sandboxState := "/state-home/git-push-memories/" + filepath.Base(stateRoot)
 	memoryRoot := environmentValue(environment, "GPM_HOST_MEMORY")
 	bwrap := []string{
 		"--clearenv", "--die-with-parent", "--new-session", "--unshare-pid", "--unshare-uts", "--unshare-ipc",
 		"--ro-bind", "/usr", "/usr", "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib", "--ro-bind", "/lib64", "/lib64",
 		"--ro-bind", "/etc/ssl", "/etc/ssl", "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind", "/etc/hosts", "/etc/hosts",
-		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input",
-		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, "/state",
+		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input", "--dir", "/state-home", "--dir", "/state-home/git-push-memories", "--dir", sandboxState,
+		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, sandboxState,
 		"--ro-bind", r.binary, "/opt/git-push-memories", "--ro-bind", r.claudeBinary, "/opt/claude",
 		"--ro-bind", filepath.Join(r.fixture, "session-a-system.md"), "/input/system.md", "--ro-bind", workspace, "/workspace", "--bind", memoryRoot, "/memory",
 		"--chdir", "/workspace", "--setenv", "PATH", "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
-		"--setenv", "HOME", "/home/experiment", "--setenv", "CLAUDE_CONFIG_DIR", "/config", "--setenv", "XDG_CONFIG_HOME", "/config/xdg",
+		"--setenv", "HOME", "/home/experiment", "--setenv", "CLAUDE_CONFIG_DIR", "/config", "--setenv", "XDG_CONFIG_HOME", "/config/xdg", "--setenv", "XDG_STATE_HOME", "/state-home",
 		"--setenv", "TMPDIR", "/tmp", "--setenv", "GOPROXY", "off", "--setenv", "GOTOOLCHAIN", "go1.25.12",
 		"--setenv", "GIT_CONFIG_NOSYSTEM", "1", "--setenv", "GIT_CONFIG_GLOBAL", "/dev/null", "--", "/opt/claude",
 	}
@@ -877,9 +887,12 @@ func scanClaudeStream(reader io.Reader, treatment bool, metric *sessionMetric) e
 	return scanner.Err()
 }
 
-func (r *runner) approveProposal(memoryRoot, codeRoot, stateRoot, id string) error {
-	common := []string{"--memory-root", memoryRoot, "--code-root", codeRoot, "--state-root", stateRoot}
-	show, err := commandOutput(r.ctx, "", isolatedRuntime(), r.binary, append([]string{"proposal", "show", id}, common...)...)
+func (r *runner) approveProposal(memoryRoot, stateRoot, id string) error {
+	environment, err := configuredRuntime(memoryRoot, stateRoot)
+	if err != nil {
+		return err
+	}
+	show, err := commandOutput(r.ctx, "", environment, r.binary, "proposal", "show", id)
 	if err != nil {
 		return errors.New("show discovery proposal")
 	}
@@ -923,10 +936,10 @@ func (r *runner) approveProposal(memoryRoot, codeRoot, stateRoot, id string) err
 	if envelope.Data.Proposal.Revision != 1 || !validOperation || !equalStrings(sources, []string{"deploy/production-alerts.yaml", "ops/queues.yaml"}) {
 		return errors.New("proposal does not match pre-registered memory")
 	}
-	if _, err := commandOutput(r.ctx, "", isolatedRuntime(), r.binary, append([]string{"proposal", "apply", id, "--revision", "1"}, common...)...); err != nil {
+	if _, err := commandOutput(r.ctx, "", environment, r.binary, "proposal", "apply", id, "--revision", "1"); err != nil {
 		return errors.New("apply discovery proposal")
 	}
-	if _, err := commandOutput(r.ctx, "", isolatedRuntime(), r.binary, append([]string{"proposal", "publish", id}, common...)...); err != nil {
+	if _, err := commandOutput(r.ctx, "", environment, r.binary, "proposal", "publish", id); err != nil {
 		return errors.New("publish discovery proposal")
 	}
 	actualPath := filepath.Join(memoryRoot, "domains", "parcel-dispatch.md")
@@ -940,8 +953,16 @@ func (r *runner) approveProposal(memoryRoot, codeRoot, stateRoot, id string) err
 	return nil
 }
 
-func (r *runner) validatePublishedContext(memoryRoot, codeRoot string) (int, error) {
-	output, err := commandOutput(r.ctx, "", isolatedRuntime(), r.binary, "retrieve", "priority parcel escalation timeout queue owner", "--memory-root", memoryRoot, "--code-root", codeRoot, "--budget-bytes", fmt.Sprint(r.protocol.SearchBudget))
+func (r *runner) validatePublishedContext(memoryRoot string) (int, error) {
+	stateRoot, err := memoryStateRoot(filepath.Join(r.temporary, "retrieval-state"), memoryRoot)
+	if err != nil {
+		return 0, err
+	}
+	environment, err := configuredRuntime(memoryRoot, stateRoot)
+	if err != nil {
+		return 0, err
+	}
+	output, err := commandOutput(r.ctx, "", environment, r.binary, "retrieve", "priority parcel escalation timeout queue owner", "--budget-bytes", fmt.Sprint(r.protocol.SearchBudget))
 	if err != nil {
 		return 0, errors.New("retrieve published memory")
 	}
@@ -1115,8 +1136,24 @@ func seedGit(ctx context.Context, root, message string, allowEmpty bool) error {
 	return nil
 }
 
-func isolatedRuntime() []string {
-	return []string{"PATH=" + os.Getenv("PATH"), "HOME=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "LANG=C", "GOPROXY=off", "GOTOOLCHAIN=go1.25.12"}
+func configuredRuntime(memoryRoot, stateRoot string) ([]string, error) {
+	configRoot := filepath.Join(filepath.Dir(stateRoot), "config")
+	if err := writeJSON(filepath.Join(configRoot, "git-push-memories", "config.json"), map[string]any{"schema_version": 1, "memory_root": memoryRoot}); err != nil {
+		return nil, err
+	}
+	return []string{
+		"PATH=" + os.Getenv("PATH"), "HOME=/dev/null", "XDG_CONFIG_HOME=" + configRoot, "XDG_STATE_HOME=" + filepath.Dir(filepath.Dir(stateRoot)),
+		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "LANG=C", "GOPROXY=off", "GOTOOLCHAIN=go1.25.12",
+	}, nil
+}
+
+func memoryStateRoot(stateHome, memoryRoot string) (string, error) {
+	output, err := commandOutput(context.Background(), memoryRoot, nil, "git", "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	identity := fmt.Sprintf("%x", sha256.Sum256(bytes.TrimSpace([]byte(output))))[:16]
+	return filepath.Join(stateHome, "git-push-memories", identity), nil
 }
 
 func environmentValue(environment []string, name string) string {

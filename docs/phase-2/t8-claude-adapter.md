@@ -1,5 +1,7 @@
 # T8: Claude Adapter explicito
 
+> Documento historico da interface validada na Fase 2. A interface atual usa configuracao global e nao possui `code-root`; consulte o README.
+
 ## Fixed point e seams
 
 O fixed point de T8 e `ec239292c6a2cfbce78cca60e09cb933783c6534`. `internal/mcpserver` e o Claude Adapter: recebe a entrada estruturada de `memory_propose_replace`, reconstrui o JSON fechado do candidato e chama Intake Guard antes de inicializar Proposal Workflow ou criar o state root. Depois da aprovacao, chama `Workflow.Prepare` e retorna somente ID, revisao, target e contagens compactas do diff.

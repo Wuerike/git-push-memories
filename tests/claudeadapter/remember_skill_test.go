@@ -44,9 +44,8 @@ func TestRememberContractHarnessBranchesWithoutStateBeforeProposal(t *testing.T)
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			memoryRoot := gitRoot(t, test.page)
-			codeRoot := gitRoot(t, "")
 			stateRoot := filepath.Join(t.TempDir(), "state")
-			session, stop := startMCP(t, memoryRoot, codeRoot, stateRoot)
+			session, stop := startMCP(t, memoryRoot, stateRoot)
 			defer stop()
 			searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 				Name: "memory_search", Arguments: map[string]any{"query": test.query, "budget_bytes": 2048},
@@ -89,7 +88,7 @@ func TestRememberContractHarnessCancellationAndBudgetFailureCreateNoState(t *tes
 		t.Run(string(rune('a'+budget%2)), func(t *testing.T) {
 			memoryRoot := gitRoot(t, populatedPage)
 			stateRoot := filepath.Join(t.TempDir(), "state")
-			session, stop := startMCP(t, memoryRoot, gitRoot(t, ""), stateRoot)
+			session, stop := startMCP(t, memoryRoot, stateRoot)
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 				Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout", "budget_bytes": budget},
 			})
@@ -146,9 +145,9 @@ func decodeBundle(t *testing.T, result *mcp.CallToolResult) retrieval.ContextBun
 	return response.Data
 }
 
-func startMCP(t *testing.T, memoryRoot, codeRoot, stateRoot string) (*mcp.ClientSession, func()) {
+func startMCP(t *testing.T, memoryRoot, stateRoot string) (*mcp.ClientSession, func()) {
 	t.Helper()
-	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, CodeRoot: codeRoot}, stateRoot, "test")
+	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, StateRoot: stateRoot}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
