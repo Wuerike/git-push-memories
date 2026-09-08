@@ -1,6 +1,14 @@
 GO_VERSION := go1.25.12
+INSTALL_DIR ?= $(HOME)/.local/bin
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || printf 'dev')
+VERSION_PACKAGE := github.com/Wuerike/git-push-memories/internal/buildinfo.Version
 
-.PHONY: verify verify-offline
+.PHONY: install verify verify-offline
+
+install:
+	mkdir -p "$(INSTALL_DIR)"
+	GOTOOLCHAIN=$(GO_VERSION) go build -ldflags "-X $(VERSION_PACKAGE)=$(VERSION)" -o "$(INSTALL_DIR)/git-push-memories" ./cmd/git-push-memories
+	@printf 'Installed git-push-memories in %s.\n' "$(INSTALL_DIR)"
 
 verify:
 	GOTOOLCHAIN=$(GO_VERSION) go test ./...

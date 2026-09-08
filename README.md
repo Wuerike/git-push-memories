@@ -131,6 +131,14 @@ O primeiro release suporta Linux em `amd64` e `arm64`. A CLI pode ser instalada 
 curl -fsSL https://raw.githubusercontent.com/Wuerike/git-push-memories/master/install.sh | sh
 ```
 
+Para instalar diretamente a partir de um clone do repositorio, com Go disponivel:
+
+```bash
+make install
+```
+
+Por padrao, o binario e instalado em `~/.local/bin`. Use `make install INSTALL_DIR=/outro/diretorio` para escolher outro destino.
+
 Configure uma unica vez um repositorio de memoria ja clonado e com pelo menos um commit:
 
 ```bash
