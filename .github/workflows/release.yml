@@ -36,7 +36,7 @@ jobs:
             mkdir -p "$directory/third_party/agent-memory" "$directory/third_party/goldmark"
             GOOS=linux GOARCH="$architecture" go build \
               -ldflags "-s -w -X github.com/Wuerike/git-push-memories/internal/buildinfo.Version=${version}" \
-              -o "$directory/git-push-memories" ./cmd/git-push-memories
+              -o "$directory/gpm" ./cmd/gpm
             cp LICENSE THIRD_PARTY_NOTICES "$directory/"
             cp third_party/agent-memory/LICENSE "$directory/third_party/agent-memory/"
             cp third_party/goldmark/LICENSE "$directory/third_party/goldmark/"
@@ -49,7 +49,7 @@ jobs:
         run: |
           mkdir -p dist/smoke
           tar -xzf dist/git-push-memories_linux_amd64.tar.gz -C dist/smoke
-          dist/smoke/git-push-memories version | grep -F "${GITHUB_REF_NAME}"
+          dist/smoke/gpm version | grep -F "${GITHUB_REF_NAME}"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}

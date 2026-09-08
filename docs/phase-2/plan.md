@@ -81,12 +81,12 @@ Neste plano, **bootstrap de memoria** significa criar o primeiro arquivo Markdow
 Os nomes abaixo fixam a superficie necessaria para os testes da fase. Flags auxiliares podem ser acrescentadas sem criar caminhos alternativos de escrita.
 
 ```text
-git-push-memories mcp --memory-root <path> --code-root <path>
-git-push-memories proposal show <proposal-id>
-git-push-memories proposal reject <proposal-id> --reason <not_relevant|incorrect|sensitive|wrong_target|user_cancelled>
-git-push-memories proposal apply <proposal-id> <revision>
-git-push-memories proposal publish <proposal-id>
-git-push-memories retrieve <query> --budget-bytes <n>
+gpm mcp --memory-root <path> --code-root <path>
+gpm proposal show <proposal-id>
+gpm proposal reject <proposal-id> --reason <not_relevant|incorrect|sensitive|wrong_target|user_cancelled>
+gpm proposal apply <proposal-id> <revision>
+gpm proposal publish <proposal-id>
+gpm retrieve <query> --budget-bytes <n>
 ```
 
 Tools MCP:
@@ -233,7 +233,7 @@ T4 pode avancar em paralelo com T5. T7 pode avancar em paralelo com a integracao
 
 **Escopo:** criar o modulo Go, entrypoint, composicao de dependencias, envelopes JSON versionados, configuracao explicita de roots e transporte MCP stdio. Selecionar e fixar uma versao do SDK MCP oficial compativel com Go 1.25.x.
 
-**Artefatos:** `go.mod`, toolchain fixado, `cmd/git-push-memories`, estrutura inicial sob `internal/`, fixture derivado da Fase 2 e inventario da dependencia MCP.
+**Artefatos:** `go.mod`, toolchain fixado, `cmd/gpm`, estrutura inicial sob `internal/`, fixture derivado da Fase 2 e inventario da dependencia MCP.
 
 **Criterios de conclusao:**
 

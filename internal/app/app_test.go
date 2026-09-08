@@ -28,9 +28,9 @@ func TestHelpAndVersionDoNotRequireRoots(t *testing.T) {
 		args []string
 		want string
 	}{
-		{name: "help", args: []string{"help"}, want: "git-push-memories mcp"},
-		{name: "long help", args: []string{"--help"}, want: "git-push-memories mcp"},
-		{name: "version", args: []string{"version"}, want: "git-push-memories test-version"},
+		{name: "help", args: []string{"help"}, want: "gpm mcp"},
+		{name: "long help", args: []string{"--help"}, want: "gpm mcp"},
+		{name: "version", args: []string{"version"}, want: "gpm test-version"},
 	}
 
 	for _, test := range tests {

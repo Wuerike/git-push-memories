@@ -7,14 +7,14 @@ Esta integracao usa MCP sobre stdio e o skill explicito `/remember`. Ela nao ins
 Depois de instalar a CLI, execute uma vez:
 
 ```bash
-git-push-memories setup /absolute/path/memory-repository
+gpm setup /absolute/path/memory-repository
 ```
 
 O repositorio deve ser um worktree Git ja clonado e possuir pelo menos um commit. O comando:
 
 - salva o memory root na configuracao global do usuario;
 - deriva um state root privado em `$XDG_STATE_HOME/git-push-memories` ou `~/.local/state/git-push-memories`;
-- registra `git-push-memories mcp` no escopo `user` do Claude Code;
+- registra `gpm mcp` no escopo `user` do Claude Code;
 - instala o skill global em `~/.claude/skills/remember/SKILL.md`.
 
 O setup e idempotente. Execute-o novamente depois de mover o binario ou para selecionar outro repositorio de memoria.
@@ -40,9 +40,9 @@ O servidor expoe somente:
 Apply e publish continuam disponiveis somente na CLI:
 
 ```bash
-git-push-memories proposal show <proposal-id>
-git-push-memories proposal apply <proposal-id> --revision <revision>
-git-push-memories proposal publish <proposal-id>
+gpm proposal show <proposal-id>
+gpm proposal apply <proposal-id> --revision <revision>
+gpm proposal publish <proposal-id>
 ```
 
 Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.

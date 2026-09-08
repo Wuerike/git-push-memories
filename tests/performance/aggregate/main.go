@@ -103,9 +103,9 @@ func main() {
 		"payloads_persisted": false, "intermediate_manifests_persisted": false,
 		"cpu_model": cpuModel(), "corpus": map[string]int{"initial_markdown_files": 0, "code_files": corpusFiles, "code_bytes": corpusBytes},
 		"commands": map[string]string{
-			"mcp_ready": "git-push-memories mcp <isolated-roots>", "search": "MCP memory_search <structured-input>", "expand": "MCP memory_expand <handle>",
-			"prepare": "MCP memory_propose_create_page <structured-input>", "show": "git-push-memories proposal show <id> <isolated-roots>",
-			"apply": "git-push-memories proposal apply <id> --revision 1 <isolated-roots>", "publish": "git-push-memories proposal publish <id> <isolated-roots>",
+			"mcp_ready": "gpm mcp <isolated-roots>", "search": "MCP memory_search <structured-input>", "expand": "MCP memory_expand <handle>",
+			"prepare": "MCP memory_propose_create_page <structured-input>", "show": "gpm proposal show <id> <isolated-roots>",
+			"apply": "gpm proposal apply <id> --revision 1 <isolated-roots>", "publish": "gpm proposal publish <id> <isolated-roots>",
 		},
 	}
 	encoded, err := json.MarshalIndent(summary, "", "  ")

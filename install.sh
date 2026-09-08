@@ -5,7 +5,7 @@ repository="Wuerike/git-push-memories"
 install_dir="${HOME}/.local/bin"
 
 if [ "$(uname -s)" != "Linux" ]; then
-  printf '%s\n' "git-push-memories currently supports Linux only." >&2
+  printf '%s\n' "gpm currently supports Linux only." >&2
   exit 1
 fi
 
@@ -26,13 +26,17 @@ curl --fail --location --silent --show-error "${base_url}/checksums.txt" --outpu
 (cd "$temporary" && sha256sum --check --ignore-missing checksums.txt)
 tar -xzf "${temporary}/${archive}" -C "$temporary"
 mkdir -p "$install_dir"
-install_target="${install_dir}/git-push-memories"
-install_temporary="$(mktemp "${install_dir}/.git-push-memories.XXXXXX")"
-install -m 0755 "${temporary}/git-push-memories" "$install_temporary"
+install_target="${install_dir}/gpm"
+install_temporary="$(mktemp "${install_dir}/.gpm.XXXXXX")"
+release_binary="${temporary}/gpm"
+if [ ! -f "$release_binary" ]; then
+  release_binary="${temporary}/git-push-memories"
+fi
+install -m 0755 "$release_binary" "$install_temporary"
 mv -f "$install_temporary" "$install_target"
 install_temporary=""
 
-printf '%s\n' "Installed git-push-memories in ${install_dir}."
+printf '%s\n' "Installed gpm in ${install_dir}."
 case ":${PATH}:" in
   *":${install_dir}:"*) ;;
   *) printf '%s\n' "Add ${install_dir} to PATH before continuing." ;;

@@ -28,9 +28,9 @@ Search is guidance, not authoritative duplicate or contradiction detection. When
 7. Return the proposal ID, revision, operation, target, and diff summary. Then give the human these next steps:
 
 ```bash
-git-push-memories proposal show <proposal-id>
-git-push-memories proposal apply <proposal-id> --revision <revision>
-git-push-memories proposal publish <proposal-id>
+gpm proposal show <proposal-id>
+gpm proposal apply <proposal-id> --revision <revision>
+gpm proposal publish <proposal-id>
 ```
 
 Apply and publish remain human CLI actions. The proposal call receives only its closed operation fields; prompt, response, transcript, session ID, and private reasoning remain outside tool arguments and durable evidence.

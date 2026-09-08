@@ -23,7 +23,7 @@ Foi escolhida a ultima versao estavel disponivel do SDK oficial. Ela fornece ser
 
 ## Inventario MCP
 
-O SDK MCP possui licenciamento misto Apache-2.0/MIT durante sua transicao de licenca. Documentacao upstream sob CC-BY-4.0 nao e incorporada. A closure abaixo e a closure externa ligada ao binario Linux segundo `go list -deps ./cmd/git-push-memories`; `go.sum` fixa os checksums.
+O SDK MCP possui licenciamento misto Apache-2.0/MIT durante sua transicao de licenca. Documentacao upstream sob CC-BY-4.0 nao e incorporada. A closure abaixo e a closure externa ligada ao binario Linux segundo `go list -deps ./cmd/gpm`; `go.sum` fixa os checksums.
 
 | Modulo | Versao | Licenca |
 |---|---|---|

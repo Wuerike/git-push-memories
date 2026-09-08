@@ -142,7 +142,7 @@ Por padrao, o binario e instalado em `~/.local/bin`. Use `make install INSTALL_D
 Configure uma unica vez um repositorio de memoria ja clonado e com pelo menos um commit:
 
 ```bash
-git-push-memories setup /path/to/memory-repository
+gpm setup /path/to/memory-repository
 ```
 
 O setup registra o MCP e instala `/remember` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode executar `/remember <fato>`.
@@ -160,20 +160,20 @@ O [material de integracao com Claude Code](integrations/claude-code/README.md) d
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
 ```bash
-git-push-memories retrieve "checkout timeout team" --budget-bytes 2048
+gpm retrieve "checkout timeout team" --budget-bytes 2048
 ```
 
 Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `proposal show`, `proposal reject` e `proposal apply`. Apply exige a revisão exata, por exemplo:
 
 ```bash
-git-push-memories proposal show <proposal-id>
-git-push-memories proposal apply <proposal-id> --revision 1
+gpm proposal show <proposal-id>
+gpm proposal apply <proposal-id> --revision 1
 ```
 
 O apply deixa a atualização como `applied_unpublished`. A publicação local cria um commit limitado ao target sem consumir staging alheio:
 
 ```bash
-git-push-memories proposal publish <proposal-id>
+gpm proposal publish <proposal-id>
 ```
 
 O Publisher não acessa remotos. O commit recebe o trailer `Git-Push-Memories-Proposal: <id>/<revision>` e falhas recuperáveis preservam o estado `applied_unpublished`.

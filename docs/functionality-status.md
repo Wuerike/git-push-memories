@@ -111,7 +111,7 @@ Os estados usados sao:
 | Funcionalidade | Comportamento esperado | Estado atual |
 |---|---|---|
 | MCP por stdio | Expor captura e recuperacao sem daemon ou porta local. | **Implementado.** O servidor publica `memory_search`, `memory_expand` e tres tools de proposta. |
-| Setup global | Instalar MCP e `/remember` sem copia manual ou configuracao por projeto. | **Implementado.** `git-push-memories setup <memory-root>` registra o MCP no escopo `user` e instala o skill embutido. |
+| Setup global | Instalar MCP e `/remember` sem copia manual ou configuracao por projeto. | **Implementado.** `gpm setup <memory-root>` registra o MCP no escopo `user` e instala o skill embutido. |
 | Adapter sem autoridade propria | Reutilizar Intake Guard, Proposal Workflow e Retrieval sem criar stores ou escrita paralela. | **Implementado.** Os handlers MCP apenas traduzem entrada e saida dos modulos centrais. |
 | Restricao de autoridade | Nao expor apply ou publish ao agente. | **Implementado.** Essas operacoes existem somente na CLI. |
 | Fluxo `/remember` | Pesquisar, expandir candidatos, apresentar uma operacao e pedir confirmacao antes de propor. | **Parcial.** O skill e os harnesses deterministas existem, mas o experimento autenticado T19 abortou antes da proposta. |

@@ -27,9 +27,9 @@ Search is guidance, not authoritative duplicate or contradiction detection. When
 7. Return the proposal ID, revision, operation, target, and diff summary. Use absolute roots already supplied explicitly in the invocation context; if any root is unavailable, ask the user and do not infer it. Then give the human these next steps with those roots substituted:
 
 ```bash
-git-push-memories proposal show <proposal-id> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
-git-push-memories proposal apply <proposal-id> --revision <revision> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
-git-push-memories proposal publish <proposal-id> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
+gpm proposal show <proposal-id> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
+gpm proposal apply <proposal-id> --revision <revision> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
+gpm proposal publish <proposal-id> --memory-root <memory-root> --code-root <code-root> --state-root <state-root>
 ```
 
 Apply and publish remain human CLI actions. The proposal call receives only its closed operation fields; prompt, response, transcript, session ID, and private reasoning remain outside tool arguments and durable evidence.

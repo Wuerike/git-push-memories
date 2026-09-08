@@ -7,8 +7,8 @@ VERSION_PACKAGE := github.com/Wuerike/git-push-memories/internal/buildinfo.Versi
 
 install:
 	mkdir -p "$(INSTALL_DIR)"
-	GOTOOLCHAIN=$(GO_VERSION) go build -ldflags "-X $(VERSION_PACKAGE)=$(VERSION)" -o "$(INSTALL_DIR)/git-push-memories" ./cmd/git-push-memories
-	@printf 'Installed git-push-memories in %s.\n' "$(INSTALL_DIR)"
+	GOTOOLCHAIN=$(GO_VERSION) go build -ldflags "-X $(VERSION_PACKAGE)=$(VERSION)" -o "$(INSTALL_DIR)/gpm" ./cmd/gpm
+	@printf 'Installed gpm in %s.\n' "$(INSTALL_DIR)"
 
 verify:
 	GOTOOLCHAIN=$(GO_VERSION) go test ./...

@@ -18,15 +18,15 @@ import (
 )
 
 const usage = `Usage:
-  git-push-memories setup <memory-root>
-  git-push-memories mcp
-  git-push-memories retrieve <query> --budget-bytes <n>
-  git-push-memories proposal show <proposal-id>
-  git-push-memories proposal reject <proposal-id> --reason <reason>
-  git-push-memories proposal apply <proposal-id> --revision <n>
-  git-push-memories proposal publish <proposal-id>
-  git-push-memories version
-  git-push-memories help
+  gpm setup <memory-root>
+  gpm mcp
+  gpm retrieve <query> --budget-bytes <n>
+  gpm proposal show <proposal-id>
+  gpm proposal reject <proposal-id> --reason <reason>
+  gpm proposal apply <proposal-id> --revision <n>
+  gpm proposal publish <proposal-id>
+  gpm version
+  gpm help
 `
 
 func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, version string) int {
@@ -40,7 +40,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprint(stdout, usage)
 		return 0
 	case "version", "--version":
-		fmt.Fprintf(stdout, "git-push-memories %s\n", version)
+		fmt.Fprintf(stdout, "gpm %s\n", version)
 		return 0
 	case "setup":
 		return runSetup(ctx, args[1:], stdout, stderr)

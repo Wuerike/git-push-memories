@@ -69,7 +69,7 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 func TestMissingClaudeMCPIsVisibleWithoutPersistingPayload(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-harness", Version: "test"}, nil)
-	command := exec.Command(filepath.Join(t.TempDir(), "missing-git-push-memories"), "mcp")
+	command := exec.Command(filepath.Join(t.TempDir(), "missing-gpm"), "mcp")
 	if _, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: command}, nil); err == nil {
 		t.Fatal("Connect() succeeded without the MCP executable")
 	}
@@ -84,8 +84,8 @@ func buildBinary(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binary := filepath.Join(t.TempDir(), "git-push-memories")
-	command := exec.Command("go", "build", "-o", binary, "./cmd/git-push-memories")
+	binary := filepath.Join(t.TempDir(), "gpm")
+	command := exec.Command("go", "build", "-o", binary, "./cmd/gpm")
 	command.Dir = repositoryRoot
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("build harness binary: %v: %s", err, output)

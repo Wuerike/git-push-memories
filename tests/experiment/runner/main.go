@@ -297,8 +297,8 @@ func newRunner(ctx context.Context, evidence, credentials, requestedAuthRoot, ve
 	if _, err := exec.LookPath("bwrap"); err != nil {
 		return nil, errors.New("bubblewrap is required")
 	}
-	r.binary = filepath.Join(temporary, "git-push-memories")
-	if err := run(ctx, repository, nil, "go", "build", "-o", r.binary, "./cmd/git-push-memories"); err != nil {
+	r.binary = filepath.Join(temporary, "gpm")
+	if err := run(ctx, repository, nil, "go", "build", "-o", r.binary, "./cmd/gpm"); err != nil {
 		return nil, errors.New("build product")
 	}
 	success = true
@@ -564,7 +564,7 @@ func (r *runner) sessionConfig(name, codeRoot, memoryRoot, stateRoot string, wit
 	servers := map[string]any{}
 	if withMemory {
 		servers["git-push-memories"] = map[string]any{
-			"type": "stdio", "command": "/opt/git-push-memories",
+			"type": "stdio", "command": "/opt/gpm",
 			"args": []string{"mcp"},
 		}
 	}
@@ -614,7 +614,7 @@ func (r *runner) runClaude(runID, workspace string, environment []string, mcpCon
 		"--ro-bind", "/etc/ssl", "/etc/ssl", "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind", "/etc/hosts", "/etc/hosts",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input", "--dir", "/state-home", "--dir", "/state-home/git-push-memories", "--dir", sandboxState,
 		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, sandboxState,
-		"--ro-bind", r.binary, "/opt/git-push-memories", "--ro-bind", r.claudeBinary, "/opt/claude",
+		"--ro-bind", r.binary, "/opt/gpm", "--ro-bind", r.claudeBinary, "/opt/claude",
 		"--ro-bind", systemPath, "/input/system.md",
 	}
 	if runID == "session-a" {
@@ -686,7 +686,7 @@ func (r *runner) runRememberSession(workspace string, environment []string, mcpC
 		"--ro-bind", "/etc/ssl", "/etc/ssl", "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf", "--ro-bind", "/etc/hosts", "/etc/hosts",
 		"--proc", "/proc", "--dev", "/dev", "--tmpfs", "/tmp", "--dir", "/home", "--dir", "/opt", "--dir", "/input", "--dir", "/state-home", "--dir", "/state-home/git-push-memories", "--dir", sandboxState,
 		"--bind", configRoot, "/config", "--bind", home, "/home/experiment", "--bind", stateRoot, sandboxState,
-		"--ro-bind", r.binary, "/opt/git-push-memories", "--ro-bind", r.claudeBinary, "/opt/claude",
+		"--ro-bind", r.binary, "/opt/gpm", "--ro-bind", r.claudeBinary, "/opt/claude",
 		"--ro-bind", filepath.Join(r.fixture, "session-a-system.md"), "/input/system.md", "--ro-bind", workspace, "/workspace", "--bind", memoryRoot, "/memory",
 		"--chdir", "/workspace", "--setenv", "PATH", "/usr/local/go/bin:/usr/local/bin:/usr/bin:/bin",
 		"--setenv", "HOME", "/home/experiment", "--setenv", "CLAUDE_CONFIG_DIR", "/config", "--setenv", "XDG_CONFIG_HOME", "/config/xdg", "--setenv", "XDG_STATE_HOME", "/state-home",

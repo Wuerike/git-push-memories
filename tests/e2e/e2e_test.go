@@ -106,8 +106,8 @@ func newHarness(t *testing.T, evidenceRoot string) *harness {
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	t.Cleanup(cancel)
 	h := &harness{t: t, ctx: ctx, repository: repository, evidenceRoot: evidenceRoot}
-	h.binary = filepath.Join(t.TempDir(), "git-push-memories")
-	h.run("build product", repository, os.Environ(), "go", "build", "-o", h.binary, "./cmd/git-push-memories")
+	h.binary = filepath.Join(t.TempDir(), "gpm")
+	h.run("build product", repository, os.Environ(), "go", "build", "-o", h.binary, "./cmd/gpm")
 	return h
 }
 
@@ -426,7 +426,7 @@ func (h *harness) runPrivacy() (int, int) {
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
-	h.records = append(h.records, commandRecord{Name: "privacy MCP under file trace", Command: "strace -ff -e trace=%file git-push-memories mcp <isolated-roots>", ExitCode: 0, DurationMS: time.Since(started).Milliseconds()})
+	h.records = append(h.records, commandRecord{Name: "privacy MCP under file trace", Command: "strace -ff -e trace=%file gpm mcp <isolated-roots>", ExitCode: 0, DurationMS: time.Since(started).Milliseconds()})
 	if !missing(stateRoot) {
 		t.Fatal("privacy rejection created state")
 	}
@@ -456,7 +456,7 @@ func (h *harness) connectMCP(name, memoryRoot string, environment []string, clie
 	if err != nil {
 		exitCode = 1
 	}
-	h.records = append(h.records, commandRecord{Name: name, Command: "git-push-memories mcp", ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()})
+	h.records = append(h.records, commandRecord{Name: name, Command: "gpm mcp", ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()})
 	if err != nil {
 		h.t.Fatal(err)
 	}
@@ -507,7 +507,7 @@ func (h *harness) cli(environment []string, name string, arguments ...string) []
 	if err != nil {
 		exitCode = 1
 	}
-	h.records = append(h.records, commandRecord{Name: name, Command: sanitizedCommand("git-push-memories", arguments), ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()})
+	h.records = append(h.records, commandRecord{Name: name, Command: sanitizedCommand("gpm", arguments), ExitCode: exitCode, DurationMS: time.Since(started).Milliseconds()})
 	if err != nil {
 		h.t.Fatalf("%s failed: %v", name, err)
 	}
