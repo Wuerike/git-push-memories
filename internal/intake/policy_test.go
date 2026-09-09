@@ -31,7 +31,7 @@ func TestCorpusMarkersCanBeInjectedWithoutEnteringProductionPolicy(t *testing.T)
 	}
 	for _, marker := range markers {
 		raw, err := json.Marshal(map[string]any{
-			"target_path": "a.md", "section_id": "a", "replacement": marker, "source_paths": []string{},
+			"target_path": "memories/a.md", "section_id": "a", "replacement": marker, "source_paths": []string{},
 		})
 		if err != nil {
 			t.Fatal(err)

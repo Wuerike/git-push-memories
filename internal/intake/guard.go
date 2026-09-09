@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wuerike/git-push-memories/internal/memory"
 )
 
 const (
@@ -149,6 +151,9 @@ func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
 	canonicalTarget, err := validatePath(decoded.TargetPath)
 	if err != nil {
 		return AllowedCandidate{}, err
+	}
+	if !memory.IsCanonicalPagePath(canonicalTarget) || decoded.Operation == OperationCreatePage && !memory.IsCreatePagePath(canonicalTarget) {
+		return AllowedCandidate{}, rejection("schema", "invalid_path")
 	}
 	canonicalSources := make([]string, len(decoded.SourcePaths))
 	for i, sourcePath := range decoded.SourcePaths {

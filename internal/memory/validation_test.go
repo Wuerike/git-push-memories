@@ -17,16 +17,16 @@ func TestInspectRejectsPathsOutsideMemoryRoot(t *testing.T) {
 	if err := os.WriteFile(outside, []byte(validPage), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	symlink := filepath.Join(root, "services", "escape.md")
+	symlink := filepath.Join(root, "memories", "escape.md")
 	if err := os.Symlink(outside, symlink); err != nil {
 		t.Fatal(err)
 	}
-	internalSymlink := filepath.Join(root, "services", "alias.md")
+	internalSymlink := filepath.Join(root, "memories", "alias.md")
 	if err := os.Symlink("checkout-api.md", internalSymlink); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, requestedPath := range []string{outside, "../outside.md", "services/../services/checkout-api.md", "services/escape.md", "services/alias.md", "services/checkout-api.txt"} {
+	for _, requestedPath := range []string{outside, "../outside.md", "memories/../memories/checkout-api.md", "memories/escape.md", "memories/alias.md", "memories/checkout-api.txt"} {
 		t.Run(requestedPath, func(t *testing.T) {
 			_, err := repository.Inspect(context.Background(), memory.Scope{Path: requestedPath})
 			if !errors.Is(err, memory.ErrInvalidPath) {
@@ -36,11 +36,36 @@ func TestInspectRejectsPathsOutsideMemoryRoot(t *testing.T) {
 	}
 }
 
+func TestInspectAcceptsOnlyDirectMemoryPages(t *testing.T) {
+	root := newEmptyMemoryRoot(t)
+	for _, name := range []string{"memories/page.md", "memories/nested/page.md", "page.md"} {
+		filePath := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(filePath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filePath, []byte(validPage), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, root, "add", ".")
+	runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "pages")
+	repository := openRepository(t, root)
+
+	if _, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/page.md"}); err != nil {
+		t.Fatalf("Inspect() rejected canonical page: %v", err)
+	}
+	for _, requestedPath := range []string{"page.md", "memories/nested/page.md"} {
+		if _, err := repository.Inspect(context.Background(), memory.Scope{Path: requestedPath}); !errors.Is(err, memory.ErrInvalidPath) {
+			t.Fatalf("Inspect(%q) error = %v, want ErrInvalidPath", requestedPath, err)
+		}
+	}
+}
+
 func TestInspectAllowsConflictExamplesInsideTextAndCodeFences(t *testing.T) {
 	page := "# Page\n<!-- @id: page -->\nThe token <<<<<<< is documented inline.\n\n```text\n<<<<<<< ours\n=======\n>>>>>>> theirs\n```\n"
 	root := newMemoryRoot(t, page)
 	repository := openRepository(t, root)
-	if _, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"}); err != nil {
+	if _, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"}); err != nil {
 		t.Fatalf("Inspect() rejected conflict examples: %v", err)
 	}
 }
@@ -49,7 +74,7 @@ func TestInspectIgnoresHeadingsInsideFrontmatter(t *testing.T) {
 	page := "---\ntitle: Page\n# YAML comment\n---\n# Page\n<!-- @id: page -->\nbody\n"
 	root := newMemoryRoot(t, page)
 	repository := openRepository(t, root)
-	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"})
+	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +101,7 @@ func TestInspectRejectsInvalidMarkdownSchema(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			root := newMemoryRoot(t, string(test.page))
 			repository := openRepository(t, root)
-			_, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"})
+			_, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
 			if !errors.Is(err, memory.ErrInvalidSchema) {
 				t.Fatalf("Inspect() error = %v, want ErrInvalidSchema", err)
 			}
@@ -100,7 +125,7 @@ func TestApplyRejectsUnknownNonLeafAndStructuralReplacementWithoutMutation(t *te
 		t.Run(test.name, func(t *testing.T) {
 			root := newMemoryRoot(t, validPage)
 			repository := openRepository(t, root)
-			snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"})
+			snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -112,7 +137,7 @@ func TestApplyRejectsUnknownNonLeafAndStructuralReplacementWithoutMutation(t *te
 			if !errors.Is(err, test.want) {
 				t.Fatalf("Apply() error = %v, want %v", err, test.want)
 			}
-			got, readErr := os.ReadFile(filepath.Join(root, "services", "checkout-api.md"))
+			got, readErr := os.ReadFile(filepath.Join(root, "memories", "checkout-api.md"))
 			if readErr != nil {
 				t.Fatal(readErr)
 			}

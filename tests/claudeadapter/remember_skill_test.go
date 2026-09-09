@@ -30,15 +30,15 @@ func TestRememberContractHarnessBranchesWithoutStateBeforeProposal(t *testing.T)
 	}{
 		{
 			name: "empty memory creates page", query: "parcel dispatch retries", tool: "memory_propose_create_page",
-			arguments: map[string]any{"target_path": "parcel-dispatch.md", "title": "Parcel Dispatch", "body": "Retries use backoff.", "source_paths": []string{}},
+			arguments: map[string]any{"target_path": "memories/parcel-dispatch.md", "title": "Parcel Dispatch", "body": "Retries use backoff.", "source_paths": []string{}},
 		},
 		{
 			name: "populated memory creates section", page: populatedPage, query: "checkout failure modes", tool: "memory_propose_create_section",
-			arguments: map[string]any{"target_path": "checkout-api.md", "heading": "Failure Modes", "body": "Circuit breaker opens.", "source_paths": []string{}},
+			arguments: map[string]any{"target_path": "memories/checkout-api.md", "heading": "Failure Modes", "body": "Circuit breaker opens.", "source_paths": []string{}},
 		},
 		{
 			name: "populated memory replaces leaf", page: populatedPage, query: "checkout timeout", tool: "memory_propose_replace",
-			arguments: map[string]any{"target_path": "checkout-api.md", "section_id": "checkout-api-operation", "replacement": "Timeout is five seconds.\n", "source_paths": []string{}},
+			arguments: map[string]any{"target_path": "memories/checkout-api.md", "section_id": "checkout-api-operation", "replacement": "Timeout is five seconds.\n", "source_paths": []string{}},
 		},
 	}
 	for _, test := range tests {
@@ -75,9 +75,10 @@ func TestRememberContractHarnessBranchesWithoutStateBeforeProposal(t *testing.T)
 			if err != nil || proposalResult.IsError {
 				t.Fatalf("confirmed proposal = %+v, %v", proposalResult, err)
 			}
-			entries, err := os.ReadDir(filepath.Join(stateRoot, "proposals"))
-			if err != nil || len(entries) != 1 {
-				t.Fatalf("proposal count = %d, %v", len(entries), err)
+			command := exec.Command("git", "-C", memoryRoot, "for-each-ref", "--format=%(refname)", "refs/heads/gpm/proposal/")
+			branches, err := command.Output()
+			if err != nil || len(strings.Fields(string(branches))) != 1 {
+				t.Fatalf("proposal branches = %q, %v", branches, err)
 			}
 		})
 	}
@@ -187,7 +188,10 @@ func gitRoot(t *testing.T, page string) string {
 		t.Fatal(err)
 	}
 	if page != "" {
-		if err := os.WriteFile(filepath.Join(root, "checkout-api.md"), []byte(page), 0o644); err != nil {
+		if err := os.Mkdir(filepath.Join(root, "memories"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, "memories", "checkout-api.md"), []byte(page), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}

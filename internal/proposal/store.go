@@ -21,10 +21,11 @@ import (
 )
 
 var validID = regexp.MustCompile(`^[0-9a-f]{32}$`)
-var validTemporary = regexp.MustCompile(`^\.git-push-memories-[0-9a-f]{16}\.tmp$`)
+var validTemporary = regexp.MustCompile(`^\.git-push-memories-[0-9a-f]{16}\.tmp(?:\.lock)?$`)
 
 type store struct {
 	root         string
+	memoryRoot   *os.File
 	fault        func(string) error
 	cleanupFault func(string) error
 }
@@ -75,33 +76,36 @@ func (store *store) withProposalLock(ctx context.Context, id string, action func
 	return action()
 }
 
-func newStore(root string, cleanup bool) (*store, error) {
-	store := &store{root: root}
+func newStore(memoryRoot, root string, cleanup bool) (*store, error) {
+	memoryHandle, err := os.Open(memoryRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open proposal repository")
+	}
+	info, err := memoryHandle.Stat()
+	if err != nil || !info.IsDir() {
+		_ = memoryHandle.Close()
+		return nil, fmt.Errorf("open proposal repository")
+	}
+	store := &store{root: root, memoryRoot: memoryHandle}
 	if cleanup {
 		if err := store.cleanup(); err != nil {
+			_ = memoryHandle.Close()
 			return nil, err
 		}
 	}
 	return store, nil
 }
 
+func (store *store) close() error {
+	return store.memoryRoot.Close()
+}
+
 func (store *store) writeProposal(view View) error {
-	encoded, err := json.Marshal(view)
-	if err != nil {
-		return err
-	}
-	return store.durableWrite("proposals", view.ID+".json", encoded)
+	return store.writeGitProposal(view)
 }
 
 func (store *store) readProposal(id string) (View, error) {
-	var view View
-	if !validID.MatchString(id) {
-		return view, ErrNotFound
-	}
-	if err := store.readJSON("proposals", id+".json", &view); err != nil {
-		return view, err
-	}
-	return view, nil
+	return store.readGitProposal(id)
 }
 
 func (store *store) readDecision(id string) (DecisionReceipt, error) {
@@ -138,27 +142,7 @@ func (store *store) readPublication(id string) (PublicationReceipt, error) {
 }
 
 func (store *store) proposalIDs() ([]string, error) {
-	directory := filepath.Join(store.root, "proposals")
-	if err := validatePrivateDirectory(directory); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("list proposal state")
-	}
-	entries, err := os.ReadDir(directory)
-	if err != nil {
-		return nil, fmt.Errorf("list proposal state")
-	}
-	ids := make([]string, 0, len(entries))
-	for _, entry := range entries {
-		if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), ".json") {
-			id := strings.TrimSuffix(entry.Name(), ".json")
-			if validID.MatchString(id) {
-				ids = append(ids, id)
-			}
-		}
-	}
-	return ids, nil
+	return store.gitProposalIDs()
 }
 
 func (store *store) readJSON(directory, name string, target any) error {
@@ -313,11 +297,7 @@ func (store *store) finishApply(id string) error {
 			return err
 		}
 	}
-	proposalPath := filepath.Join(store.root, "proposals", id+".json")
-	if err := os.Remove(proposalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove applied proposal")
-	}
-	return syncDirectory(filepath.Dir(proposalPath))
+	return store.confirmGitProposal(id)
 }
 
 func (store *store) confirmDurable(directory string) error {
@@ -344,11 +324,7 @@ func (store *store) reject(receipt DecisionReceipt) error {
 }
 
 func (store *store) finishRejection(id string) error {
-	proposalPath := filepath.Join(store.root, "proposals", id+".json")
-	if err := os.Remove(proposalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("remove rejected proposal")
-	}
-	return syncDirectory(filepath.Dir(proposalPath))
+	return store.confirmGitProposal(id)
 }
 
 func (store *store) durableWrite(directory, name string, contents []byte) error {

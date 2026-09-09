@@ -51,7 +51,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_search",
-		Description: "Search current Markdown memory and return ranked section excerpts with expandable handles.",
+		Description: "Search current memory pages in memories/*.md and return ranked section excerpts with expandable handles.",
 	}, server.search)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_expand",
@@ -63,7 +63,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}, server.proposeReplace)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_propose_create_page",
-		Description: "Explicitly propose creating one root memory page with product-generated schema and anchors.",
+		Description: "Explicitly propose creating one memories/*.md page with product-generated schema and anchors.",
 	}, server.proposeCreatePage)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_propose_create_section",
@@ -101,7 +101,7 @@ type proposeInput struct {
 }
 
 type proposeCreatePageInput struct {
-	TargetPath  string   `json:"target_path" jsonschema:"canonical root Markdown filename for the new memory page"`
+	TargetPath  string   `json:"target_path" jsonschema:"canonical memories/<lowercase-kebab-case>.md path for the new memory page"`
 	Title       string   `json:"title" jsonschema:"H1 title rendered by the product"`
 	Body        string   `json:"body" jsonschema:"initial Overview section body without headings or anchors"`
 	SourcePaths []string `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
@@ -132,6 +132,7 @@ type proposalToolResponse struct {
 
 type proposalToolData struct {
 	ID          string          `json:"id"`
+	Branch      string          `json:"branch"`
 	Revision    int             `json:"revision"`
 	Operation   string          `json:"operation"`
 	Target      proposal.Target `json:"target"`
@@ -203,7 +204,7 @@ func (s *Server) propose(ctx context.Context, input any) (*mcp.CallToolResult, p
 	return nil, proposalToolResponse{
 		SchemaVersion: 1,
 		Data: &proposalToolData{
-			ID: view.ID, Revision: view.Revision, Operation: view.Operation.Type, Target: view.Operation.Target,
+			ID: view.ID, Branch: proposal.Branch(view.ID), Revision: view.Revision, Operation: view.Operation.Type, Target: view.Operation.Target,
 			DiffSummary: summarizeDiff(view.Diff),
 		},
 	}, nil

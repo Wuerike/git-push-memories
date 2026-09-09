@@ -29,7 +29,7 @@ const memoryPage = `# checkout-api
 `
 
 func TestMemorySearchAndExpand(t *testing.T) {
-	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
+	memoryRoot := newGitRoot(t, map[string]string{"memories/checkout-api.md": memoryPage})
 	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, StateRoot: filepath.Join(t.TempDir(), "state")}, "test")
 	if err != nil {
 		t.Fatal(err)
@@ -103,9 +103,9 @@ func TestMemorySearchAndExpand(t *testing.T) {
 }
 
 func TestMemoryProposeReplace(t *testing.T) {
-	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
+	memoryRoot := newGitRoot(t, map[string]string{"memories/checkout-api.md": memoryPage})
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	before, err := os.ReadFile(filepath.Join(memoryRoot, "services/checkout-api.md"))
+	before, err := os.ReadFile(filepath.Join(memoryRoot, "memories/checkout-api.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestMemoryProposeReplace(t *testing.T) {
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose_replace",
 		Arguments: map[string]any{
-			"target_path":  "services/checkout-api.md",
+			"target_path":  "memories/checkout-api.md",
 			"section_id":   "checkout-api-operation",
 			"replacement":  "\n- timeout: cinco segundos\n- owner: team-a\n",
 			"source_paths": []string{"services/checkout.go"},
@@ -127,17 +127,22 @@ func TestMemoryProposeReplace(t *testing.T) {
 	if result.IsError || response.Data == nil || response.Data.ID == "" || response.Data.Revision != 1 {
 		t.Fatalf("memory_propose_replace result = %+v, response = %+v", result, response)
 	}
-	if response.Data.Target.Path != "services/checkout-api.md" || response.Data.Target.SectionID != "checkout-api-operation" {
+	if response.Data.Target.Path != "memories/checkout-api.md" || response.Data.Target.SectionID != "checkout-api-operation" {
 		t.Fatalf("target = %+v", response.Data.Target)
 	}
 	if response.Data.DiffSummary.AddedLines != 2 || response.Data.DiffSummary.RemovedLines != 2 {
 		t.Fatalf("diff summary = %+v", response.Data.DiffSummary)
 	}
-	entries, err := os.ReadDir(filepath.Join(stateRoot, "proposals"))
-	if err != nil || len(entries) != 1 {
-		t.Fatalf("proposal entries = %v, err = %v", entries, err)
+	if response.Data.Branch != "gpm/proposal/"+response.Data.ID {
+		t.Fatalf("proposal branch = %q", response.Data.Branch)
 	}
-	after, err := os.ReadFile(filepath.Join(memoryRoot, "services/checkout-api.md"))
+	if _, err := os.Stat(filepath.Join(stateRoot, "proposals")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state proposal directory exists: %v", err)
+	}
+	if stored := gitOutput(t, memoryRoot, "show", response.Data.Branch+":proposals/"+response.Data.ID+".json"); stored == "" {
+		t.Fatal("proposal branch does not contain the proposal")
+	}
+	after, err := os.ReadFile(filepath.Join(memoryRoot, "memories/checkout-api.md"))
 	if err != nil || string(after) != string(before) {
 		t.Fatalf("memory changed before apply: err = %v", err)
 	}
@@ -165,13 +170,13 @@ func TestMemoryProposeCreatePageAndSection(t *testing.T) {
 	}{
 		{
 			name: "page", tool: "memory_propose_create_page", operation: "create_page",
-			arguments: map[string]any{"target_path": "parcel-dispatch.md", "title": "Parcel Dispatch", "body": "Retries use backoff.", "source_paths": []string{"services/parcel.go"}},
-			target:    proposal.Target{Path: "parcel-dispatch.md", SectionID: "parcel-dispatch-overview"},
+			arguments: map[string]any{"target_path": "memories/parcel-dispatch.md", "title": "Parcel Dispatch", "body": "Retries use backoff.", "source_paths": []string{"services/parcel.go"}},
+			target:    proposal.Target{Path: "memories/parcel-dispatch.md", SectionID: "parcel-dispatch-overview"},
 		},
 		{
-			name: "section", files: map[string]string{"services/checkout-api.md": memoryPage}, tool: "memory_propose_create_section", operation: "create_section",
-			arguments: map[string]any{"target_path": "services/checkout-api.md", "heading": "Failure Modes", "body": "Circuit breaker opens.", "source_paths": []string{}},
-			target:    proposal.Target{Path: "services/checkout-api.md", SectionID: "checkout-api-failure-modes"},
+			name: "section", files: map[string]string{"memories/checkout-api.md": memoryPage}, tool: "memory_propose_create_section", operation: "create_section",
+			arguments: map[string]any{"target_path": "memories/checkout-api.md", "heading": "Failure Modes", "body": "Circuit breaker opens.", "source_paths": []string{}},
+			target:    proposal.Target{Path: "memories/checkout-api.md", SectionID: "checkout-api-failure-modes"},
 		},
 	}
 	for _, test := range tests {
@@ -206,7 +211,7 @@ func TestMemoryProposeCreatePageAndSection(t *testing.T) {
 }
 
 func TestInvalidAndSensitiveProposalsAreRejectedWithoutStateOrBlockingSession(t *testing.T) {
-	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
+	memoryRoot := newGitRoot(t, map[string]string{"memories/checkout-api.md": memoryPage})
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	session, stop := startServer(t, memoryRoot, stateRoot)
 	defer stop()
@@ -228,7 +233,7 @@ func TestInvalidAndSensitiveProposalsAreRejectedWithoutStateOrBlockingSession(t 
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose_replace",
 		Arguments: map[string]any{
-			"target_path":  "services/checkout-api.md",
+			"target_path":  "memories/checkout-api.md",
 			"section_id":   "checkout-api-operation",
 			"replacement":  "\n- password=super-secret\n",
 			"source_paths": []string{},
@@ -257,6 +262,7 @@ type proposalResponse struct {
 	SchemaVersion int `json:"schema_version"`
 	Data          *struct {
 		ID          string          `json:"id"`
+		Branch      string          `json:"branch"`
 		Revision    int             `json:"revision"`
 		Operation   string          `json:"operation"`
 		Target      proposal.Target `json:"target"`

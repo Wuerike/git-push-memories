@@ -66,7 +66,7 @@ func testApplyAndRejectAcrossProcesses(t *testing.T) {
 	if (applyErr == nil) == (rejectErr == nil) {
 		t.Fatalf("terminal receipts: apply=%v reject=%v", applyErr, rejectErr)
 	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

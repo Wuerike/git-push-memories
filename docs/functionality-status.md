@@ -29,7 +29,7 @@ Os estados usados sao:
 | Runtime local | Executar como um unico programa Go, sem daemon, worker ou backend obrigatorio. | **Implementado.** Existe um executavel local e o servidor MCP e transitorio sobre stdio. |
 | Markdown e Git canonicos | Manter a memoria legivel e integra sem banco, indice ou processo da ferramenta. | **Implementado.** O Markdown e o historico Git sao a unica autoridade duravel. |
 | Configuracao global | Permitir que qualquer sessao use a mesma memoria sem configuracao por repositorio de codigo. | **Implementado.** `setup` registra memory root, MCP e skill uma unica vez no escopo do usuario. |
-| Estado privado | Manter propostas fora da memoria e de worktrees Git. | **Implementado.** O state root e derivado de XDG e rejeitado quando sobrepoe um worktree Git. |
+| Estado privado | Manter locks e receipts operacionais fora de worktrees Git. | **Implementado.** O state root e derivado de XDG e rejeitado quando sobrepoe um worktree Git; propostas duraveis ficam em branches Git dedicadas. |
 | Indice local derivado | Se um indice for necessario, torna-lo descartavel e reconstruivel somente do Markdown. | **Nao aplicavel.** A implementacao atual nao possui indice persistente e percorre os arquivos diretamente. |
 | Runtime, banco e store de sessao adicionais | Nao introduzir Python, banco autoritativo, daemon, grafo, vector DB ou store de sessao no primeiro ciclo. | **Implementado como restricao.** Nenhum desses componentes faz parte do produto atual. |
 
@@ -62,14 +62,14 @@ Os estados usados sao:
 
 | Funcionalidade | Comportamento esperado | Estado atual |
 |---|---|---|
-| Proposta antes da mutacao | Criar um artefato temporario e observavel sem alterar Markdown ou Git. | **Implementado.** A proposta e um JSON privado fora dos repositorios. |
-| Persistencia privada e atomica | Usar diretorios `0700`, arquivos `0600`, temporario, `fsync`, rename e `fsync` do diretorio. | **Implementado.** O Proposal Store aplica essas garantias a propostas e receipts. |
+| Proposta antes da mutacao | Criar um artefato observavel sem alterar a branch, indice, worktree ou Markdown canonico. | **Implementado.** A proposta e commitada como `proposals/<id>.json` em `gpm/proposal/<id>`. |
+| Persistencia duravel da proposta | Permitir backup e revisao sem depender do state local. | **Implementado localmente.** Cada proposta possui uma branch Git dedicada que pode ser enviada explicitamente ao remoto. |
 | Integridade da proposta | Detectar adulteracao de operacao, hashes, diff ou post-state. | **Implementado.** A proposta possui hash de integridade e e revalidada antes do apply. |
 | Visualizacao do diff | Permitir que a pessoa inspecione exatamente a alteracao proposta. | **Implementado.** `proposal show` retorna a proposta e seu diff completo. |
-| Rejeicao explicita | Rejeitar usando um motivo fechado, persistir o receipt e remover o payload. | **Implementado.** Os motivos aceitos sao `not_relevant`, `incorrect`, `sensitive`, `wrong_target` e `user_cancelled`. |
+| Rejeicao explicita | Rejeitar usando um motivo fechado e persistir o receipt. | **Implementado.** Os motivos aceitos sao `not_relevant`, `incorrect`, `sensitive`, `wrong_target` e `user_cancelled`; a branch preserva o payload historico. |
 | Aceite explicito | Aplicar somente quando a pessoa informa a revisao exata. | **Implementado.** `proposal apply <id> --revision <n>` constitui o aceite humano. |
 | Edicao de proposta | Ajustar uma proposta criando uma nova revisao imutavel e aplicar exatamente a revisao inspecionada. | **Adiado.** Todas as propostas atuais possuem revisao 1. Para corrigir o conteudo, e necessario rejeitar e criar outra proposta. |
-| Remocao do payload terminal | Preservar apenas receipts sem corpo depois de reject ou apply. | **Implementado.** O payload e removido somente depois que o receipt terminal se torna duravel. |
+| Retencao do payload terminal | Preservar a proposta versionada depois de reject ou apply. | **Implementado.** Receipts permanecem privados e a branch Git continua disponivel para auditoria ou remocao humana. |
 
 ## Apply e recuperacao de falhas
 
@@ -92,13 +92,13 @@ Os estados usados sao:
 | Indice Git isolado | Nao consumir nem perder staging preexistente do usuario. | **Implementado.** O commit usa `GIT_INDEX_FILE` temporario e reconcilia o indice real sob lock. |
 | Protecao concorrente | Detectar mudancas de HEAD, index ou target durante a publicacao. | **Implementado.** O Publisher combina index lock, hashes e atualizacao compare-and-swap da ref. |
 | Idempotencia e recovery de publish | Reconhecer commit ja criado depois de interrupcao e evitar duplicacao. | **Implementado.** Marcadores privados permitem retomar ou reconhecer a publicacao. |
-| Operacoes remotas | Criar branch dedicada, push e pull request para revisao compartilhada. | **Adiado para a politica de governanca.** O Publisher atual cria somente commit local na branch corrente e nao acessa remotos. |
+| Operacoes remotas | Permitir push e revisao compartilhada sem acesso remoto automatico. | **Parcial.** A branch de proposta e criada localmente e pode ser enviada por comando Git humano; pull request e politica de merge continuam adiados. |
 
 ## Recuperacao
 
 | Funcionalidade | Comportamento esperado | Estado atual |
 |---|---|---|
-| Busca textual local | Encontrar memoria atual sem banco ou servico externo. | **Implementado.** A busca percorre arquivos Markdown e ranqueia secoes lexicalmente. |
+| Busca textual local | Encontrar memoria atual sem banco ou servico externo. | **Implementado.** A busca percorre somente arquivos diretos em `memories/*.md` e ranqueia secoes lexicalmente. |
 | Escopo | Restringir a busca por prefixo canonico de path. | **Implementado.** Paths absolutos e escapes por `..` sao rejeitados. |
 | Orcamento de contexto | Nunca ultrapassar silenciosamente o limite de bytes informado. | **Implementado.** Budget insuficiente retorna erro tipado. |
 | Handles expandiveis | Retornar path, section ID e hash para expansao posterior e deteccao de conteudo obsoleto. | **Implementado.** `memory_expand` rejeita handles stale. |

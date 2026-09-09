@@ -20,7 +20,7 @@ func TestApplyRecoversWhenReceiptPublicationFailsAfterMemoryRename(t *testing.T)
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err == nil {
 		t.Fatal("Apply() error = nil")
 	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memory.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "memory.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestApplyRecoversWhenReceiptPublicationFailsAfterMemoryRename(t *testing.T)
 }
 
 func TestApplyRetryOnlyCleansUpAfterDurableReceipt(t *testing.T) {
-	workflow, view, _, stateRoot := newFaultWorkflow(t)
+	workflow, view, _, _ := newFaultWorkflow(t)
 	workflow.store.cleanupFault = func(string) error { return errors.New("cleanup fault") }
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err == nil {
 		t.Fatal("Apply() error = nil")
@@ -46,8 +46,8 @@ func TestApplyRetryOnlyCleansUpAfterDurableReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal("apply receipt was not durable before cleanup failure")
 	}
-	if _, err := os.Stat(filepath.Join(stateRoot, "proposals", view.ID+".json")); err != nil {
-		t.Fatal("cleanup failure removed proposal")
+	if _, err := workflow.store.readProposal(view.ID); err != nil {
+		t.Fatal("cleanup failure removed proposal branch")
 	}
 	workflow.store.cleanupFault = nil
 	repeated, err := workflow.Apply(context.Background(), view.ID, view.Revision)
@@ -70,8 +70,8 @@ func TestApplyDoesNotCleanUpWhenReceiptDirectorySyncFails(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateRoot, "applies", view.ID+".json")); err != nil {
 		t.Fatal("renamed apply receipt is not visible")
 	}
-	if _, err := os.Stat(filepath.Join(stateRoot, "proposals", view.ID+".json")); err != nil {
-		t.Fatal("directory sync failure removed recovery payload")
+	if _, err := workflow.store.readProposal(view.ID); err != nil {
+		t.Fatal("directory sync failure removed recovery branch")
 	}
 	workflow.store.fault = nil
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err != nil {
@@ -98,22 +98,18 @@ func TestRejectCannotWinAfterApplyRenamesMemory(t *testing.T) {
 }
 
 func TestApplyRescansSensitiveContentAfterProposalWasSealedAgain(t *testing.T) {
-	workflow, view, memoryRoot, stateRoot := newFaultWorkflow(t)
+	workflow, view, memoryRoot, _ := newFaultWorkflow(t)
 	view.Operation.Replacement = "Authorization: Bearer secret"
 	if err := sealProposal(&view); err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(stateRoot, "proposals", view.ID+".json"), encoded, 0o600); err != nil {
+	if err := workflow.store.writeProposal(view); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("Apply() error = %v, want ErrIntegrity", err)
 	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memory.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "memory.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,43 +119,35 @@ func TestApplyRescansSensitiveContentAfterProposalWasSealedAgain(t *testing.T) {
 }
 
 func TestCreatePageApplyRescansSensitiveBodyAfterProposalWasSealedAgain(t *testing.T) {
-	workflow, view, memoryRoot, stateRoot := newCreatePageWorkflow(t)
+	workflow, view, memoryRoot, _ := newCreatePageWorkflow(t)
 	view.Operation.Body = "Authorization: Bearer secret"
 	if err := sealProposal(&view); err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(stateRoot, "proposals", view.ID+".json"), encoded, 0o600); err != nil {
+	if err := workflow.store.writeProposal(view); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("Apply() error = %v, want ErrIntegrity", err)
 	}
-	if _, err := os.Stat(filepath.Join(memoryRoot, "page.md")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "page.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("sensitive create body reached memory")
 	}
 }
 
 func TestCreatePageApplyRejectsResealedDerivedTargetBeforeMutation(t *testing.T) {
-	workflow, view, memoryRoot, stateRoot := newCreatePageWorkflow(t)
+	workflow, view, memoryRoot, _ := newCreatePageWorkflow(t)
 	view.Operation.Target.SectionID = "wrong-overview"
 	if err := sealProposal(&view); err != nil {
 		t.Fatal(err)
 	}
-	encoded, err := json.Marshal(view)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(stateRoot, "proposals", view.ID+".json"), encoded, 0o600); err != nil {
+	if err := workflow.store.writeProposal(view); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, ErrIntegrity) {
 		t.Fatalf("Apply() error = %v, want ErrIntegrity", err)
 	}
-	if _, err := os.Stat(filepath.Join(memoryRoot, "page.md")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "page.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("invalid derived target created memory")
 	}
 }
@@ -182,7 +170,7 @@ func newCreatePageWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte(`{"operation":"create_page","target_path":"page.md","title":"Page","body":"safe","source_paths":[]}`)
+	raw := []byte(`{"operation":"create_page","target_path":"memories/page.md","title":"Page","body":"safe","source_paths":[]}`)
 	allowed, err := guard.Inspect(intake.NewCandidate(raw))
 	if err != nil {
 		t.Fatal(err)
@@ -204,11 +192,11 @@ func newFaultWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	root := t.TempDir()
 	memoryRoot := filepath.Join(root, "memory")
 	stateRoot := filepath.Join(root, "state")
-	if err := os.MkdirAll(memoryRoot, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(memoryRoot, "memories"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	page := "# Memory\n<!-- @id: memory -->\n\n## State\n<!-- @id: state -->\n\nold\n"
-	if err := os.WriteFile(filepath.Join(memoryRoot, "memory.md"), []byte(page), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(memoryRoot, "memories", "memory.md"), []byte(page), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"init", "--quiet"}, {"config", "user.name", "Test"}, {"config", "user.email", "test@example.com"}, {"add", "."}, {"commit", "--quiet", "-m", "initial"}} {
@@ -221,7 +209,7 @@ func newFaultWorkflow(t *testing.T) (*Workflow, View, string, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := json.Marshal(map[string]any{"target_path": "memory.md", "section_id": "state", "replacement": "\nnew\n", "source_paths": []string{}})
+	raw, err := json.Marshal(map[string]any{"target_path": "memories/memory.md", "section_id": "state", "replacement": "\nnew\n", "source_paths": []string{}})
 	if err != nil {
 		t.Fatal(err)
 	}

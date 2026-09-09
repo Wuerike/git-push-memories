@@ -31,10 +31,11 @@ const initialPage = `# checkout-api
 - owner: team-a
 `
 
-func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.T) {
+func TestPreparePersistsReviewableProposalOnDedicatedBranch(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
-	before := treeFingerprint(t, memoryRoot)
+	beforeHead := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+	beforeStatus := gitOutput(t, memoryRoot, "status", "--porcelain=v1", "--untracked-files=all")
 	workflow, err := proposal.New(memoryRoot, stateRoot)
 	if err != nil {
 		t.Fatal(err)
@@ -50,26 +51,44 @@ func TestPreparePersistsReviewableProposalWithoutChangingMemoryOrGit(t *testing.
 	if _, err := workflow.Applied(view.ID); !errors.Is(err, proposal.ErrNotApplied) {
 		t.Fatalf("Applied() error = %v, want ErrNotApplied", err)
 	}
-	if view.Operation.Type != "replace_section_content" || view.Operation.Target.Path != "services/checkout-api.md" || view.Operation.Target.SectionID != "checkout-api-operation" {
+	if view.Operation.Type != "replace_section_content" || view.Operation.Target.Path != "memories/checkout-api.md" || view.Operation.Target.SectionID != "checkout-api-operation" {
 		t.Fatalf("Prepare() operation = %+v", view.Operation)
 	}
 	if view.Baseline.FileHash == view.PostState.FileHash || view.Baseline.Head == "" || view.Baseline.Blob == "" {
 		t.Fatalf("Prepare() states = baseline %+v, post-state %+v", view.Baseline, view.PostState)
 	}
-	if !strings.Contains(view.Diff, "--- a/services/checkout-api.md") || !strings.Contains(view.Diff, "\n-- timeout: cinco segundos") || !strings.Contains(view.Diff, "\n+- timeout: tres segundos") {
+	if !strings.Contains(view.Diff, "--- a/memories/checkout-api.md") || !strings.Contains(view.Diff, "\n-- timeout: cinco segundos") || !strings.Contains(view.Diff, "\n+- timeout: tres segundos") {
 		t.Fatalf("Prepare() diff = %q", view.Diff)
 	}
 	assertMode(t, stateRoot, 0o700)
-	assertMode(t, filepath.Join(stateRoot, "proposals"), 0o700)
-	assertMode(t, filepath.Join(stateRoot, "proposals", view.ID+".json"), 0o600)
-	if got := treeFingerprint(t, memoryRoot); got != before {
-		t.Fatalf("Prepare() changed memory/Git: before %s, after %s", before, got)
+	if _, err := os.Stat(filepath.Join(stateRoot, "proposals")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("state proposal directory exists: %v", err)
+	}
+	branch := "gpm/proposal/" + view.ID
+	if parent := gitOutput(t, memoryRoot, "rev-parse", branch+"^"); parent != view.Baseline.Head {
+		t.Fatalf("proposal branch parent = %q, want %q", parent, view.Baseline.Head)
+	}
+	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-only", "-r", branch); changed != "proposals/"+view.ID+".json" {
+		t.Fatalf("proposal branch changed %q", changed)
+	}
+	var stored proposal.View
+	if err := json.Unmarshal([]byte(gitOutput(t, memoryRoot, "show", branch+":proposals/"+view.ID+".json")), &stored); err != nil || !reflect.DeepEqual(stored, view) {
+		t.Fatalf("stored proposal = %+v, %v; want %+v", stored, err, view)
+	}
+	if got := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); got != beforeHead {
+		t.Fatalf("Prepare() changed HEAD from %s to %s", beforeHead, got)
+	}
+	if got := gitOutput(t, memoryRoot, "status", "--porcelain=v1", "--untracked-files=all"); got != beforeStatus {
+		t.Fatalf("Prepare() changed worktree/index: before %q, after %q", beforeStatus, got)
 	}
 	if err := workflow.Close(); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.RemoveAll(stateRoot); err != nil {
+		t.Fatal(err)
+	}
 
-	restarted, err := proposal.New(memoryRoot, stateRoot)
+	restarted, err := proposal.OpenReadOnly(memoryRoot, filepath.Join(t.TempDir(), "fresh-state"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,10 +121,10 @@ func TestCreatePageProposalAppliesOnceFromAbsentBaseline(t *testing.T) {
 	if view.Baseline.Exists == nil || *view.Baseline.Exists || view.Baseline.FileHash != "" || view.Baseline.Blob != "" || view.Baseline.Head == "" {
 		t.Fatalf("Prepare() baseline = %+v", view.Baseline)
 	}
-	if !strings.HasPrefix(view.Diff, "--- /dev/null\n+++ b/parcel-dispatch.md\n") {
+	if !strings.HasPrefix(view.Diff, "--- /dev/null\n+++ b/memories/parcel-dispatch.md\n") {
 		t.Fatalf("Prepare() diff = %q", view.Diff)
 	}
-	if _, err := os.Stat(filepath.Join(memoryRoot, "parcel-dispatch.md")); !errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "parcel-dispatch.md")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatal("Prepare() created the target")
 	}
 
@@ -116,7 +135,7 @@ func TestCreatePageProposalAppliesOnceFromAbsentBaseline(t *testing.T) {
 	if receipt.SchemaVersion != 2 || receipt.Baseline.Exists == nil || *receipt.Baseline.Exists || receipt.Target != view.Operation.Target || receipt.PostState != view.PostState {
 		t.Fatalf("Apply() receipt = %+v", receipt)
 	}
-	page, err := os.ReadFile(filepath.Join(memoryRoot, "parcel-dispatch.md"))
+	page, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "parcel-dispatch.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,8 +159,11 @@ func TestCreatePageApplyRejectsTargetCreatedAfterPrepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pagePath := filepath.Join(memoryRoot, "parcel-dispatch.md")
+	pagePath := filepath.Join(memoryRoot, "memories", "parcel-dispatch.md")
 	concurrent := []byte("concurrent content\n")
+	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(pagePath, concurrent, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +194,10 @@ func TestCreatePageStartupRecoversPostStateWithoutApplyReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	postState := "# Parcel Dispatch\n<!-- @id: parcel-dispatch -->\n\n## Overview\n<!-- @id: parcel-dispatch-overview -->\nCurrent state.\n"
-	if err := os.WriteFile(filepath.Join(memoryRoot, "parcel-dispatch.md"), []byte(postState), 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(memoryRoot, "memories"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(memoryRoot, "memories", "parcel-dispatch.md"), []byte(postState), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	restarted, err := proposal.New(memoryRoot, stateRoot)
@@ -220,7 +245,7 @@ func TestCreatePageConcurrentApplyReturnsOneDurableResult(t *testing.T) {
 	if first.err != nil || second.err != nil || !reflect.DeepEqual(first.receipt, second.receipt) {
 		t.Fatalf("concurrent Apply() = (%+v, %v), (%+v, %v)", first.receipt, first.err, second.receipt, second.err)
 	}
-	if _, err := os.Stat(filepath.Join(memoryRoot, "parcel-dispatch.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "parcel-dispatch.md")); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -283,7 +308,7 @@ func TestCreateSectionProposalAppliesPublishesAndRetrievesGeneratedID(t *testing
 	if err != nil || !reflect.DeepEqual(repeatedApply, receipt) {
 		t.Fatalf("repeated Apply() = %+v, %v", repeatedApply, err)
 	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,7 +360,7 @@ func TestCreateSectionApplyRejectsWholeFileDrift(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 	drift := []byte(initialPage + "drift\n")
 	if err := os.WriteFile(pagePath, drift, 0o644); err != nil {
 		t.Fatal(err)
@@ -364,7 +389,7 @@ func TestCreateSectionStartupRecoversPostState(t *testing.T) {
 		t.Fatal(err)
 	}
 	postState := initialPage + "\n## Failure Modes\n<!-- @id: checkout-api-failure-modes -->\nCircuit breaker opens.\n"
-	if err := os.WriteFile(filepath.Join(memoryRoot, "services", "checkout-api.md"), []byte(postState), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"), []byte(postState), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	restarted, err := proposal.New(memoryRoot, stateRoot)
@@ -414,12 +439,12 @@ func TestPrepareRejectsDirtyTarget(t *testing.T) {
 	for _, staged := range []bool{false, true} {
 		t.Run(fmt.Sprintf("staged=%v", staged), func(t *testing.T) {
 			memoryRoot := newMemoryRoot(t)
-			pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+			pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 			if err := os.WriteFile(pagePath, []byte(strings.Replace(initialPage, "cinco", "quatro", 1)), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			if staged {
-				runGit(t, memoryRoot, "add", "services/checkout-api.md")
+				runGit(t, memoryRoot, "add", "memories/checkout-api.md")
 			}
 			stateRoot := filepath.Join(t.TempDir(), "state")
 			workflow, err := proposal.New(memoryRoot, stateRoot)
@@ -496,7 +521,7 @@ func TestApplyExactRevisionIsDurableAndIdempotent(t *testing.T) {
 		receipt.Target != view.Operation.Target || !reflect.DeepEqual(receipt.Baseline, view.Baseline) || receipt.PostState != view.PostState {
 		t.Fatalf("Apply() receipt = %+v", receipt)
 	}
-	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 	applied, err := os.ReadFile(pagePath)
 	if err != nil {
 		t.Fatal(err)
@@ -541,7 +566,7 @@ func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T)
 		{
 			name: "drift outside section",
 			mutate: func(t *testing.T, memoryRoot, _ string, _ proposal.View) {
-				path := filepath.Join(memoryRoot, "services", "checkout-api.md")
+				path := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 				if err := os.WriteFile(path, []byte(initialPage+"\noutside\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
@@ -550,15 +575,15 @@ func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T)
 		},
 		{
 			name: "tampered diff",
-			mutate: func(t *testing.T, _ string, stateRoot string, view proposal.View) {
-				editStoredProposal(t, stateRoot, view.ID, func(stored *proposal.View) { stored.Diff += "tampered" })
+			mutate: func(t *testing.T, memoryRoot, _ string, view proposal.View) {
+				editStoredProposal(t, memoryRoot, view.ID, func(stored *proposal.View) { stored.Diff += "tampered" })
 			},
 			want: proposal.ErrIntegrity,
 		},
 		{
 			name: "sensitive replacement",
-			mutate: func(t *testing.T, _ string, stateRoot string, view proposal.View) {
-				editStoredProposal(t, stateRoot, view.ID, func(stored *proposal.View) {
+			mutate: func(t *testing.T, memoryRoot, _ string, view proposal.View) {
+				editStoredProposal(t, memoryRoot, view.ID, func(stored *proposal.View) {
 					stored.Operation.Replacement = "Authorization: Bearer secret"
 				})
 			},
@@ -579,14 +604,14 @@ func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T)
 				t.Fatal(err)
 			}
 			test.mutate(t, memoryRoot, stateRoot, view)
-			before, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			before, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
 			if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); !errors.Is(err, test.want) {
 				t.Fatalf("Apply() error = %v, want %v", err, test.want)
 			}
-			after, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			after, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -611,25 +636,42 @@ func TestApplyRejectsDriftWrongRevisionAndTamperingWithoutMutation(t *testing.T)
 	}
 }
 
-func editStoredProposal(t *testing.T, stateRoot, id string, edit func(*proposal.View)) {
+func editStoredProposal(t *testing.T, memoryRoot, id string, edit func(*proposal.View)) {
 	t.Helper()
-	path := filepath.Join(stateRoot, "proposals", id+".json")
-	encoded, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
+	branch := "gpm/proposal/" + id
+	proposalPath := "proposals/" + id + ".json"
+	encoded := []byte(gitOutput(t, memoryRoot, "show", branch+":"+proposalPath))
 	var view proposal.View
 	if err := json.Unmarshal(encoded, &view); err != nil {
 		t.Fatal(err)
 	}
 	edit(&view)
-	encoded, err = json.Marshal(view)
+	encoded, err := json.Marshal(view)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(path, encoded, 0o600); err != nil {
-		t.Fatal(err)
+	parent := gitOutput(t, memoryRoot, "rev-parse", branch+"^")
+	oldCommit := gitOutput(t, memoryRoot, "rev-parse", branch)
+	indexPath := filepath.Join(t.TempDir(), "index")
+	environment := append(os.Environ(), "GIT_INDEX_FILE="+indexPath)
+	gitInput(t, memoryRoot, environment, nil, "read-tree", parent)
+	blob := gitInput(t, memoryRoot, os.Environ(), encoded, "hash-object", "-w", "--stdin")
+	gitInput(t, memoryRoot, environment, nil, "update-index", "--add", "--cacheinfo", "100644,"+blob+","+proposalPath)
+	tree := gitInput(t, memoryRoot, environment, nil, "write-tree")
+	commit := gitInput(t, memoryRoot, os.Environ(), []byte("Tamper proposal\n"), "commit-tree", tree, "-p", parent)
+	gitInput(t, memoryRoot, os.Environ(), nil, "update-ref", "refs/heads/"+branch, commit, oldCommit)
+}
+
+func gitInput(t *testing.T, root string, environment []string, input []byte, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	command.Env = environment
+	command.Stdin = bytes.NewReader(input)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", arguments, err)
 	}
+	return strings.TrimSpace(string(output))
 }
 
 func TestApplyAndRejectRaceHasOneTerminalReceipt(t *testing.T) {
@@ -666,7 +708,7 @@ func TestApplyAndRejectRaceHasOneTerminalReceipt(t *testing.T) {
 		if (applyErr == nil) == (rejectErr == nil) {
 			t.Fatalf("iteration %d terminal receipts: apply=%v reject=%v", iteration, applyErr, rejectErr)
 		}
-		contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+		contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -731,7 +773,7 @@ func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
 	}{
 		{name: "baseline", mutate: func(*testing.T, string) {}},
 		{name: "drift", mutate: func(t *testing.T, memoryRoot string) {
-			path := filepath.Join(memoryRoot, "services", "checkout-api.md")
+			path := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 			if err := os.WriteFile(path, []byte(initialPage+"\ndrift\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
@@ -752,7 +794,7 @@ func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
 				t.Fatal(err)
 			}
 			test.mutate(t, memoryRoot)
-			before, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			before, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -764,7 +806,7 @@ func TestStartupDoesNotApplyBaselineOrRepairDrift(t *testing.T) {
 			if _, err := restarted.Applied(view.ID); !errors.Is(err, proposal.ErrNotApplied) {
 				t.Fatalf("startup Applied() error = %v", err)
 			}
-			after, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+			after, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -799,13 +841,13 @@ func TestBaselineRestoredAfterInterruptedApplyRemainsEligible(t *testing.T) {
 	if err := repository.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(memoryRoot, "services", "checkout-api.md"), []byte(initialPage), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"), []byte(initialPage), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err != nil {
 		t.Fatal(err)
 	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -814,7 +856,7 @@ func TestBaselineRestoredAfterInterruptedApplyRemainsEligible(t *testing.T) {
 	}
 }
 
-func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
+func TestStartupRetainsProposalBranchAfterDurableApplyReceipt(t *testing.T) {
 	memoryRoot := newMemoryRoot(t)
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	workflow, err := proposal.New(memoryRoot, stateRoot)
@@ -825,18 +867,10 @@ func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposalPath := filepath.Join(stateRoot, "proposals", view.ID+".json")
-	payload, err := os.ReadFile(proposalPath)
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := workflow.Apply(context.Background(), view.ID, view.Revision); err != nil {
 		t.Fatal(err)
 	}
 	if err := workflow.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(proposalPath, payload, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	restarted, err := proposal.New(memoryRoot, stateRoot)
@@ -844,8 +878,8 @@ func TestStartupFinishesCleanupAfterDurableApplyReceipt(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restarted.Close()
-	if _, err := os.Stat(proposalPath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("startup retained payload after durable apply receipt")
+	if branch := gitOutput(t, memoryRoot, "rev-parse", "--verify", "gpm/proposal/"+view.ID); branch == "" {
+		t.Fatal("startup removed durable proposal branch")
 	}
 }
 
@@ -926,7 +960,7 @@ func TestReadOnlyReviewDoesNotCleanState(t *testing.T) {
 	if err := workflow.Close(); err != nil {
 		t.Fatal(err)
 	}
-	temporary := filepath.Join(stateRoot, "proposals", ".git-push-memories-0123456789abcdef.tmp")
+	temporary := filepath.Join(stateRoot, ".git-push-memories-0123456789abcdef.tmp")
 	if err := os.WriteFile(temporary, []byte("partial"), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -948,7 +982,7 @@ func TestReadOnlyReviewDoesNotCleanState(t *testing.T) {
 func allowedCandidate(t *testing.T, replacement string) intake.AllowedCandidate {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"target_path": "services/checkout-api.md", "section_id": "checkout-api-operation",
+		"target_path": "memories/checkout-api.md", "section_id": "checkout-api-operation",
 		"replacement": replacement, "source_paths": []string{"services/checkout-api/service.yaml"},
 	})
 	if err != nil {
@@ -968,7 +1002,7 @@ func allowedCandidate(t *testing.T, replacement string) intake.AllowedCandidate 
 func allowedCreatePageCandidate(t *testing.T, body string) intake.AllowedCandidate {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"operation": "create_page", "target_path": "parcel-dispatch.md", "title": "Parcel Dispatch",
+		"operation": "create_page", "target_path": "memories/parcel-dispatch.md", "title": "Parcel Dispatch",
 		"body": body, "source_paths": []string{"services/parcel/service.yaml"},
 	})
 	if err != nil {
@@ -988,7 +1022,7 @@ func allowedCreatePageCandidate(t *testing.T, body string) intake.AllowedCandida
 func allowedCreateSectionCandidate(t *testing.T, body string) intake.AllowedCandidate {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{
-		"operation": "create_section", "target_path": "services/checkout-api.md", "heading": "Failure Modes",
+		"operation": "create_section", "target_path": "memories/checkout-api.md", "heading": "Failure Modes",
 		"body": body, "source_paths": []string{"services/checkout-api/service.yaml"},
 	})
 	if err != nil {
@@ -1008,7 +1042,7 @@ func allowedCreateSectionCandidate(t *testing.T, body string) intake.AllowedCand
 func newMemoryRoot(t *testing.T) string {
 	t.Helper()
 	root := filepath.Join(t.TempDir(), "memory")
-	pagePath := filepath.Join(root, "services", "checkout-api.md")
+	pagePath := filepath.Join(root, "memories", "checkout-api.md")
 	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -1042,6 +1076,16 @@ func runGit(t *testing.T, root string, arguments ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", arguments, err, output)
 	}
+}
+
+func gitOutput(t *testing.T, root string, arguments ...string) string {
+	t.Helper()
+	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("git %v: %v", arguments, err)
+	}
+	return strings.TrimSpace(string(output))
 }
 
 func assertMode(t *testing.T, path string, mode os.FileMode) {

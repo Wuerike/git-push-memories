@@ -147,11 +147,13 @@ gpm setup /path/to/memory-repository
 
 O setup registra o MCP e instala `/remember` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode executar `/remember <fato>`.
 
+Memorias canonicas sao arquivos diretos em `memories/*.md`. Outros Markdown do repositorio, como `README.md`, e subdiretorios de `memories/` sao ignorados pela busca. Propostas ficam em `proposals/<id>.json` dentro de branches locais `gpm/proposal/<id>`, sem alterar a branch, o indice ou o worktree atuais; essas branches podem ser enviadas explicitamente ao remoto para backup ou revisao.
+
 O servidor publica cinco tools:
 
-- `memory_search`, para buscar excerpts Markdown dentro de um orçamento em bytes;
+- `memory_search`, para buscar excerpts em `memories/*.md` dentro de um orçamento em bytes;
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto.
-- `memory_propose_create_page`, `memory_propose_create_section` e `memory_propose_replace`, para criar propostas estruturadas sem aplicar Markdown ou executar Git.
+- `memory_propose_create_page`, `memory_propose_create_section` e `memory_propose_replace`, para criar propostas estruturadas em branches Git dedicadas sem aplicar Markdown nem alterar o checkout atual.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
 
@@ -167,8 +169,11 @@ Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `p
 
 ```bash
 gpm proposal show <proposal-id>
+git -C <memory-repository> push -u origin gpm/proposal/<proposal-id>
 gpm proposal apply <proposal-id> --revision 1
 ```
+
+O push e opcional e permanece uma acao humana; o produto nao acessa remotos. A branch de proposta nao deve ser mesclada diretamente na branch corrente.
 
 O apply deixa a atualização como `applied_unpublished`. A publicação local cria um commit limitado ao target sem consumir staging alheio:
 

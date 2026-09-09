@@ -15,12 +15,12 @@ func TestGuardAllowsOnlyCanonicalClosedCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte(`{"target_path":"services\\checkout-api.md","section_id":"checkout-api-operation","replacement":"\ncurrent state\n","source_paths":["services\\checkout-api\\service.yaml"]}`)
+	raw := []byte(`{"target_path":"memories\\checkout-api.md","section_id":"checkout-api-operation","replacement":"\ncurrent state\n","source_paths":["services\\checkout-api\\service.yaml"]}`)
 	allowed, err := guard.Inspect(intake.NewCandidate(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if allowed.TargetPath() != "services/checkout-api.md" || allowed.SectionID() != "checkout-api-operation" || allowed.Replacement() != "\ncurrent state\n" {
+	if allowed.TargetPath() != "memories/checkout-api.md" || allowed.SectionID() != "checkout-api-operation" || allowed.Replacement() != "\ncurrent state\n" {
 		t.Fatalf("Inspect() = target %q, section %q, replacement %q", allowed.TargetPath(), allowed.SectionID(), allowed.Replacement())
 	}
 	if got := allowed.SourcePaths(); len(got) != 1 || got[0] != "services/checkout-api/service.yaml" {
@@ -33,12 +33,12 @@ func TestGuardAllowsClosedCreatePageCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte(`{"operation":"create_page","target_path":"parcel-dispatch.md","title":"Parcel Dispatch","body":"Retries use backoff.\n","source_paths":["services/parcel/service.yaml"]}`)
+	raw := []byte(`{"operation":"create_page","target_path":"memories/parcel-dispatch.md","title":"Parcel Dispatch","body":"Retries use backoff.\n","source_paths":["services/parcel/service.yaml"]}`)
 	allowed, err := guard.Inspect(intake.NewCandidate(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if allowed.Operation() != "create_page" || allowed.TargetPath() != "parcel-dispatch.md" || allowed.Title() != "Parcel Dispatch" || allowed.Body() != "Retries use backoff.\n" {
+	if allowed.Operation() != "create_page" || allowed.TargetPath() != "memories/parcel-dispatch.md" || allowed.Title() != "Parcel Dispatch" || allowed.Body() != "Retries use backoff.\n" {
 		t.Fatalf("Inspect() = operation %q, target %q, title %q, body %q", allowed.Operation(), allowed.TargetPath(), allowed.Title(), allowed.Body())
 	}
 	if allowed.SectionID() != "" || allowed.Replacement() != "" {
@@ -51,13 +51,27 @@ func TestGuardAllowsClosedCreateSectionCandidate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte(`{"operation":"create_section","target_path":"services/checkout-api.md","heading":"Failure Modes","body":"Circuit breaker opens.","source_paths":[]}`)
+	raw := []byte(`{"operation":"create_section","target_path":"memories/checkout-api.md","heading":"Failure Modes","body":"Circuit breaker opens.","source_paths":[]}`)
 	allowed, err := guard.Inspect(intake.NewCandidate(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if allowed.Operation() != "create_section" || allowed.Heading() != "Failure Modes" || allowed.Body() != "Circuit breaker opens." || allowed.SectionID() != "" {
 		t.Fatalf("Inspect() = %+v", allowed)
+	}
+}
+
+func TestGuardRejectsTargetsOutsideMemoryDirectory(t *testing.T) {
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, target := range []string{"page.md", "memories/nested/page.md", "proposals/page.md"} {
+		_, err := guard.Inspect(intake.NewCandidate(candidateJSON(t, target, "page", "body", []string{})))
+		var rejection intake.Rejection
+		if !errors.As(err, &rejection) || rejection.Class != "schema" || rejection.Reason != "invalid_path" {
+			t.Fatalf("Inspect(%q) error = %v, want schema:invalid_path", target, err)
+		}
 	}
 }
 
@@ -95,7 +109,7 @@ func TestGuardEnforcesExactByteAndCollectionLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	candidate := map[string]any{
-		"target_path": "a.md", "section_id": "a", "replacement": strings.Repeat("x", 128*1024), "source_paths": []string{},
+		"target_path": "memories/a.md", "section_id": "a", "replacement": strings.Repeat("x", 128*1024), "source_paths": []string{},
 	}
 	raw, _ := json.Marshal(candidate)
 	if _, err := guard.Inspect(intake.NewCandidate(raw)); err != nil {
@@ -107,7 +121,7 @@ func TestGuardEnforcesExactByteAndCollectionLimits(t *testing.T) {
 		t.Fatal("Inspect() accepted replacement over limit")
 	}
 
-	exactPath := strings.Repeat("a", 1021) + ".md"
+	exactPath := "memories/" + strings.Repeat("a", 1012) + ".md"
 	exactSources := make([]string, 16)
 	for i := range exactSources {
 		exactSources[i] = "source"
@@ -125,7 +139,7 @@ func TestGuardEnforcesExactByteAndCollectionLimits(t *testing.T) {
 		t.Fatal("Inspect() accepted too many source paths")
 	}
 
-	base := candidateJSON(t, "a.md", "a", "ok", nil)
+	base := candidateJSON(t, "memories/a.md", "a", "ok", nil)
 	exactCandidate := append(base, bytes.Repeat([]byte(" "), 256*1024-len(base))...)
 	if _, err := guard.Inspect(intake.NewCandidate(exactCandidate)); err != nil {
 		t.Fatalf("Inspect() rejected exact candidate limit: %v", err)

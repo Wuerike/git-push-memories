@@ -14,7 +14,7 @@ import (
 func TestConcurrentAppliesAcrossProcessesYieldOneSuccessAndOneDrift(t *testing.T) {
 	root := newMemoryRoot(t, validPage)
 	repository := openRepository(t, root)
-	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"})
+	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestApplyHelperProcess(t *testing.T) {
 	if err == nil {
 		_, err = repository.Apply(context.Background(), memory.ChangeSet{
 			Target: memory.Target{
-				Path:      "services/checkout-api.md",
+				Path:      "memories/checkout-api.md",
 				SectionID: "checkout-api-operation",
 			},
 			BaselineHash: os.Getenv("GPM_BASELINE_HASH"),

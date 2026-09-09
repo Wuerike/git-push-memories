@@ -429,7 +429,10 @@ func publisherFixture(t *testing.T) (string, proposal.ApplyReceipt, []byte) {
 	}
 	baseline := []byte("# Memory\n<!-- @id: memory -->\n\nold\n")
 	postState := []byte("# Memory\n<!-- @id: memory -->\n\nnew\n")
-	if err := os.WriteFile(filepath.Join(root, "memory.md"), baseline, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "memories"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "memories", "memory.md"), baseline, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "other.txt"), []byte("other\n"), 0o644); err != nil {
@@ -439,13 +442,13 @@ func publisherFixture(t *testing.T) (string, proposal.ApplyReceipt, []byte) {
 		gitCommand(t, root, args...)
 	}
 	head := gitText(t, root, "rev-parse", "HEAD")
-	blob := gitText(t, root, "rev-parse", "HEAD:memory.md")
-	if err := os.WriteFile(filepath.Join(root, "memory.md"), postState, 0o644); err != nil {
+	blob := gitText(t, root, "rev-parse", "HEAD:memories/memory.md")
+	if err := os.WriteFile(filepath.Join(root, "memories", "memory.md"), postState, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return root, proposal.ApplyReceipt{
 		SchemaVersion: 1, ProposalID: "0123456789abcdef0123456789abcdef", Revision: 1, Status: "applied_unpublished", AppliedAt: time.Now().UTC(),
-		MemoryRoot: root, Target: proposal.Target{Path: "memory.md", SectionID: "memory"},
+		MemoryRoot: root, Target: proposal.Target{Path: "memories/memory.md", SectionID: "memory"},
 		Baseline: proposal.Baseline{FileHash: publisherHash(baseline), Head: head, Blob: blob}, PostState: proposal.PostState{FileHash: publisherHash(postState)},
 	}, postState
 }
@@ -461,13 +464,16 @@ func createdPublisherFixture(t *testing.T) (string, proposal.ApplyReceipt, []byt
 	}
 	head := gitText(t, root, "rev-parse", "HEAD")
 	postState := []byte("# Page\n<!-- @id: page -->\n\n## Overview\n<!-- @id: page-overview -->\nBody.\n")
-	if err := os.WriteFile(filepath.Join(root, "page.md"), postState, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "memories"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "memories", "page.md"), postState, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	absent := false
 	return root, proposal.ApplyReceipt{
 		SchemaVersion: 2, ProposalID: "0123456789abcdef0123456789abcdef", Revision: 1, Status: "applied_unpublished", AppliedAt: time.Now().UTC(),
-		MemoryRoot: root, Target: proposal.Target{Path: "page.md", SectionID: "page-overview"},
+		MemoryRoot: root, Target: proposal.Target{Path: "memories/page.md", SectionID: "page-overview"},
 		Baseline: proposal.Baseline{Exists: &absent, Head: head}, PostState: proposal.PostState{FileHash: publisherHash(postState)},
 	}, postState
 }

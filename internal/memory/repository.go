@@ -22,12 +22,25 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var createPagePath = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
+var createPagePath = regexp.MustCompile(`^memories/[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
 var reservedPageNames = map[string]struct{}{
 	"aux": {}, "con": {}, "nul": {}, "prn": {},
 	"com1": {}, "com2": {}, "com3": {}, "com4": {}, "com5": {}, "com6": {}, "com7": {}, "com8": {}, "com9": {},
 	"lpt1": {}, "lpt2": {}, "lpt3": {}, "lpt4": {}, "lpt5": {}, "lpt6": {}, "lpt7": {}, "lpt8": {}, "lpt9": {},
+}
+
+func IsCanonicalPagePath(requestedPath string) bool {
+	canonicalPath, err := canonicalRelativePath(requestedPath)
+	return err == nil && canonicalPath == requestedPath
+}
+
+func IsCreatePagePath(requestedPath string) bool {
+	return createPagePath.MatchString(requestedPath)
+}
+
+func PageID(pagePath string) string {
+	return strings.TrimSuffix(path.Base(pagePath), ".md")
 }
 
 type Repository struct {
@@ -260,6 +273,9 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 		if err != nil || confirmedHead != request.Head {
 			return ErrDrift
 		}
+		if err := ensureMemoryDirectory(int(repository.root.Fd())); err != nil {
+			return fmt.Errorf("create memory directory: %w", err)
+		}
 		if err := durableCreate(int(repository.root.Fd()), targetPath, postState, 0o644, repository.fault); err != nil {
 			return fmt.Errorf("write memory file: %w", err)
 		}
@@ -362,7 +378,7 @@ func validateCreatePageRequest(request CreatePageRequest) (string, string, error
 	if !createPagePath.MatchString(request.TargetPath) {
 		return "", "", ErrInvalidPath
 	}
-	pageID := strings.TrimSuffix(request.TargetPath, ".md")
+	pageID := PageID(request.TargetPath)
 	if _, reserved := reservedPageNames[pageID]; reserved {
 		return "", "", ErrInvalidPath
 	}
@@ -664,7 +680,7 @@ func canonicalRelativePath(requestedPath string) (string, error) {
 		}
 	}
 	clean := path.Clean(normalized)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.Ext(clean) != ".md" {
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.Dir(clean) != "memories" || path.Ext(clean) != ".md" {
 		return "", ErrInvalidPath
 	}
 	return clean, nil

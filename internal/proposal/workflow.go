@@ -52,7 +52,7 @@ func openWorkflow(memoryRoot, stateRoot string, cleanup bool) (*Workflow, error)
 	if err != nil {
 		return nil, err
 	}
-	store, err := newStore(stateAbsolute, cleanup)
+	store, err := newStore(memoryAbsolute, stateAbsolute, cleanup)
 	if err != nil {
 		_ = repository.Close()
 		return nil, err
@@ -61,6 +61,7 @@ func openWorkflow(memoryRoot, stateRoot string, cleanup bool) (*Workflow, error)
 	if cleanup {
 		if err := workflow.reconcileStartup(context.Background()); err != nil {
 			_ = repository.Close()
+			_ = store.close()
 			return nil, err
 		}
 	}
@@ -109,7 +110,12 @@ func within(candidate, root string) bool {
 }
 
 func (workflow *Workflow) Close() error {
-	return workflow.repository.Close()
+	repositoryErr := workflow.repository.Close()
+	storeErr := workflow.store.close()
+	if repositoryErr != nil {
+		return repositoryErr
+	}
+	return storeErr
 }
 
 func (workflow *Workflow) Prepare(ctx context.Context, candidate intake.AllowedCandidate) (View, error) {
@@ -422,7 +428,7 @@ func (workflow *Workflow) reconcileView(ctx context.Context, view View, mode mem
 			return ErrIntegrity
 		}
 		if view.Operation.Type == OperationCreatePage {
-			expectedSectionID := strings.TrimSuffix(view.Operation.Target.Path, ".md") + "-overview"
+			expectedSectionID := memory.PageID(view.Operation.Target.Path) + "-overview"
 			if view.Operation.Target.SectionID != expectedSectionID || allowed.Title() != view.Operation.Title || allowed.Body() != view.Operation.Body {
 				return ErrIntegrity
 			}

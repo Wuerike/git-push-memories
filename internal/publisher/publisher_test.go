@@ -99,7 +99,7 @@ func TestPublishCommitsNewAppliedTargetFromAbsentBaseline(t *testing.T) {
 	if publication.Status != "published" || publication.Parent != receipt.Baseline.Head || publication.Commit == "" {
 		t.Fatalf("Publish() receipt = %+v", publication)
 	}
-	if got := strings.TrimSpace(gitOutput(t, root, "diff-tree", "--no-commit-id", "--name-status", "-r", publication.Commit)); got != "A\tparcel-dispatch.md" {
+	if got := strings.TrimSpace(gitOutput(t, root, "diff-tree", "--no-commit-id", "--name-status", "-r", publication.Commit)); got != "A\tmemories/parcel-dispatch.md" {
 		t.Fatalf("commit change = %q", got)
 	}
 	if got := gitOutput(t, root, "show", publication.Commit+":"+receipt.Target.Path); got != string(postState) {
@@ -254,10 +254,13 @@ func newAppliedRepository(t *testing.T) (string, proposal.ApplyReceipt) {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	target := "memory.md"
+	target := "memories/memory.md"
 	baseline := []byte("# Memory\n<!-- @id: memory -->\n\nold\n")
 	postState := []byte("# Memory\n<!-- @id: memory -->\n\nnew\n")
 	for path, contents := range map[string][]byte{target: baseline, "staged.txt": []byte("staged old\n"), "unstaged.txt": []byte("unstaged old\n")} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, path)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		if err := os.WriteFile(filepath.Join(root, path), contents, 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -305,7 +308,10 @@ func newCreatedRepository(t *testing.T) (string, proposal.ApplyReceipt, []byte) 
 	gitRun(t, root, "commit", "--quiet", "-m", "initial")
 	head := strings.TrimSpace(gitOutput(t, root, "rev-parse", "HEAD"))
 	postState := []byte("# Parcel Dispatch\n<!-- @id: parcel-dispatch -->\n\n## Overview\n<!-- @id: parcel-dispatch-overview -->\nCurrent state.\n")
-	if err := os.WriteFile(filepath.Join(root, "parcel-dispatch.md"), postState, 0o644); err != nil {
+	if err := os.MkdirAll(filepath.Join(root, "memories"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "memories", "parcel-dispatch.md"), postState, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("staged new\n"), 0o644); err != nil {
@@ -318,7 +324,7 @@ func newCreatedRepository(t *testing.T) (string, proposal.ApplyReceipt, []byte) 
 	absent := false
 	return root, proposal.ApplyReceipt{
 		SchemaVersion: 2, ProposalID: "0123456789abcdef0123456789abcdef", Revision: 1, Status: "applied_unpublished", AppliedAt: time.Now().UTC(),
-		MemoryRoot: root, Target: proposal.Target{Path: "parcel-dispatch.md", SectionID: "parcel-dispatch-overview"},
+		MemoryRoot: root, Target: proposal.Target{Path: "memories/parcel-dispatch.md", SectionID: "parcel-dispatch-overview"},
 		Baseline: proposal.Baseline{Exists: &absent, Head: head}, PostState: proposal.PostState{FileHash: hash(postState)},
 	}, postState
 }

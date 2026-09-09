@@ -10,12 +10,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/proposal"
 	"golang.org/x/sys/unix"
 )
@@ -27,7 +27,6 @@ var (
 
 var validProposalID = regexp.MustCompile(`^[0-9a-f]{32}$`)
 var validGitObject = regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`)
-var validCreatedPage = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
 
 type Publisher struct {
 	root      *os.File
@@ -340,10 +339,9 @@ func (publisher *Publisher) validateReceipt(receipt proposal.ApplyReceipt) error
 	validVersion := receipt.SchemaVersion == 1 && receipt.Baseline.Exists == nil || receipt.SchemaVersion == 2 && receipt.Baseline.Exists != nil
 	validBaseline := receiptBaselineExists(receipt.Baseline) && validHash(receipt.Baseline.FileHash) && validGitObject.MatchString(receipt.Baseline.Blob) && receipt.Baseline.FileHash != receipt.PostState.FileHash ||
 		!receiptBaselineExists(receipt.Baseline) && receipt.SchemaVersion == 2 && receipt.Baseline.FileHash == "" && receipt.Baseline.Blob == ""
-	validCreatedTarget := receiptBaselineExists(receipt.Baseline) || validCreatedPage.MatchString(receipt.Target.Path) && receipt.Target.SectionID == strings.TrimSuffix(receipt.Target.Path, ".md")+"-overview"
+	validCreatedTarget := receiptBaselineExists(receipt.Baseline) || memory.IsCreatePagePath(receipt.Target.Path) && receipt.Target.SectionID == memory.PageID(receipt.Target.Path)+"-overview"
 	if !validVersion || receipt.Status != "applied_unpublished" || receipt.Revision != 1 || receipt.AppliedAt.IsZero() || receipt.MemoryRoot != publisher.rootPath ||
-		!validProposalID.MatchString(receipt.ProposalID) || receipt.Target.Path == "" || receipt.Target.SectionID == "" || path.Ext(receipt.Target.Path) != ".md" ||
-		path.Clean(receipt.Target.Path) != receipt.Target.Path || path.IsAbs(receipt.Target.Path) || receipt.Target.Path == ".." || strings.HasPrefix(receipt.Target.Path, "../") || strings.Contains(receipt.Target.Path, "\\") || hasControl(receipt.Target.Path) ||
+		!validProposalID.MatchString(receipt.ProposalID) || receipt.Target.Path == "" || receipt.Target.SectionID == "" || !memory.IsCanonicalPagePath(receipt.Target.Path) || hasControl(receipt.Target.Path) ||
 		!validBaseline || !validCreatedTarget || !validHash(receipt.PostState.FileHash) || !validGitObject.MatchString(receipt.Baseline.Head) {
 		return proposal.ErrIntegrity
 	}

@@ -14,7 +14,7 @@ import (
 )
 
 func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
-	memoryRoot := newGitRoot(t, map[string]string{"services/checkout-api.md": memoryPage})
+	memoryRoot := newGitRoot(t, map[string]string{"memories/checkout-api.md": memoryPage})
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if _, err := config.Save(memoryRoot); err != nil {
@@ -31,7 +31,7 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose_replace",
 		Arguments: map[string]any{
-			"target_path":  "services/checkout-api.md",
+			"target_path":  "memories/checkout-api.md",
 			"section_id":   "checkout-api-operation",
 			"replacement":  "\n- timeout: cinco segundos\n- owner: team-a\n",
 			"source_paths": []string{"services/checkout.go"},
@@ -56,7 +56,7 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 	if !strings.Contains(string(output), `"id":"`+response.Data.ID+`"`) || !strings.Contains(string(output), `"status":"pending"`) {
 		t.Fatalf("proposal show output = %s", output)
 	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "services/checkout-api.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories/checkout-api.md"))
 	if err != nil || string(contents) != memoryPage {
 		t.Fatalf("memory changed before apply: err = %v", err)
 	}

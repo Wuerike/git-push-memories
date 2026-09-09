@@ -11,7 +11,10 @@ import (
 
 func TestApplyLeavesBaselineWhenAtomicWriterFails(t *testing.T) {
 	root := t.TempDir()
-	filePath := filepath.Join(root, "page.md")
+	filePath := filepath.Join(root, "memories", "page.md")
+	if err := os.Mkdir(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	source := []byte("# Page\n<!-- @id: page -->\n## Leaf\n<!-- @id: leaf -->\nold\n")
 	if err := os.WriteFile(filePath, source, 0o644); err != nil {
 		t.Fatal(err)
@@ -35,7 +38,7 @@ func TestApplyLeavesBaselineWhenAtomicWriterFails(t *testing.T) {
 			}
 
 			_, err = repository.Apply(context.Background(), ChangeSet{
-				Target:       Target{Path: "page.md", SectionID: "leaf"},
+				Target:       Target{Path: "memories/page.md", SectionID: "leaf"},
 				BaselineHash: hash(source),
 				Replacement:  "new\n",
 			})
@@ -49,7 +52,7 @@ func TestApplyLeavesBaselineWhenAtomicWriterFails(t *testing.T) {
 			if string(got) != string(source) {
 				t.Fatal("Apply() changed the baseline before rename")
 			}
-			entries, readErr := os.ReadDir(root)
+			entries, readErr := os.ReadDir(filepath.Join(root, "memories"))
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
@@ -78,7 +81,10 @@ func TestNewRemovesControlledInterruptedTemporaries(t *testing.T) {
 
 func TestApplyTreatsRenameAsCommitPointWhenLaterStepFails(t *testing.T) {
 	root := t.TempDir()
-	filePath := filepath.Join(root, "page.md")
+	filePath := filepath.Join(root, "memories", "page.md")
+	if err := os.Mkdir(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	source := []byte("# Page\n<!-- @id: page -->\n## Leaf\n<!-- @id: leaf -->\nold\n")
 	if err := os.WriteFile(filePath, source, 0o644); err != nil {
 		t.Fatal(err)
@@ -96,7 +102,7 @@ func TestApplyTreatsRenameAsCommitPointWhenLaterStepFails(t *testing.T) {
 		return nil
 	}
 	_, err = repository.Apply(context.Background(), ChangeSet{
-		Target:       Target{Path: "page.md", SectionID: "leaf"},
+		Target:       Target{Path: "memories/page.md", SectionID: "leaf"},
 		BaselineHash: hash(source),
 		Replacement:  "new\n",
 	})
@@ -115,7 +121,10 @@ func TestApplyTreatsRenameAsCommitPointWhenLaterStepFails(t *testing.T) {
 
 func TestApplyDoesNotOverwriteEditMadeImmediatelyBeforeRename(t *testing.T) {
 	root := t.TempDir()
-	filePath := filepath.Join(root, "page.md")
+	filePath := filepath.Join(root, "memories", "page.md")
+	if err := os.Mkdir(filepath.Dir(filePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	source := []byte("# Page\n<!-- @id: page -->\n## Leaf\n<!-- @id: leaf -->\nold\n")
 	if err := os.WriteFile(filePath, source, 0o644); err != nil {
 		t.Fatal(err)
@@ -132,7 +141,7 @@ func TestApplyDoesNotOverwriteEditMadeImmediatelyBeforeRename(t *testing.T) {
 		}
 		return nil
 	}
-	_, err = repository.Apply(context.Background(), ChangeSet{Target: Target{Path: "page.md", SectionID: "leaf"}, BaselineHash: hash(source), Replacement: "new\n"})
+	_, err = repository.Apply(context.Background(), ChangeSet{Target: Target{Path: "memories/page.md", SectionID: "leaf"}, BaselineHash: hash(source), Replacement: "new\n"})
 	if !errors.Is(err, ErrDrift) {
 		t.Fatalf("Apply() error = %v, want ErrDrift", err)
 	}
@@ -157,7 +166,7 @@ func TestCreatePageFaultsPreserveAbsenceOrRecoverPostState(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer repository.Close()
-			preview, err := repository.PreviewCreatePage(context.Background(), CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "Body."})
+			preview, err := repository.PreviewCreatePage(context.Background(), CreatePageRequest{TargetPath: "memories/page.md", Title: "Page", Body: "Body."})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -169,13 +178,13 @@ func TestCreatePageFaultsPreserveAbsenceOrRecoverPostState(t *testing.T) {
 				return nil
 			}
 			request := ReconcileCreatePageRequest{
-				CreatePageRequest: CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "Body."},
+				CreatePageRequest: CreatePageRequest{TargetPath: "memories/page.md", Title: "Page", Body: "Body."},
 				PostStateHash:     preview.PostStateHash, Head: preview.Head, Mode: ApplyBaseline,
 			}
 			if _, err := repository.ReconcileCreatePage(context.Background(), request); !errors.Is(err, writeFailure) {
 				t.Fatalf("ReconcileCreatePage() error = %v, want injected failure", err)
 			}
-			_, statErr := os.Stat(filepath.Join(root, "page.md"))
+			_, statErr := os.Stat(filepath.Join(root, "memories", "page.md"))
 			if stage < writeRenamed && !errors.Is(statErr, os.ErrNotExist) {
 				t.Fatalf("target exists before rename: %v", statErr)
 			}

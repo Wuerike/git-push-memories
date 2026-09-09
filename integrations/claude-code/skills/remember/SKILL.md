@@ -15,22 +15,23 @@ Handle one fact only because the user explicitly invoked `/remember`.
 
 | Search result | Choices |
 |---|---|
-| no related page | create a root page; cancel |
-| related page, no suitable leaf section | create a section there; create a root page; cancel |
-| related leaf section | replace that section; create a section there; create a root page; cancel |
+| no related page | create a memory page; cancel |
+| related page, no suitable leaf section | create a section there; create a memory page; cancel |
+| related leaf section | replace that section; create a section there; create a memory page; cancel |
 | fact already represented by current content | cancel; replace only if the user explicitly wants different current wording |
 
 Search is guidance, not authoritative duplicate or contradiction detection. When results are ambiguous, explain the ambiguity and offer cancel without selecting an operation.
 
-4. Prepare the selected operation in memory. For replace, include the complete resulting body of the existing leaf section. For create page, use a root-level lowercase kebab-case filename, title, and body. For create section, use the existing page path, heading, and body. Include only canonical code `source_paths` that support the fact. Never construct anchors or section IDs.
+4. Prepare the selected operation in memory. For replace, include the complete resulting body of the existing leaf section. For create page, use `memories/<lowercase-kebab-case>.md`, title, and body. For create section, use the existing `memories/*.md` page path, heading, and body. Include only canonical code `source_paths` that support the fact. Never construct anchors or section IDs.
 5. Show the operation, target path, existing section ID for replace, title or heading for create, body, and source paths. Require an explicit confirmation to create the proposal.
 6. After confirmation, call exactly one matching proposal tool. A cancellation, ambiguity, insufficient budget, missing MCP server, or tool error ends the flow without another proposal call or fallback write.
-7. Return the proposal ID, revision, operation, target, and diff summary. Then give the human these next steps:
+7. Return the proposal ID, proposal branch, revision, operation, target, and diff summary. Explain that the branch is local until explicitly pushed. Then give the human these next steps:
 
 ```bash
 gpm proposal show <proposal-id>
+git -C <memory-repository> push -u origin <proposal-branch>
 gpm proposal apply <proposal-id> --revision <revision>
 gpm proposal publish <proposal-id>
 ```
 
-Apply and publish remain human CLI actions. The proposal call receives only its closed operation fields; prompt, response, transcript, session ID, and private reasoning remain outside tool arguments and durable evidence.
+Pushing the proposal branch, apply, and publish remain human actions. The proposal branch is for durable review and is not merged into the current branch directly. The proposal call receives only its closed operation fields; prompt, response, transcript, session ID, and private reasoning remain outside tool arguments and durable evidence.

@@ -20,7 +20,7 @@ func TestApplyDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 	outsideBefore := fingerprint(t, outsideRoot)
 	indexBefore := fingerprint(t, filepath.Join(memoryRoot, ".git", "index"))
 	objectsBefore := fingerprint(t, filepath.Join(memoryRoot, ".git", "objects"))
-	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "services/checkout-api.md"})
+	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,14 +48,14 @@ func TestApplyDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 	if got := fingerprint(t, filepath.Join(memoryRoot, ".git", "objects")); got != objectsBefore {
 		t.Fatal("Apply() modified Git objects")
 	}
-	entries, err := os.ReadDir(filepath.Join(memoryRoot, "services"))
+	entries, err := os.ReadDir(filepath.Join(memoryRoot, "memories"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 || entries[0].Name() != "checkout-api.md" {
 		t.Fatalf("temporary files remain after Apply(): %v", entries)
 	}
-	info, err := os.Stat(filepath.Join(memoryRoot, "services", "checkout-api.md"))
+	info, err := os.Stat(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 	if err != nil {
 		t.Fatal(err)
 	}

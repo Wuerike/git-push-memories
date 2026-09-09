@@ -115,7 +115,7 @@ func TestMCPDoesNotExposeInvalidRootPath(t *testing.T) {
 func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
 	configure(t, memoryRoot)
-	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
 func TestProposalShowAndRejectCommands(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
 	cfg := configure(t, memoryRoot)
-	pagePath := filepath.Join(memoryRoot, "services", "checkout-api.md")
+	pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
 	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestProposalShowAndRejectCommands(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	allowed, err := guard.Inspect(intake.NewCandidate([]byte(`{"target_path":"services/checkout-api.md","section_id":"checkout-api-operation","replacement":"\nnew\n","source_paths":[]}`)))
+	allowed, err := guard.Inspect(intake.NewCandidate([]byte(`{"target_path":"memories/checkout-api.md","section_id":"checkout-api-operation","replacement":"\nnew\n","source_paths":[]}`)))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,6 @@ import (
 	"os"
 	"path"
 	"sort"
-	"strings"
 )
 
 func (repository *Repository) MarkdownPaths(ctx context.Context) ([]string, error) {
@@ -25,11 +24,14 @@ func (repository *Repository) MarkdownPaths(ctx context.Context) ([]string, erro
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			if entry.IsDir() && excludedBrowseDirectory(entry.Name()) {
+			if entry.IsDir() {
+				if filePath == "." || filePath == "memories" {
+					return nil
+				}
 				return fs.SkipDir
 			}
-			if entry.Type().IsRegular() && path.Ext(filePath) == ".md" {
-				paths = append(paths, strings.TrimPrefix(filePath, "./"))
+			if entry.Type().IsRegular() && path.Dir(filePath) == "memories" && path.Ext(filePath) == ".md" {
+				paths = append(paths, filePath)
 			}
 			return nil
 		})
@@ -39,13 +41,4 @@ func (repository *Repository) MarkdownPaths(ctx context.Context) ([]string, erro
 	}
 	sort.Strings(paths)
 	return paths, nil
-}
-
-func excludedBrowseDirectory(name string) bool {
-	switch name {
-	case ".git", ".git-push-memories", "proposals", "receipts":
-		return true
-	default:
-		return false
-	}
 }

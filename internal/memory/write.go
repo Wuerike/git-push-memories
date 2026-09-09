@@ -49,6 +49,21 @@ func durableCreate(rootFD int, relativePath string, content []byte, mode os.File
 	return durableWrite(rootFD, relativePath, content, mode, "", true, fault)
 }
 
+func ensureMemoryDirectory(rootFD int) error {
+	if err := unix.Mkdirat(rootFD, "memories", 0o755); err != nil && !errors.Is(err, unix.EEXIST) {
+		return err
+	}
+	directoryFD, err := unix.Openat2(rootFD, "memories", &unix.OpenHow{
+		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	})
+	if err != nil {
+		return err
+	}
+	defer unix.Close(directoryFD)
+	return unix.Fsync(rootFD)
+}
+
 func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileMode, expectedHash string, create bool, fault writeFault) error {
 	parentPath, base := path.Split(relativePath)
 	parentPath = strings.TrimSuffix(parentPath, "/")
