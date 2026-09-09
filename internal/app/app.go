@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -11,9 +10,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/claudecode"
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
-	"github.com/Wuerike/git-push-memories/internal/proposal"
 	"github.com/Wuerike/git-push-memories/internal/protocol"
-	"github.com/Wuerike/git-push-memories/internal/publisher"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 )
 
@@ -21,10 +18,6 @@ const usage = `Usage:
   gpm setup <memory-root>
   gpm mcp
   gpm retrieve <query> --budget-bytes <n>
-  gpm proposal show <proposal-id>
-  gpm proposal reject <proposal-id> --reason <reason>
-  gpm proposal apply <proposal-id> --revision <n>
-  gpm proposal publish <proposal-id>
   gpm version
   gpm help
 `
@@ -48,8 +41,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runMCP(ctx, args[1:], stdin, stdout, stderr, version)
 	case "retrieve":
 		return runRetrieve(ctx, args[1:], stdout, stderr)
-	case "proposal":
-		return runProposal(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n%s", args[0], usage)
 		return 2
@@ -68,100 +59,6 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 	}
 	fmt.Fprintf(stdout, "Configured memory at %s. Use /remember <fact> in any Claude Code session.\n", result.MemoryRoot)
 	return 0
-}
-
-func runProposal(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) < 2 || (args[0] != "show" && args[0] != "reject" && args[0] != "apply" && args[0] != "publish") {
-		fmt.Fprintln(stderr, "proposal requires show, reject, apply, or publish and a proposal ID")
-		return 2
-	}
-	action, id := args[0], args[1]
-	flags := flag.NewFlagSet("proposal "+action, flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	reason := flags.String("reason", "", "closed rejection reason")
-	revision := flags.Int("revision", 0, "exact proposal revision to apply")
-	if err := flags.Parse(args[2:]); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 || ((action == "show" || action == "publish") && (*reason != "" || *revision != 0)) ||
-		(action == "reject" && *revision != 0) || (action == "apply" && (*reason != "" || *revision < 1)) {
-		fmt.Fprintln(stderr, "invalid proposal arguments")
-		return 2
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	var workflow *proposal.Workflow
-	if action == "show" {
-		workflow, err = proposal.OpenReadOnly(cfg.MemoryRoot, cfg.StateRoot)
-	} else {
-		workflow, err = proposal.New(cfg.MemoryRoot, cfg.StateRoot)
-	}
-	if err != nil {
-		fmt.Fprintln(stderr, "proposal workflow could not initialize")
-		return 1
-	}
-	defer workflow.Close()
-	var response any
-	if action == "show" {
-		response, err = workflow.Review(id)
-	} else if action == "reject" {
-		response, err = workflow.Reject(id, *reason)
-	} else if action == "apply" {
-		response, err = workflow.Apply(ctx, id, *revision)
-	} else {
-		response, err = publishProposal(ctx, workflow, cfg.MemoryRoot, cfg.StateRoot, id)
-	}
-	if err != nil {
-		switch {
-		case errors.Is(err, proposal.ErrInvalidReason):
-			fmt.Fprintln(stderr, "invalid_rejection_reason")
-		case errors.Is(err, proposal.ErrNotFound):
-			fmt.Fprintln(stderr, "proposal_not_found")
-		case errors.Is(err, proposal.ErrWrongRevision):
-			fmt.Fprintln(stderr, "proposal_revision_mismatch")
-		case errors.Is(err, proposal.ErrTerminal):
-			fmt.Fprintln(stderr, "proposal_already_terminal")
-		case errors.Is(err, proposal.ErrIntegrity):
-			fmt.Fprintln(stderr, "proposal_integrity_failed")
-		case errors.Is(err, publisher.ErrDrift):
-			fmt.Fprintln(stderr, "publication_drift")
-		case errors.Is(err, publisher.ErrLocked):
-			fmt.Fprintln(stderr, "git_index_locked")
-		default:
-			fmt.Fprintln(stderr, "proposal_operation_failed")
-		}
-		return 1
-	}
-	if err := json.NewEncoder(stdout).Encode(protocol.NewEnvelope(response)); err != nil {
-		fmt.Fprintln(stderr, "write proposal response failed")
-		return 1
-	}
-	return 0
-}
-
-func publishProposal(ctx context.Context, workflow *proposal.Workflow, memoryRoot, stateRoot, id string) (proposal.PublicationReceipt, error) {
-	if published, err := workflow.Published(id); err == nil {
-		return published, nil
-	} else if !errors.Is(err, proposal.ErrNotFound) {
-		return proposal.PublicationReceipt{}, err
-	}
-	applied, err := workflow.Applied(id)
-	if err != nil {
-		return proposal.PublicationReceipt{}, err
-	}
-	driver, err := publisher.New(memoryRoot, stateRoot)
-	if err != nil {
-		return proposal.PublicationReceipt{}, err
-	}
-	defer driver.Close()
-	published, err := driver.Publish(ctx, applied)
-	if err != nil {
-		return proposal.PublicationReceipt{}, err
-	}
-	return workflow.RecordPublication(ctx, published)
 }
 
 func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
@@ -186,7 +83,7 @@ func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	retriever, err := retrieval.New(cfg.MemoryRoot)
+	retriever, err := retrieval.New(cfg.MemoryRoot, cfg.MemoryCategories...)
 	if err != nil {
 		fmt.Fprintln(stderr, "retrieval could not initialize")
 		return 1

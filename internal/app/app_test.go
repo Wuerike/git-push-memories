@@ -16,8 +16,6 @@ import (
 	"time"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
-	"github.com/Wuerike/git-push-memories/internal/intake"
-	"github.com/Wuerike/git-push-memories/internal/proposal"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -115,7 +113,7 @@ func TestMCPDoesNotExposeInvalidRootPath(t *testing.T) {
 func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
 	configure(t, memoryRoot)
-	pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
+	pagePath := filepath.Join(memoryRoot, "memories", "domains", "checkout-api.md")
 	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -155,78 +153,6 @@ func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
 	}
 }
 
-func TestProposalShowAndRejectCommands(t *testing.T) {
-	memoryRoot := newGitRoot(t, "memory")
-	cfg := configure(t, memoryRoot)
-	pagePath := filepath.Join(memoryRoot, "memories", "checkout-api.md")
-	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	page := "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\nold\n"
-	if err := os.WriteFile(pagePath, []byte(page), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, memoryRoot, "config", "user.name", "Test")
-	runGit(t, memoryRoot, "config", "user.email", "test@example.com")
-	runGit(t, memoryRoot, "add", ".")
-	runGit(t, memoryRoot, "commit", "--quiet", "-m", "initial")
-	stateRoot := cfg.StateRoot
-	guard, err := intake.New()
-	if err != nil {
-		t.Fatal(err)
-	}
-	allowed, err := guard.Inspect(intake.NewCandidate([]byte(`{"target_path":"memories/checkout-api.md","section_id":"checkout-api-operation","replacement":"\nnew\n","source_paths":[]}`)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	workflow, err := proposal.New(memoryRoot, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err := workflow.Prepare(context.Background(), allowed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := workflow.Close(); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	showArgs := []string{"proposal", "show", view.ID}
-	if exitCode := Run(context.Background(), showArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), view.ID) {
-		t.Fatalf("proposal show exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	rejectArgs := []string{"proposal", "reject", view.ID, "--reason", "incorrect"}
-	if exitCode := Run(context.Background(), rejectArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"rejected"`) {
-		t.Fatalf("proposal reject exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
-	}
-
-	workflow, err = proposal.New(memoryRoot, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	view, err = workflow.Prepare(context.Background(), allowed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := workflow.Close(); err != nil {
-		t.Fatal(err)
-	}
-	stdout.Reset()
-	stderr.Reset()
-	applyArgs := []string{"proposal", "apply", view.ID, "--revision", "1"}
-	if exitCode := Run(context.Background(), applyArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"applied_unpublished"`) {
-		t.Fatalf("proposal apply exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
-	}
-	stdout.Reset()
-	stderr.Reset()
-	publishArgs := []string{"proposal", "publish", view.ID}
-	if exitCode := Run(context.Background(), publishArgs, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 || !strings.Contains(stdout.String(), `"status":"published"`) {
-		t.Fatalf("proposal publish exit = %d, stdout = %q, stderr = %q", exitCode, stdout.String(), stderr.String())
-	}
-}
-
 func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	memoryRoot := newGitRoot(t, "memory")
 	cfg := configure(t, memoryRoot)
@@ -255,7 +181,7 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 5 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_propose_create_page" || result.Tools[2].Name != "memory_propose_create_section" || result.Tools[3].Name != "memory_propose_replace" || result.Tools[4].Name != "memory_search" {
+	if len(result.Tools) != 3 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_propose" || result.Tools[2].Name != "memory_search" {
 		t.Fatalf("ListTools() = %+v, want only read and proposal tools", result.Tools)
 	}
 	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -314,13 +240,17 @@ func newGitRoot(t *testing.T, name string) string {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	command := exec.Command("git", "init", "--quiet", root)
+	command := exec.Command("git", "init", "--quiet", "--initial-branch=main", root)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, output)
 	}
 	runGit(t, root, "config", "user.name", "Test")
 	runGit(t, root, "config", "user.email", "test@example.com")
-	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte("{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\", \"decision\"]\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "gpm.json")
+	runGit(t, root, "commit", "--quiet", "-m", "initial")
 	return root
 }
 

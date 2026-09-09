@@ -383,7 +383,7 @@ func validateCreatePageRequest(request CreatePageRequest) (string, string, error
 		return "", "", ErrInvalidPath
 	}
 	if len(pageID) > 64 || len(pageID+"-overview") > 64 {
-		return "", "", fmt.Errorf("%w: generated section ID exceeds limit", ErrInvalidID)
+		return "", "", ErrGeneratedIDTooLong
 	}
 	if request.Title == "" || len(request.Title) > 256 || !utf8.ValidString(request.Title) || hasDisallowedControl(request.Title, false) || strings.ContainsAny(request.Title, "\r\n") ||
 		strings.Contains(request.Title, "<!-- @id:") || hasUnresolvedMerge([]byte(request.Title)) {
@@ -442,8 +442,11 @@ func renderSection(source []byte, parsed []markdown.Section, heading, body strin
 	}
 	slug := slugHeading(heading)
 	sectionID := pageID + "-" + slug
-	if slug == "" || len(sectionID) > 64 {
+	if slug == "" {
 		return nil, "", ErrInvalidID
+	}
+	if len(sectionID) > 64 {
+		return nil, "", ErrGeneratedIDTooLong
 	}
 	for _, section := range parsed {
 		if section.AnchorID == sectionID {
@@ -680,7 +683,7 @@ func canonicalRelativePath(requestedPath string) (string, error) {
 		}
 	}
 	clean := path.Clean(normalized)
-	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || path.Dir(clean) != "memories" || path.Ext(clean) != ".md" {
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || !strings.HasPrefix(clean, "memories/") || path.Ext(clean) != ".md" {
 		return "", ErrInvalidPath
 	}
 	return clean, nil

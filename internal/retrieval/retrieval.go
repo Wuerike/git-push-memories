@@ -13,14 +13,26 @@ import (
 
 type Retriever struct {
 	repository *memory.Repository
+	categories map[string]struct{}
 }
 
-func New(memoryRoot string) (*Retriever, error) {
+func New(memoryRoot string, memoryCategories ...string) (*Retriever, error) {
+	if len(memoryCategories) == 0 {
+		return nil, ErrInvalidScope
+	}
 	repository, err := memory.NewReadOnly(memoryRoot)
 	if err != nil {
 		return nil, err
 	}
-	return &Retriever{repository: repository}, nil
+	categories := make(map[string]struct{}, len(memoryCategories))
+	for _, category := range memoryCategories {
+		if category == "" || strings.Contains(category, "/") {
+			_ = repository.Close()
+			return nil, ErrInvalidScope
+		}
+		categories[category] = struct{}{}
+	}
+	return &Retriever{repository: repository, categories: categories}, nil
 }
 
 func (retriever *Retriever) Close() error {
@@ -95,7 +107,7 @@ func (retriever *Retriever) Expand(ctx context.Context, handle Handle, budget in
 	if budget <= 0 {
 		return ContextBundle{}, ErrInvalidBudget
 	}
-	if handle.Path == "" || handle.SectionID == "" || handle.ContentHash == "" {
+	if handle.Path == "" || handle.SectionID == "" || handle.ContentHash == "" || !retriever.authoritativePath(handle.Path) {
 		return ContextBundle{}, ErrStaleHandle
 	}
 	snapshot, err := retriever.repository.Inspect(ctx, memory.Scope{Path: handle.Path})
@@ -172,7 +184,11 @@ func canonicalScope(requested string) (string, error) {
 }
 
 func (retriever *Retriever) markdownPaths(ctx context.Context, prefix string) ([]string, error) {
-	allPaths, err := retriever.repository.MarkdownPaths(ctx)
+	categories := make([]string, 0, len(retriever.categories))
+	for category := range retriever.categories {
+		categories = append(categories, category)
+	}
+	allPaths, err := retriever.repository.MarkdownPaths(ctx, categories)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +199,19 @@ func (retriever *Retriever) markdownPaths(ctx context.Context, prefix string) ([
 		}
 	}
 	return paths, nil
+}
+
+func (retriever *Retriever) authoritativePath(filePath string) bool {
+	if !strings.HasPrefix(filePath, "memories/") || path.Ext(filePath) != ".md" {
+		return false
+	}
+	relative := strings.TrimPrefix(filePath, "memories/")
+	category, remainder, found := strings.Cut(relative, "/")
+	if !found || remainder == "" {
+		return false
+	}
+	_, configured := retriever.categories[category]
+	return configured
 }
 
 func fitContextBundleToBudget(items []Item, budget int) (ContextBundle, error) {

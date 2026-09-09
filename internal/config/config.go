@@ -6,23 +6,54 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
 const schemaVersion = 1
 
 type Config struct {
-	MemoryRoot string `json:"memory_root"`
-	StateRoot  string `json:"-"`
+	MemoryRoot       string   `json:"memory_root"`
+	StateRoot        string   `json:"-"`
+	MemoryCategories []string `json:"-"`
 }
 
 type fileConfig struct {
 	SchemaVersion int    `json:"schema_version"`
 	MemoryRoot    string `json:"memory_root"`
 }
+
+type repositoryConfig struct {
+	SchemaVersion    int      `json:"schema_version"`
+	MemoryCategories []string `json:"memory_categories"`
+}
+
+func (config Config) IsMemoryPath(requested string) bool {
+	if requested == "" || strings.Contains(requested, "\\") || path.IsAbs(requested) || path.Clean(requested) != requested || path.Ext(requested) != ".md" {
+		return false
+	}
+	relative, found := strings.CutPrefix(requested, "memories/")
+	if !found {
+		return false
+	}
+	category, remainder, found := strings.Cut(relative, "/")
+	if !found || remainder == "" {
+		return false
+	}
+	for _, configured := range config.MemoryCategories {
+		if category == configured {
+			return true
+		}
+	}
+	return false
+}
+
+var categoryPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 func Load() (Config, error) {
 	path, err := Path()
@@ -58,7 +89,38 @@ func Resolve(memoryRoot string) (Config, error) {
 	if pathsOverlap(canonical, stateRoot) || insideGitWorktree(stateRoot) {
 		return Config{}, errors.New("state root must be outside Git worktrees")
 	}
-	return Config{MemoryRoot: canonical, StateRoot: stateRoot}, nil
+	categories, err := loadRepositoryConfig(canonical)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{MemoryRoot: canonical, StateRoot: stateRoot, MemoryCategories: categories}, nil
+}
+
+func loadRepositoryConfig(root string) ([]string, error) {
+	contents, err := os.ReadFile(filepath.Join(root, "gpm.json"))
+	if err != nil {
+		return nil, errors.New("repository configuration is invalid")
+	}
+	var stored repositoryConfig
+	decoder := json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&stored); err != nil || stored.SchemaVersion != schemaVersion || len(stored.MemoryCategories) == 0 {
+		return nil, errors.New("repository configuration is invalid")
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, errors.New("repository configuration is invalid")
+	}
+	seen := make(map[string]struct{}, len(stored.MemoryCategories))
+	for _, category := range stored.MemoryCategories {
+		if !categoryPattern.MatchString(category) {
+			return nil, errors.New("repository configuration is invalid")
+		}
+		if _, exists := seen[category]; exists {
+			return nil, errors.New("repository configuration is invalid")
+		}
+		seen[category] = struct{}{}
+	}
+	return append([]string(nil), stored.MemoryCategories...), nil
 }
 
 func Save(memoryRoot string) (Config, error) {

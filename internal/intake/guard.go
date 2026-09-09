@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
-
-	"github.com/Wuerike/git-push-memories/internal/memory"
 )
 
 const (
@@ -19,8 +17,6 @@ const (
 	maxPathBytes        = 1024
 	maxSourcePaths      = 16
 )
-
-var sectionIDPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 var normativePatterns = []string{
 	`-----BEGIN[ A-Z0-9_-]*PRIVATE KEY-----`,
@@ -57,122 +53,77 @@ func newGuard(extraPatterns []string) (*Guard, error) {
 	return &Guard{detectors: detectors}, nil
 }
 
-func (guard *Guard) Inspect(candidate Candidate) (AllowedCandidate, error) {
+func (guard *Guard) InspectProposal(candidate ProposalCandidate) (AllowedProposal, error) {
 	if len(candidate.raw) > maxCandidateBytes {
-		return AllowedCandidate{}, rejection("limits", "limit_exceeded")
+		return AllowedProposal{}, rejection("limits", "limit_exceeded")
 	}
 	if !utf8.Valid(candidate.raw) {
-		return AllowedCandidate{}, rejection("schema", "invalid_encoding")
+		return AllowedProposal{}, rejection("schema", "invalid_encoding")
 	}
 	fields, err := decodeClosedObject(candidate.raw)
 	if err != nil {
-		return AllowedCandidate{}, err
+		return AllowedProposal{}, err
+	}
+	if !hasExactly(fields, "title", "suggested_action", "target", "knowledge", "source_paths") && !hasExactly(fields, "title", "suggested_action", "knowledge", "source_paths") {
+		return AllowedProposal{}, rejection("schema", "invalid_candidate")
 	}
 	var decoded struct {
-		Operation   string
-		TargetPath  string
-		SectionID   string
-		Replacement string
-		Title       string
-		Heading     string
-		Body        string
-		SourcePaths []string
+		Title           string
+		SuggestedAction string
+		Target          string
+		Knowledge       string
+		SourcePaths     []string
 	}
-	if raw, exists := fields["operation"]; exists {
-		if err := decodeRawField(raw, &decoded.Operation); err != nil {
-			return AllowedCandidate{}, err
+	for name, target := range map[string]any{
+		"title": &decoded.Title, "suggested_action": &decoded.SuggestedAction, "knowledge": &decoded.Knowledge, "source_paths": &decoded.SourcePaths,
+	} {
+		if err := decodeField(fields, name, target); err != nil {
+			return AllowedProposal{}, err
 		}
-	} else {
-		decoded.Operation = OperationReplaceSection
 	}
-	if err := decodeField(fields, "target_path", &decoded.TargetPath); err != nil {
-		return AllowedCandidate{}, err
+	if raw, exists := fields["target"]; exists {
+		if err := decodeRawField(raw, &decoded.Target); err != nil {
+			return AllowedProposal{}, err
+		}
 	}
-	switch decoded.Operation {
-	case OperationReplaceSection:
-		if !hasExactly(fields, "target_path", "section_id", "replacement", "source_paths") && !hasExactly(fields, "operation", "target_path", "section_id", "replacement", "source_paths") {
-			return AllowedCandidate{}, rejection("schema", "invalid_candidate")
-		}
-		if err := decodeField(fields, "section_id", &decoded.SectionID); err != nil {
-			return AllowedCandidate{}, err
-		}
-		if err := decodeField(fields, "replacement", &decoded.Replacement); err != nil {
-			return AllowedCandidate{}, err
-		}
-	case OperationCreatePage:
-		if !hasExactly(fields, "operation", "target_path", "title", "body", "source_paths") {
-			return AllowedCandidate{}, rejection("schema", "invalid_candidate")
-		}
-		if err := decodeField(fields, "title", &decoded.Title); err != nil {
-			return AllowedCandidate{}, err
-		}
-		if err := decodeField(fields, "body", &decoded.Body); err != nil {
-			return AllowedCandidate{}, err
-		}
-	case OperationCreateSection:
-		if !hasExactly(fields, "operation", "target_path", "heading", "body", "source_paths") {
-			return AllowedCandidate{}, rejection("schema", "invalid_candidate")
-		}
-		if err := decodeField(fields, "heading", &decoded.Heading); err != nil {
-			return AllowedCandidate{}, err
-		}
-		if err := decodeField(fields, "body", &decoded.Body); err != nil {
-			return AllowedCandidate{}, err
-		}
-	default:
-		return AllowedCandidate{}, rejection("schema", "invalid_operation")
+	if decoded.SuggestedAction != "create" && decoded.SuggestedAction != "update" && decoded.SuggestedAction != "remove" {
+		return AllowedProposal{}, rejection("schema", "invalid_action")
 	}
-	if err := decodeField(fields, "source_paths", &decoded.SourcePaths); err != nil {
-		return AllowedCandidate{}, err
+	if decoded.Title == "" || decoded.Knowledge == "" || len(decoded.Title) > maxHeadingBytes || len(decoded.Knowledge) > maxReplacementBytes || len(decoded.Target) > maxPathBytes || len(decoded.SourcePaths) > maxSourcePaths {
+		return AllowedProposal{}, rejection("limits", "limit_exceeded")
 	}
-	if len(decoded.TargetPath) > maxPathBytes || len(decoded.Replacement) > maxReplacementBytes || len(decoded.Body) > maxReplacementBytes || len(decoded.Title) > maxHeadingBytes || len(decoded.Heading) > maxHeadingBytes || len(decoded.SourcePaths) > maxSourcePaths {
-		return AllowedCandidate{}, rejection("limits", "limit_exceeded")
-	}
+	values := []string{decoded.Title, decoded.SuggestedAction, decoded.Target, decoded.Knowledge}
 	for _, sourcePath := range decoded.SourcePaths {
 		if len(sourcePath) > maxPathBytes {
-			return AllowedCandidate{}, rejection("limits", "limit_exceeded")
+			return AllowedProposal{}, rejection("limits", "limit_exceeded")
 		}
+		values = append(values, sourcePath)
 	}
-	if invalidControls(decoded.Operation, false) || invalidControls(decoded.TargetPath, false) || invalidControls(decoded.SectionID, false) || invalidControls(decoded.Replacement, true) || invalidControls(decoded.Title, false) || invalidControls(decoded.Heading, false) || invalidControls(decoded.Body, true) {
-		return AllowedCandidate{}, rejection("privacy", "control_character")
-	}
-	for _, sourcePath := range decoded.SourcePaths {
-		if invalidControls(sourcePath, false) {
-			return AllowedCandidate{}, rejection("privacy", "control_character")
+	for index, value := range values {
+		allowLayout := index == 3
+		if invalidControls(value, allowLayout) {
+			return AllowedProposal{}, rejection("privacy", "control_character")
 		}
-	}
-	rawValues := []string{decoded.Operation, decoded.TargetPath, decoded.SectionID, decoded.Replacement, decoded.Title, decoded.Heading, decoded.Body}
-	rawValues = append(rawValues, decoded.SourcePaths...)
-	for _, value := range rawValues {
 		if guard.sensitive(value) {
-			return AllowedCandidate{}, rejection("privacy", "sensitive_content")
+			return AllowedProposal{}, rejection("privacy", "sensitive_content")
 		}
 	}
-	canonicalTarget, err := validatePath(decoded.TargetPath)
-	if err != nil {
-		return AllowedCandidate{}, err
-	}
-	if !memory.IsCanonicalPagePath(canonicalTarget) || decoded.Operation == OperationCreatePage && !memory.IsCreatePagePath(canonicalTarget) {
-		return AllowedCandidate{}, rejection("schema", "invalid_path")
+	if decoded.Target != "" {
+		decoded.Target, err = validatePath(decoded.Target)
+		if err != nil {
+			return AllowedProposal{}, err
+		}
 	}
 	canonicalSources := make([]string, len(decoded.SourcePaths))
-	for i, sourcePath := range decoded.SourcePaths {
-		canonicalSources[i], err = validatePath(sourcePath)
+	for index, sourcePath := range decoded.SourcePaths {
+		canonicalSources[index], err = validatePath(sourcePath)
 		if err != nil {
-			return AllowedCandidate{}, err
+			return AllowedProposal{}, err
 		}
 	}
-	for _, value := range append([]string{canonicalTarget}, canonicalSources...) {
-		if guard.sensitive(value) {
-			return AllowedCandidate{}, rejection("privacy", "sensitive_content")
-		}
-	}
-	if decoded.Operation == OperationReplaceSection && (!sectionIDPattern.MatchString(decoded.SectionID) || len(decoded.SectionID) > 64) {
-		return AllowedCandidate{}, rejection("schema", "invalid_section_id")
-	}
-	return AllowedCandidate{
-		operation: decoded.Operation, targetPath: canonicalTarget, sectionID: decoded.SectionID,
-		replacement: decoded.Replacement, title: decoded.Title, heading: decoded.Heading, body: decoded.Body, sourcePaths: canonicalSources,
+	return AllowedProposal{
+		title: decoded.Title, suggestedAction: decoded.SuggestedAction, target: decoded.Target,
+		knowledge: decoded.Knowledge, sourcePaths: canonicalSources,
 	}, nil
 }
 
@@ -183,7 +134,7 @@ func decodeClosedObject(raw []byte) (map[string]json.RawMessage, error) {
 		return nil, rejection("schema", "invalid_candidate")
 	}
 	fields := make(map[string]json.RawMessage, 7)
-	allowed := map[string]bool{"operation": true, "target_path": true, "section_id": true, "replacement": true, "title": true, "heading": true, "body": true, "source_paths": true}
+	allowed := map[string]bool{"title": true, "suggested_action": true, "target": true, "knowledge": true, "source_paths": true}
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {

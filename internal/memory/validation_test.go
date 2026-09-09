@@ -36,7 +36,7 @@ func TestInspectRejectsPathsOutsideMemoryRoot(t *testing.T) {
 	}
 }
 
-func TestInspectAcceptsOnlyDirectMemoryPages(t *testing.T) {
+func TestInspectAcceptsNestedMemoryPages(t *testing.T) {
 	root := newEmptyMemoryRoot(t)
 	for _, name := range []string{"memories/page.md", "memories/nested/page.md", "page.md"} {
 		filePath := filepath.Join(root, filepath.FromSlash(name))
@@ -51,13 +51,13 @@ func TestInspectAcceptsOnlyDirectMemoryPages(t *testing.T) {
 	runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "pages")
 	repository := openRepository(t, root)
 
-	if _, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/page.md"}); err != nil {
-		t.Fatalf("Inspect() rejected canonical page: %v", err)
-	}
-	for _, requestedPath := range []string{"page.md", "memories/nested/page.md"} {
-		if _, err := repository.Inspect(context.Background(), memory.Scope{Path: requestedPath}); !errors.Is(err, memory.ErrInvalidPath) {
-			t.Fatalf("Inspect(%q) error = %v, want ErrInvalidPath", requestedPath, err)
+	for _, requestedPath := range []string{"memories/page.md", "memories/nested/page.md"} {
+		if _, err := repository.Inspect(context.Background(), memory.Scope{Path: requestedPath}); err != nil {
+			t.Fatalf("Inspect(%q) rejected memory page: %v", requestedPath, err)
 		}
+	}
+	if _, err := repository.Inspect(context.Background(), memory.Scope{Path: "page.md"}); !errors.Is(err, memory.ErrInvalidPath) {
+		t.Fatalf("Inspect(page.md) error = %v, want ErrInvalidPath", err)
 	}
 }
 

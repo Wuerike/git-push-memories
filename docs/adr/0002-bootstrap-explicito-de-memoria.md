@@ -1,6 +1,6 @@
 # Bootstrap explícito de memória sem Markdown manual
 
-Status: accepted
+Status: proposal lifecycle superseded by ADR 0004
 
 A Fase 2 deve conseguir criar a primeira página de memória em um Git worktree local já inicializado e com `HEAD`, mesmo quando ele não contém arquivos Markdown. O produto expõe operações estreitas de criação de página e seção, renderiza schema e anchors deterministicamente e mantém proposta, revisão humana, apply humano e publicação humana como etapas distintas; não expõe um changeset genérico nem exige que a pessoa escreva Markdown ou IDs internos.
 

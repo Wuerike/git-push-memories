@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -27,8 +28,11 @@ func TestSaveAndLoadGlobalConfiguration(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded != saved || loaded.MemoryRoot != memoryRoot || loaded.StateRoot != wantState {
+	if loaded.MemoryRoot != saved.MemoryRoot || loaded.StateRoot != saved.StateRoot || !slices.Equal(loaded.MemoryCategories, saved.MemoryCategories) || loaded.MemoryRoot != memoryRoot || loaded.StateRoot != wantState {
 		t.Fatalf("Load() = %+v, want memory %q and state %q", loaded, memoryRoot, wantState)
+	}
+	if strings.Join(loaded.MemoryCategories, ",") != "domains,decision" {
+		t.Fatalf("Load() categories = %v, want domains and decision", loaded.MemoryCategories)
 	}
 	info, err := os.Stat(filepath.Join(configHome, "git-push-memories", "config.json"))
 	if err != nil {
@@ -53,6 +57,57 @@ func TestResolveRequiresCommittedGitRoot(t *testing.T) {
 	}
 	if _, err := Resolve(t.TempDir()); err == nil || !strings.Contains(err.Error(), "with a commit") {
 		t.Fatalf("Resolve() error = %v", err)
+	}
+}
+
+func TestResolveRejectsInvalidRepositoryConfiguration(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	tests := []struct {
+		name     string
+		contents string
+	}{
+		{name: "missing", contents: ""},
+		{name: "malformed", contents: "{"},
+		{name: "unknown field", contents: `{"schema_version":1,"memory_categories":["domains"],"extra":true}`},
+		{name: "wrong schema", contents: `{"schema_version":2,"memory_categories":["domains"]}`},
+		{name: "empty categories", contents: `{"schema_version":1,"memory_categories":[]}`},
+		{name: "empty category", contents: `{"schema_version":1,"memory_categories":[""]}`},
+		{name: "non kebab category", contents: `{"schema_version":1,"memory_categories":["Domain Rules"]}`},
+		{name: "duplicate category", contents: `{"schema_version":1,"memory_categories":["domains","domains"]}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			root := newGitRoot(t, test.name)
+			configPath := filepath.Join(root, "gpm.json")
+			if test.contents == "" {
+				if err := os.Remove(configPath); err != nil {
+					t.Fatal(err)
+				}
+			} else if err := os.WriteFile(configPath, []byte(test.contents), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Resolve(root); err == nil || !strings.Contains(err.Error(), "repository configuration is invalid") {
+				t.Fatalf("Resolve() error = %v, want invalid repository configuration", err)
+			}
+		})
+	}
+}
+
+func TestConfigRecognizesOnlyConfiguredMemoryPaths(t *testing.T) {
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	cfg, err := Resolve(newGitRoot(t, "memory-paths"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, valid := range []string{"memories/domains/charge.md", "memories/decision/platform/retry.md"} {
+		if !cfg.IsMemoryPath(valid) {
+			t.Fatalf("IsMemoryPath(%q) = false", valid)
+		}
+	}
+	for _, invalid := range []string{"memories/charge.md", "memories/notes/charge.md", "memories/domains/charge.txt", "memories/domains/../decision/charge.md", "../memories/domains/charge.md"} {
+		if cfg.IsMemoryPath(invalid) {
+			t.Fatalf("IsMemoryPath(%q) = true", invalid)
+		}
 	}
 }
 
@@ -105,7 +160,11 @@ func newGitRoot(t *testing.T, name string) string {
 	runGit(t, root, "init", "--quiet")
 	runGit(t, root, "config", "user.name", "Test")
 	runGit(t, root, "config", "user.email", "test@example.com")
-	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial "+name)
+	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte("{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\", \"decision\"]\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "gpm.json")
+	runGit(t, root, "commit", "--quiet", "-m", "initial "+name)
 	return root
 }
 

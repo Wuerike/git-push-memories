@@ -2,7 +2,7 @@
 name: remember
 description: Search memory and create one explicit proposal for a fact after human confirmation.
 disable-model-invocation: true
-allowed-tools: mcp__git-push-memories__memory_search, mcp__git-push-memories__memory_expand, mcp__git-push-memories__memory_propose_create_page, mcp__git-push-memories__memory_propose_create_section, mcp__git-push-memories__memory_propose_replace
+allowed-tools: mcp__git-push-memories__memory_search, mcp__git-push-memories__memory_expand, mcp__git-push-memories__memory_propose
 argument-hint: "[fact to remember]"
 ---
 <!-- managed-by: git-push-memories -->
@@ -11,27 +11,24 @@ Handle one fact only because the user explicitly invoked `/remember`.
 
 1. Extract a short retrieval query from the fact and call `memory_search` once with `budget_bytes: 2048`. Keep the fact, query, results, and reasoning in memory only.
 2. Expand every handle returned by the bounded search response, in rank order, up to a maximum of three, with `budget_bytes: 4096`. Do not stop before those returned candidates are classified.
-3. Present exactly the applicable choices from this table and ask the user to select one or cancel:
+3. Use the search only to suggest how a future curator should treat the fact:
 
-| Search result | Choices |
+| Search result | Suggested action and target |
 |---|---|
-| no related page | create a memory page; cancel |
-| related page, no suitable leaf section | create a section there; create a memory page; cancel |
-| related leaf section | replace that section; create a section there; create a memory page; cancel |
-| fact already represented by current content | cancel; replace only if the user explicitly wants different current wording |
+| no related memory | `create`, with no target unless the user supplied one |
+| related memory should change | `update`, targeting its canonical Markdown path |
+| related memory is obsolete | `remove`, targeting its canonical Markdown path |
+| fact already represented by current content | cancel |
 
-Search is guidance, not authoritative duplicate or contradiction detection. When results are ambiguous, explain the ambiguity and offer cancel without selecting an operation.
+Search is guidance, not authoritative duplicate or contradiction detection. When results are ambiguous, explain the ambiguity and leave the target empty rather than inventing one.
 
-4. Prepare the selected operation in memory. For replace, include the complete resulting body of the existing leaf section. For create page, use `memories/<lowercase-kebab-case>.md`, title, and body. For create section, use the existing `memories/*.md` page path, heading, and body. Include only canonical code `source_paths` that support the fact. Never construct anchors or section IDs.
-5. Show the operation, target path, existing section ID for replace, title or heading for create, body, and source paths. Require an explicit confirmation to create the proposal.
-6. After confirmation, call exactly one matching proposal tool. A cancellation, ambiguity, insufficient budget, missing MCP server, or tool error ends the flow without another proposal call or fallback write.
-7. Return the proposal ID, proposal branch, revision, operation, target, and diff summary. Explain that the branch is local until explicitly pushed. Then give the human these next steps:
+4. Prepare a concise `title`, one `suggested_action` (`create`, `update`, or `remove`), an optional canonical `target`, the self-contained `knowledge`, and only canonical code `source_paths` that support it. Do not include prompts, responses, transcript references, session IDs, or private reasoning.
+5. Show those exact fields and require explicit confirmation to create the proposal.
+6. After confirmation, call `memory_propose` exactly once. Cancellation, insufficient budget, missing MCP server, or any tool error ends the flow without another proposal call or fallback write. If the tool returns `not_on_main`, explain that the memory repository must be checked out on exactly `main` before a new explicit attempt.
+7. Return the proposal ID, Markdown path, and commit. Explain that the proposal is now committed locally on `main`; pushing remains a human action:
 
 ```bash
-gpm proposal show <proposal-id>
-git -C <memory-repository> push -u origin <proposal-branch>
-gpm proposal apply <proposal-id> --revision <revision>
-gpm proposal publish <proposal-id>
+git -C <memory-repository> push
 ```
 
-Pushing the proposal branch, apply, and publish remain human actions. The proposal branch is for durable review and is not merged into the current branch directly. The proposal call receives only its closed operation fields; prompt, response, transcript, session ID, and private reasoning remain outside tool arguments and durable evidence.
+The proposal call receives only its closed fields; all session-private material remains outside tool arguments and durable evidence. Curating proposals into canonical memory is a separate flow.

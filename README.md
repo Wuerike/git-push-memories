@@ -117,11 +117,7 @@ make verify
 
 Depois do primeiro download da toolchain e das dependências, `make verify-offline` repete a matriz sem acessar o proxy de módulos. Ambos os comandos impõem Go 1.25.12, inclusive quando outra versão está instalada localmente.
 
-O [E2E sintetico da Fase 2](docs/phase-2/e2e-synthetic.md) executa o fluxo completo e uma passagem separada de privacidade, preservando evidencias sanitizadas em `.artifacts/phase-2/`.
-
-O [experimento controlado de valor](docs/phase-2/value-experiment-protocol.md) usa somente fixtures sinteticos versionados e sessoes autenticadas isoladas para comparar tres pares com e sem memoria.
-
-O [relatorio do experimento](docs/phase-2/value-experiment-report.md) registra a decisao pre-registrada `revisar o fluxo`: correcao foi preservada, mas o limiar por pares nao foi atingido com consistencia suficiente para iniciar a Fase 3.
+Os documentos do [E2E sintetico da Fase 2](docs/phase-2/e2e-synthetic.md) e do [experimento controlado de valor](docs/phase-2/value-experiment-protocol.md) preservam evidencia historica do fluxo substituido pela ADR 0004. Os runners congelados foram removidos junto com o lifecycle antigo; o commit registrado em cada protocolo continua sendo o ponto reproduzivel.
 
 ## Instalacao
 
@@ -139,7 +135,16 @@ make install
 
 Por padrao, o binario e instalado em `~/.local/bin`. Use `make install INSTALL_DIR=/outro/diretorio` para escolher outro destino.
 
-Configure uma unica vez um repositorio de memoria ja clonado e com pelo menos um commit:
+O repositorio de memoria deve ter pelo menos um commit, estar em `main` para criar propostas e conter `gpm.json` na raiz:
+
+```json
+{
+  "schema_version": 1,
+  "memory_categories": ["domains", "decision"]
+}
+```
+
+As categorias devem ser unicas e usar lowercase kebab-case. Configure o repositorio uma unica vez:
 
 ```bash
 gpm setup /path/to/memory-repository
@@ -147,17 +152,17 @@ gpm setup /path/to/memory-repository
 
 O setup registra o MCP e instala `/remember` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode executar `/remember <fato>`.
 
-Memorias canonicas sao arquivos diretos em `memories/*.md`. Outros Markdown do repositorio, como `README.md`, e subdiretorios de `memories/` sao ignorados pela busca. Propostas ficam em `proposals/<id>.json` dentro de branches locais `gpm/proposal/<id>`, sem alterar a branch, o indice ou o worktree atuais; essas branches podem ser enviadas explicitamente ao remoto para backup ou revisao.
+Memorias canonicas ficam em `memories/<categoria-configurada>/**/*.md`. Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. Propostas ficam em `proposals/<id>-<slug>.md` e recebem um commit path-scoped diretamente na `main`, sem consumir staging alheio.
 
-O servidor publica cinco tools:
+O servidor publica tres tools:
 
-- `memory_search`, para buscar excerpts em `memories/*.md` dentro de um orçamento em bytes;
-- `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto.
-- `memory_propose_create_page`, `memory_propose_create_section` e `memory_propose_replace`, para criar propostas estruturadas em branches Git dedicadas sem aplicar Markdown nem alterar o checkout atual.
+- `memory_search`, para buscar secoes nas categorias configuradas dentro de um orçamento em bytes;
+- `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
+- `memory_propose`, para registrar uma proposta Markdown com titulo, acao sugerida, target opcional, conhecimento e paths de fonte.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
 
-O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado; apply e publish permanecem comandos humanos da CLI.
+O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica.
 
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
@@ -165,23 +170,14 @@ A mesma recuperação também pode ser chamada diretamente pela CLI:
 gpm retrieve "checkout timeout team" --budget-bytes 2048
 ```
 
-Propostas pendentes podem ser revisadas, rejeitadas ou aplicadas pela CLI com `proposal show`, `proposal reject` e `proposal apply`. Apply exige a revisão exata, por exemplo:
+Depois da confirmacao em `/remember`, a proposta ja esta legivel no worktree e commitada localmente em `main`. O produto nao acessa remotos; o push permanece humano:
 
 ```bash
-gpm proposal show <proposal-id>
-git -C <memory-repository> push -u origin gpm/proposal/<proposal-id>
-gpm proposal apply <proposal-id> --revision 1
+git -C <memory-repository> show --stat HEAD
+git -C <memory-repository> push
 ```
 
-O push e opcional e permanece uma acao humana; o produto nao acessa remotos. A branch de proposta nao deve ser mesclada diretamente na branch corrente.
-
-O apply deixa a atualização como `applied_unpublished`. A publicação local cria um commit limitado ao target sem consumir staging alheio:
-
-```bash
-gpm proposal publish <proposal-id>
-```
-
-O Publisher não acessa remotos. O commit recebe o trailer `Git-Push-Memories-Proposal: <id>/<revision>` e falhas recuperáveis preservam o estado `applied_unpublished`.
+A curadoria que transforma propostas em memoria canonica e um fluxo separado e ainda nao faz parte desta entrega.
 
 ## Licença
 

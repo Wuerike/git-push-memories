@@ -28,9 +28,9 @@ const initialMemory = `# checkout-api
 
 func TestRetrieveFindsOperationSection(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"memories/checkout-api.md": initialMemory,
+		"memories/domains/checkout-api.md": initialMemory,
 	})
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestRetrieveFindsOperationSection(t *testing.T) {
 		t.Fatalf("Retrieve() returned %d items, want 1", len(bundle.Items))
 	}
 	item := bundle.Items[0]
-	if item.Handle.Path != "memories/checkout-api.md" || item.Handle.SectionID != "checkout-api-operation" {
+	if item.Handle.Path != "memories/domains/checkout-api.md" || item.Handle.SectionID != "checkout-api-operation" {
 		t.Fatalf("Retrieve() handle = %+v", item.Handle)
 	}
 	if item.Heading != "Operacao" || item.Score != 3 {
@@ -63,15 +63,17 @@ func TestRetrieveFindsOperationSection(t *testing.T) {
 	}
 }
 
-func TestRetrieveSearchesOnlyDirectMemoryPages(t *testing.T) {
+func TestRetrieveSearchesRecursivelyOnlyInConfiguredCategories(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"README.md":                       "",
-		"root.md":                         initialMemory,
-		"memories/checkout-api.md":        initialMemory,
-		"memories/nested/checkout-api.md": initialMemory,
-		"proposals/draft.md":              "not a memory page",
+		"README.md":                        "",
+		"root.md":                          initialMemory,
+		"memories/checkout-api.md":         initialMemory,
+		"memories/domains/checkout-api.md": initialMemory,
+		"memories/decision/platform/checkout-api.md": initialMemory,
+		"memories/notes/checkout-api.md":             initialMemory,
+		"proposals/draft.md":                         "not a memory page",
 	})
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains", "decision")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,16 +83,21 @@ func TestRetrieveSearchesOnlyDirectMemoryPages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/checkout-api.md" {
-		t.Fatalf("Retrieve() = %+v, want only memories/checkout-api.md", bundle)
+	got := make([]string, len(bundle.Items))
+	for index, item := range bundle.Items {
+		got[index] = item.Handle.Path
+	}
+	want := []string{"memories/decision/platform/checkout-api.md", "memories/domains/checkout-api.md"}
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("Retrieve() paths = %v, want %v", got, want)
 	}
 }
 
 func TestExpandWorksAfterRestart(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"memories/checkout-api.md": initialMemory,
+		"memories/domains/checkout-api.md": initialMemory,
 	})
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +110,7 @@ func TestExpandWorksAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restarted, err := retrieval.New(root)
+	restarted, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +133,8 @@ func TestExpandWorksAfterRestart(t *testing.T) {
 }
 
 func TestRetrieveUsesCurrentStateAndStalesOldHandle(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root)
+	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,10 +182,10 @@ func TestRetrieveTieOrderIsDeterministic(t *testing.T) {
 		return fmt.Sprintf("# %s\n<!-- @id: %s -->\n\n## First\n<!-- @id: %s -->\ncommon\n\n## Second\n<!-- @id: %s -->\ncommon\n", name, name, firstID, secondID)
 	}
 	root := newMemoryRoot(t, map[string]string{
-		"memories/b.md": page("b", "b-first", "b-second"),
-		"memories/a.md": page("a", "a-first", "a-second"),
+		"memories/domains/b.md": page("b", "b-first", "b-second"),
+		"memories/domains/a.md": page("a", "a-first", "a-second"),
 	})
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +199,7 @@ func TestRetrieveTieOrderIsDeterministic(t *testing.T) {
 	for i, item := range bundle.Items {
 		got[i] = item.Handle.Path + ":" + item.Handle.SectionID
 	}
-	want := []string{"memories/a.md:a-first", "memories/a.md:a-second", "memories/b.md:b-first", "memories/b.md:b-second"}
+	want := []string{"memories/domains/a.md:a-first", "memories/domains/a.md:a-second", "memories/domains/b.md:b-first", "memories/domains/b.md:b-second"}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("Retrieve() order = %v, want %v", got, want)
 	}
@@ -200,10 +207,10 @@ func TestRetrieveTieOrderIsDeterministic(t *testing.T) {
 
 func TestRetrieveReportsWholeResultTruncation(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"memories/a.md": "# a\n<!-- @id: a -->\n\n## One\n<!-- @id: a-one -->\ncommon first\n",
-		"memories/b.md": "# b\n<!-- @id: b -->\n\n## Two\n<!-- @id: b-two -->\ncommon second\n",
+		"memories/domains/a.md": "# a\n<!-- @id: a -->\n\n## One\n<!-- @id: a-one -->\ncommon first\n",
+		"memories/domains/b.md": "# b\n<!-- @id: b -->\n\n## Two\n<!-- @id: b-two -->\ncommon second\n",
 	})
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +229,7 @@ func TestRetrieveReportsWholeResultTruncation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !limited.Truncated || len(limited.Items) != 1 || limited.Items[0].Handle.Path != "memories/a.md" {
+	if !limited.Truncated || len(limited.Items) != 1 || limited.Items[0].Handle.Path != "memories/domains/a.md" {
 		t.Fatalf("Retrieve() limited bundle = %+v", limited)
 	}
 	encoded, err := json.Marshal(limited)
@@ -236,20 +243,20 @@ func TestRetrieveReportsWholeResultTruncation(t *testing.T) {
 
 func TestRetrieveScopesToCanonicalPathPrefix(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"memories/a.md": "# a\n<!-- @id: a -->\n\n## One\n<!-- @id: a-one -->\ncommon\n",
-		"memories/b.md": "# b\n<!-- @id: b -->\n\n## Two\n<!-- @id: b-two -->\ncommon\n",
+		"memories/domains/a.md": "# a\n<!-- @id: a -->\n\n## One\n<!-- @id: a-one -->\ncommon\n",
+		"memories/domains/b.md": "# b\n<!-- @id: b -->\n\n## Two\n<!-- @id: b-two -->\ncommon\n",
 	})
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = retriever.Close() })
 
-	bundle, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "memories/a.md"}, 2048)
+	bundle, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "memories/domains/a.md"}, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/a.md" {
+	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/domains/a.md" {
 		t.Fatalf("Retrieve() scoped bundle = %+v", bundle)
 	}
 	if _, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "../services"}, 2048); !errors.Is(err, retrieval.ErrInvalidScope) {
@@ -258,8 +265,8 @@ func TestRetrieveScopesToCanonicalPathPrefix(t *testing.T) {
 }
 
 func TestRetrieveAndExpandEnforceExactJSONBudget(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root)
+	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -298,16 +305,16 @@ func TestRetrieveAndExpandEnforceExactJSONBudget(t *testing.T) {
 
 func TestRetrievalIsReadOnlyAndExcludesReservedState(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"memories/checkout-api.md":                         initialMemory,
-		"proposals/private.md":                             "not valid memory",
-		"receipts/private.md":                              "not valid memory",
-		".git-push-memories/private.md":                    "not valid memory",
-		"notes.txt":                                        "timeout team",
-		".git-push-memories-0123456789abcdef.tmp":          "interrupted",
-		"memories/.git-push-memories-abcdefabcdef1234.tmp": "interrupted",
+		"memories/domains/checkout-api.md":                         initialMemory,
+		"proposals/private.md":                                     "not valid memory",
+		"receipts/private.md":                                      "not valid memory",
+		".git-push-memories/private.md":                            "not valid memory",
+		"notes.txt":                                                "timeout team",
+		".git-push-memories-0123456789abcdef.tmp":                  "interrupted",
+		"memories/domains/.git-push-memories-abcdefabcdef1234.tmp": "interrupted",
 	})
 	before := treeFingerprint(t, root)
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -330,8 +337,8 @@ func TestRetrievalIsReadOnlyAndExcludesReservedState(t *testing.T) {
 }
 
 func TestRetrievalPinsMemoryRootAcrossPathReplacement(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root)
+	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -349,22 +356,22 @@ func TestRetrievalPinsMemoryRootAcrossPathReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/checkout-api.md" {
+	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/domains/checkout-api.md" {
 		t.Fatalf("Retrieve() followed replacement root: %+v", bundle)
 	}
 }
 
 func TestRetrieveDoesNotTraverseReservedDirectories(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"memories/checkout-api.md": initialMemory,
-		"proposals/private.md":     "not valid memory",
+		"memories/domains/checkout-api.md": initialMemory,
+		"proposals/private.md":             "not valid memory",
 	})
 	proposals := filepath.Join(root, "proposals")
 	if err := os.Chmod(proposals, 0); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.Chmod(proposals, 0o755) })
-	retriever, err := retrieval.New(root)
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,8 +387,8 @@ func TestRetrieveDoesNotTraverseReservedDirectories(t *testing.T) {
 }
 
 func TestExpandTreatsMissingTargetAsStaleHandle(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root)
+	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
+	retriever, err := retrieval.New(root, "domains")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +397,7 @@ func TestExpandTreatsMissingTargetAsStaleHandle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Remove(filepath.Join(root, "memories", "checkout-api.md")); err != nil {
+	if err := os.Remove(filepath.Join(root, "memories", "domains", "checkout-api.md")); err != nil {
 		t.Fatal(err)
 	}
 

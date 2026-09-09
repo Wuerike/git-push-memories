@@ -31,12 +31,12 @@ func TestCorpusMarkersCanBeInjectedWithoutEnteringProductionPolicy(t *testing.T)
 	}
 	for _, marker := range markers {
 		raw, err := json.Marshal(map[string]any{
-			"target_path": "memories/a.md", "section_id": "a", "replacement": marker, "source_paths": []string{},
+			"title": "Fact", "suggested_action": "create", "knowledge": marker, "source_paths": []string{},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = guard.Inspect(NewCandidate(raw))
+		_, err = guard.InspectProposal(NewProposalCandidate(raw))
 		var rejection Rejection
 		if !errors.As(err, &rejection) || rejection.Reason != "sensitive_content" {
 			t.Fatalf("Inspect() did not classify fixture marker as sensitive")

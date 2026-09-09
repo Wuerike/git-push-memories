@@ -54,10 +54,14 @@ func newMemoryRoot(t *testing.T) string {
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, root, "init", "--quiet")
+	runGit(t, root, "init", "--quiet", "--initial-branch=main")
 	runGit(t, root, "config", "user.name", "Test")
 	runGit(t, root, "config", "user.email", "test@example.com")
-	runGit(t, root, "commit", "--quiet", "--allow-empty", "-m", "initial")
+	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte("{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\"]\n}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", "gpm.json")
+	runGit(t, root, "commit", "--quiet", "-m", "initial")
 	return root
 }
 

@@ -1,41 +1,27 @@
 package intake
 
-const (
-	OperationReplaceSection = "replace_section_content"
-	OperationCreatePage     = "create_page"
-	OperationCreateSection  = "create_section"
-)
-
-type Candidate struct {
+type ProposalCandidate struct {
 	raw []byte
 }
 
-func NewCandidate(raw []byte) Candidate {
-	return Candidate{raw: append([]byte(nil), raw...)}
+func NewProposalCandidate(raw []byte) ProposalCandidate {
+	return ProposalCandidate{raw: append([]byte(nil), raw...)}
 }
 
-type AllowedCandidate struct {
-	operation   string
-	targetPath  string
-	sectionID   string
-	replacement string
-	title       string
-	heading     string
-	body        string
-	sourcePaths []string
+type AllowedProposal struct {
+	title           string
+	suggestedAction string
+	target          string
+	knowledge       string
+	sourcePaths     []string
 }
 
-func (candidate AllowedCandidate) Operation() string   { return candidate.operation }
-func (candidate AllowedCandidate) TargetPath() string  { return candidate.targetPath }
-func (candidate AllowedCandidate) SectionID() string   { return candidate.sectionID }
-func (candidate AllowedCandidate) Replacement() string { return candidate.replacement }
-func (candidate AllowedCandidate) Title() string       { return candidate.title }
-func (candidate AllowedCandidate) Heading() string     { return candidate.heading }
-func (candidate AllowedCandidate) Body() string        { return candidate.body }
-func (candidate AllowedCandidate) SourcePaths() []string {
-	result := make([]string, len(candidate.sourcePaths))
-	copy(result, candidate.sourcePaths)
-	return result
+func (proposal AllowedProposal) Title() string           { return proposal.title }
+func (proposal AllowedProposal) SuggestedAction() string { return proposal.suggestedAction }
+func (proposal AllowedProposal) Target() string          { return proposal.target }
+func (proposal AllowedProposal) Knowledge() string       { return proposal.knowledge }
+func (proposal AllowedProposal) SourcePaths() []string {
+	return append([]string(nil), proposal.sourcePaths...)
 }
 
 type Rejection struct {

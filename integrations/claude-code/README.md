@@ -1,6 +1,6 @@
 # Claude Code
 
-Esta integracao usa MCP sobre stdio e o skill explicito `/remember`. Ela nao instala hooks, nao captura sessoes e nao concede ao Claude Code autoridade para apply ou publish.
+Esta integracao usa MCP sobre stdio e o skill explicito `/remember`. Ela nao instala hooks, nao captura sessoes e nao altera memoria canonica durante a captura.
 
 ## Configurar
 
@@ -10,7 +10,7 @@ Depois de instalar a CLI, execute uma vez:
 gpm setup /absolute/path/memory-repository
 ```
 
-O repositorio deve ser um worktree Git ja clonado e possuir pelo menos um commit. O comando:
+O repositorio deve ser um worktree Git ja clonado, possuir pelo menos um commit e conter um `gpm.json` valido com `memory_categories`. A criacao de propostas exige que o checkout esteja exatamente em `main`. O comando:
 
 - salva o memory root na configuracao global do usuario;
 - deriva um state root privado em `$XDG_STATE_HOME/git-push-memories` ou `~/.local/state/git-push-memories`;
@@ -22,11 +22,11 @@ O setup e idempotente. Execute-o novamente depois de mover o binario ou para sel
 O repositorio usa dois namespaces versionaveis:
 
 ```text
-memories/*.md       memoria canonica pesquisavel
-proposals/*.json    propostas em branches gpm/proposal/<id>
+memories/<categoria-configurada>/**/*.md    memoria canonica pesquisavel
+proposals/<id>-<slug>.md                    inbox de propostas
 ```
 
-Arquivos Markdown fora de `memories/`, incluindo `README.md`, nao participam da recuperacao. Paginas dentro de subdiretorios de `memories/` tambem nao sao consideradas.
+Markdown fora das categorias configuradas, incluindo `README.md`, arquivos diretos em `memories/` e o inbox `proposals/`, nao participa da recuperacao.
 
 ## Usar
 
@@ -36,25 +36,21 @@ Em qualquer sessao do Claude Code:
 /remember <fato>
 ```
 
-O fluxo pesquisa a memoria, expande ate tres candidatos, oferece somente operacoes aplicaveis e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como `proposals/<id>.json` em uma branch local dedicada sem alterar o checkout atual. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
+O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como Markdown diretamente em `main`; memoria canonica e staging alheio permanecem inalterados. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
 
 O servidor expoe somente:
 
 - `memory_search`;
 - `memory_expand`;
-- `memory_propose_create_page`;
-- `memory_propose_create_section`;
-- `memory_propose_replace`.
+- `memory_propose`.
 
-Apply e publish continuam disponiveis somente na CLI:
+O commit local pode ser revisado e enviado com Git comum:
 
 ```bash
-gpm proposal show <proposal-id>
-git -C <memory-repository> push -u origin gpm/proposal/<proposal-id>
-gpm proposal apply <proposal-id> --revision <revision>
-gpm proposal publish <proposal-id>
+git -C <memory-repository> show --stat HEAD
+git -C <memory-repository> push
 ```
 
-O push da branch de proposta e opcional e sempre humano; o produto nao acessa remotos. A branch preserva a proposta para backup ou revisao, mas nao deve ser mesclada diretamente na branch corrente. Apply e publish continuam operando pelo ID da proposta.
+O push e sempre humano e o produto nao acessa remotos. A curadoria posterior do inbox e um fluxo separado.
 
 Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.

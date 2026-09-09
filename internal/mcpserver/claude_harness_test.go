@@ -13,8 +13,8 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
-	memoryRoot := newGitRoot(t, map[string]string{"memories/checkout-api.md": memoryPage})
+func TestClaudeAdapterCommitsProposalToMemoryRepository(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	if _, err := config.Save(memoryRoot); err != nil {
@@ -29,18 +29,19 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_propose_replace",
+		Name: "memory_propose",
 		Arguments: map[string]any{
-			"target_path":  "memories/checkout-api.md",
-			"section_id":   "checkout-api-operation",
-			"replacement":  "\n- timeout: cinco segundos\n- owner: team-a\n",
-			"source_paths": []string{"services/checkout.go"},
+			"title":            "Update checkout timeout",
+			"suggested_action": "update",
+			"target":           "memories/domains/checkout-api.md",
+			"knowledge":        "The checkout timeout is five seconds.",
+			"source_paths":     []string{"services/checkout.go"},
 		},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	response := decodeProposalResponse(t, result)
+	response := decodeInboxResponse(t, result)
 	if result.IsError || response.Data == nil {
 		t.Fatalf("proposal result = %+v, response = %+v", result, response)
 	}
@@ -48,21 +49,17 @@ func TestClaudeAdapterPersistsProposalForNewCLIProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	show := exec.Command(binary, "proposal", "show", response.Data.ID)
-	output, err := show.CombinedOutput()
-	if err != nil {
-		t.Fatalf("proposal show: %v: %s", err, output)
+	proposalContents, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(response.Data.Path)))
+	if err != nil || !strings.Contains(string(proposalContents), "# Update checkout timeout") {
+		t.Fatalf("proposal Markdown = %q, %v", proposalContents, err)
 	}
-	if !strings.Contains(string(output), `"id":"`+response.Data.ID+`"`) || !strings.Contains(string(output), `"status":"pending"`) {
-		t.Fatalf("proposal show output = %s", output)
-	}
-	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories/checkout-api.md"))
+	contents, err := os.ReadFile(filepath.Join(memoryRoot, "memories/domains/checkout-api.md"))
 	if err != nil || string(contents) != memoryPage {
-		t.Fatalf("memory changed before apply: err = %v", err)
+		t.Fatalf("proposal changed canonical memory: err = %v", err)
 	}
 	status := exec.Command("git", "-C", memoryRoot, "status", "--porcelain=v1")
 	if output, err := status.CombinedOutput(); err != nil || len(output) != 0 {
-		t.Fatalf("Git changed before apply: %v: %s", err, output)
+		t.Fatalf("proposal commit left Git dirty: %v: %s", err, output)
 	}
 }
 

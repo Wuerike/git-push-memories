@@ -1,17 +1,21 @@
 package memory
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
-	ErrInvalidPath     = errors.New("invalid memory path")
-	ErrInvalidSchema   = errors.New("invalid Markdown schema")
-	ErrSectionNotFound = errors.New("section not found")
-	ErrSectionNotLeaf  = errors.New("section is not a leaf")
-	ErrDrift           = errors.New("memory file drifted")
-	ErrTargetDirty     = errors.New("memory target has Git changes")
-	ErrTargetExists    = errors.New("memory target already exists")
-	ErrInvalidID       = errors.New("invalid generated memory ID")
-	ErrSectionExists   = errors.New("memory section already exists")
+	ErrInvalidPath        = errors.New("invalid memory path")
+	ErrInvalidSchema      = errors.New("invalid Markdown schema")
+	ErrSectionNotFound    = errors.New("section not found")
+	ErrSectionNotLeaf     = errors.New("section is not a leaf")
+	ErrDrift              = errors.New("memory file drifted")
+	ErrTargetDirty        = errors.New("memory target has Git changes")
+	ErrTargetExists       = errors.New("memory target already exists")
+	ErrInvalidID          = errors.New("invalid generated memory ID")
+	ErrGeneratedIDTooLong = fmt.Errorf("%w: generated section ID exceeds 64 characters", ErrInvalidID)
+	ErrSectionExists      = errors.New("memory section already exists")
 )
 
 type Scope struct {
