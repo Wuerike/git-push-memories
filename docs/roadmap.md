@@ -39,7 +39,7 @@ Tecnologias como bancos vetoriais, grafos, ontologias e serviços externos não 
 |---|---|---|
 | 1. Avaliação de projetos | Referências concretas e escolha fundamentada entre fork, reutilização e implementação própria | Quais conceitos adotar e sobre qual base construir? |
 | 2. Fluxo vertical mínimo | Conhecimento publicado em uma sessão é recuperado em outra | O fluxo produz valor? |
-| 3. Confiança e governança | Propostas são consolidadas e publicadas com segurança | O fluxo é confiável? |
+| 3. Curadoria e confiança | Propostas do inbox são consolidadas em memória canônica com segurança | O fluxo de curadoria é confiável? |
 | 4. Captura automática | Hooks geram propostas úteis sem persistir sessões | A automação mantém qualidade e privacidade? |
 | 5. Recuperação e escala | A busca continua relevante com o crescimento da memória | É necessário um índice mais sofisticado? |
 
@@ -144,34 +144,64 @@ A proposta deve preferir alterar a explicação do estado atual a simplesmente a
 
 A fase termina quando o fluxo partir de um memory root sem Markdown preparado e ao menos um cenário autenticado mostrar que a memória publicada melhora a execução posterior sem exigir acesso à sessão original. O primeiro experimento, executado em 2026-09-06, teve 6/6 runs válidos, mas somente 1/3 pares superou o limiar de tempo; portanto o gate permanece aberto com decisão `revisar o fluxo`.
 
-## Fase 3: Confiança e governança
+## Transição depois da Fase 2
+
+**Estado em 2026-09-09:** a decisão `revisar o fluxo` levou à substituição do lifecycle técnico da Fase 2 pela [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md). Os planos, protocolos e relatórios da Fase 2 continuam sendo registros históricos do fluxo que avaliaram; não descrevem a interface atual.
+
+A nova base mantém captura e curadoria separadas:
+
+```text
+captura explícita com /remember
+-> busca nas categorias configuradas
+-> confirmação humana
+-> proposta Markdown no inbox
+-> commit path-scoped diretamente em main
+-> curadoria futura do inbox
+-> memória canônica nas categorias configuradas
+-> recuperação em sessões futuras
+```
+
+O produto atual entrega o fluxo até o commit da proposta. O repositório de memória declara categorias em `gpm.json`; a recuperação lê somente `memories/<categoria-configurada>/**/*.md`; propostas usam `proposals/<id>-<slug>.md`. Não existem branches de proposta, receipts, nem comandos `proposal show`, `proposal apply` ou `proposal publish`. O push permanece uma ação humana e a curadoria ainda não está implementada.
+
+Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 não foi convertido em aprovação retroativa e deverá ser reavaliado depois que existir um fluxo de curadoria utilizável.
+
+## Fase 3: Curadoria e confiança
+
+**Estado atual:** em andamento. A entrada da fase está implementada pelo inbox Markdown e pela fronteira de privacidade; listar, avaliar e consumir propostas ainda está pendente.
 
 ### Resultado esperado
 
-Tornar o fluxo mínimo seguro o suficiente para produzir memória compartilhada revisável.
+Transformar propostas do inbox em memória canônica atual, coerente e recuperável, sem reintroduzir um lifecycle paralelo ao Git.
+
+Uma curadoria concluída deve produzir um commit auditável que atualize os arquivos canônicos necessários e remova, no mesmo commit, todas as propostas consumidas. Propostas descartadas também devem sair do inbox por uma decisão Git observável. O desenho da interface de curadoria deve ser definido por tracer bullets antes de escolher comandos, automação ou política de branches.
 
 ### Capacidades
 
+- leitura e validação do schema Markdown das propostas no inbox;
 - detecção de duplicidades e possíveis contradições;
-- atualização ou remoção de conhecimento desatualizado;
+- decisão entre criar, atualizar, remover ou descartar conhecimento;
+- escolha e validação dos targets dentro das categorias configuradas;
 - validações determinísticas de estrutura e referências;
 - validação por agente nos pontos em que ela agregar evidência;
-- fronteira de privacidade antes de qualquer persistência;
-- apresentação clara do diff proposto;
-- criação de branch e suporte à revisão por pull request;
-- estados e motivos explícitos para aceitar, rejeitar ou solicitar revisão.
+- apresentação clara do diff de curadoria antes da escrita;
+- commit atômico contendo memória canônica e remoção das propostas consumidas;
+- preservação de staging alheio e tratamento explícito de concorrência local;
+- revisão compartilhada pelo fluxo Git adotado pelo time, sem acesso remoto automático.
 
 ### Entregáveis
 
-- política inicial de consolidação;
-- modelo de estados de uma proposta;
-- conjunto de validações e seus limites;
+- contrato de leitura e seleção de propostas do inbox;
+- política inicial de curadoria e descarte;
+- operações canônicas de criação, atualização e remoção de memória;
+- conjunto de validações estruturais, de privacidade e de referências;
+- commit path-scoped ou multi-path seguro que consome propostas e atualiza memória;
 - testes para privacidade, duplicidade, contradição e atualização;
-- fluxo documentado de revisão e publicação.
+- fluxo documentado de revisão, curadoria e push humano;
+- nova avaliação de valor sobre o fluxo vigente.
 
 ### Gate de decisão
 
-A fase termina quando uma proposta incorreta, contraditória ou sensível for interrompida ou encaminhada para revisão, e uma proposta válida puder ser publicada com histórico auditável.
+A fase termina quando propostas válidas puderem ser transformadas em memória canônica recuperável, propostas incorretas puderem ser descartadas, duplicidades e contradições forem tratadas de forma observável, e o processo inteiro mantiver histórico Git auditável sem deixar propostas consumidas no inbox. O gate de valor deve ser executado novamente sobre esse fluxo antes de avançar para captura automática.
 
 ## Fase 4: Captura automática
 
@@ -184,7 +214,7 @@ Reduzir a dependência de comandos manuais sem transformar sessões completas em
 - observar eventos disponíveis nos hooks do Claude Code;
 - extrair somente candidatos necessários para avaliar uma proposta;
 - aplicar a fronteira de privacidade antes da persistência;
-- reutilizar o mesmo fluxo de consolidação e revisão da captura explícita;
+- produzir o mesmo schema de proposta do inbox e reutilizar o fluxo de curadoria da captura explícita;
 - permitir que a pessoa desative, rejeite ou corrija a captura;
 - medir aceitação, rejeição e motivos de descarte.
 

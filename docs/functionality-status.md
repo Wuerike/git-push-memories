@@ -1,142 +1,138 @@
 # Estado das funcionalidades
 
-Este documento registra as funcionalidades identificadas durante a Fase 1 e o
-estado atual de sua implementacao. A Fase 1 teve como objetivo avaliar projetos
-existentes e escolher uma base arquitetural; portanto, sua conclusao nao
-significava que todas as capacidades abaixo ja deveriam estar implementadas.
+Atualizado em 2026-09-09.
+
+Este documento descreve o comportamento exposto pela implementacao atual. Os documentos em `docs/phase-1/` e `docs/phase-2/` preservam decisoes, protocolos e evidencias dos fluxos avaliados naquelas fases; eles nao substituem este inventario operacional.
 
 Os estados usados sao:
 
 - **implementado**: comportamento disponivel e coberto pela verificacao atual;
-- **parcial**: existe um fluxo funcional, mas parte do comportamento desejado
-  ainda nao foi entregue;
-- **adiado**: capacidade deliberadamente reservada para uma fase posterior;
-- **nao aplicavel**: a condicao somente se aplica caso o componente seja
-  introduzido.
+- **parcial**: existe um fluxo utilizavel, mas falta parte relevante do resultado;
+- **adiado**: capacidade deliberadamente reservada para uma etapa posterior;
+- **removido**: comportamento que existiu no produto, mas nao faz parte da interface atual.
 
 ## Estado das fases
 
-| Fase | Estado | Evidencia principal |
+| Fase | Estado atual | Observacao |
 |---|---|---|
-| Fase 1: avaliacao de projetos | concluida | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
-| Fase 2: gate tecnico | concluido | Os fluxos sinteticos de replace e bootstrap foram executados de ponta a ponta. Consulte [E2E sintetico](phase-2/e2e-synthetic.md) e [E2E de bootstrap](phase-2/e2e-bootstrap.md). |
-| Fase 2: gate de valor | aberto | O resultado atual e `revisar o fluxo`; a Fase 3 permanece bloqueada. Consulte o [relatorio do experimento de bootstrap](phase-2/bootstrap-value-experiment-report.md). |
+| Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
+| Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
+| Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
+| Fase 3: curadoria e confianca | **Em andamento.** | A captura no inbox esta implementada; a transformacao de propostas em memoria canonica ainda nao esta. |
 
-## Arquitetura e armazenamento
+## Superficie operacional
 
-| Funcionalidade | Comportamento esperado | Estado atual |
+### CLI
+
+| Comando | Estado | Comportamento atual |
 |---|---|---|
-| Runtime local | Executar como um unico programa Go, sem daemon, worker ou backend obrigatorio. | **Implementado.** Existe um executavel local e o servidor MCP e transitorio sobre stdio. |
-| Markdown e Git canonicos | Manter a memoria legivel e integra sem banco, indice ou processo da ferramenta. | **Implementado.** O Markdown e o historico Git sao a unica autoridade duravel. |
-| Configuracao global | Permitir que qualquer sessao use a mesma memoria sem configuracao por repositorio de codigo. | **Implementado.** `setup` registra memory root, MCP e skill uma unica vez no escopo do usuario. |
-| Estado privado | Manter locks operacionais fora de worktrees Git. | **Implementado.** O state root e derivado de XDG e rejeitado quando sobrepoe um worktree Git; o inbox usa somente um lock local. |
-| Indice local derivado | Se um indice for necessario, torna-lo descartavel e reconstruivel somente do Markdown. | **Nao aplicavel.** A implementacao atual nao possui indice persistente e percorre os arquivos diretamente. |
-| Runtime, banco e store de sessao adicionais | Nao introduzir Python, banco autoritativo, daemon, grafo, vector DB ou store de sessao no primeiro ciclo. | **Implementado como restricao.** Nenhum desses componentes faz parte do produto atual. |
+| `gpm setup <memory-root>` | **Implementado.** | Valida e salva o repositorio de memoria, registra `gpm mcp` no Claude Code e instala o skill global `/remember`. |
+| `gpm mcp` | **Implementado.** | Executa o servidor MCP transitorio sobre stdio. |
+| `gpm retrieve <query> --budget-bytes <n>` | **Implementado.** | Executa a mesma recuperacao textual usada por `memory_search`. |
+| `gpm version` e `gpm help` | **Implementado.** | Funcionam sem configuracao previa do repositorio de memoria. |
+| `gpm proposal show/reject/apply/publish` | **Removido.** | Nao existe lifecycle de proposta paralelo ao Git. Propostas sao arquivos Markdown comuns no inbox. |
 
-## Markdown e estado atual
+### MCP
 
-| Funcionalidade | Comportamento esperado | Estado atual |
+| Tool | Estado | Comportamento atual |
 |---|---|---|
-| Identidade de secao | Identificar uma secao por path canonico e `section_id` estavel. | **Implementado.** IDs usam `<!-- @id: slug -->` imediatamente depois do heading e sao unicos no arquivo. |
-| Parsing byte-preserving | Alterar a secao alvo sem reformatar os demais bytes do documento. | **Implementado.** O parser e o splice adaptados do agent-memory ficam em `internal/markdown`. |
-| Validacao de schema | Rejeitar UTF-8 invalido, IDs ausentes ou duplicados, anchors mal posicionados e conflitos de merge. | **Implementado.** O Memory Repository valida o documento antes de ler ou alterar seu estado. |
-| Estado atual | Substituir a explicacao autoritativa anterior em vez de acrescentar um delta contraditorio. | **Adiado para curadoria.** A captura apenas registra conhecimento no inbox. |
-| Criacao da primeira pagina | Permitir bootstrap sem Markdown ou anchors preparados manualmente. | **Adiado para curadoria.** Uma proposta `create` pode ser registrada sem target. |
-| Criacao de secao | Criar uma nova secao quando a pagina existe, mas ainda nao ha alvo adequado. | **Adiado para curadoria.** Uma proposta `update` pode apontar para a pagina relacionada. |
-| Operacoes multi-arquivo | Aplicar uma proposta atomica sobre varios arquivos. | **Adiado para curadoria.** |
+| `memory_search` | **Implementado.** | Busca secoes folha da memoria canonica dentro de um budget exato. |
+| `memory_expand` | **Implementado.** | Expande um handle de busca e rejeita handles obsoletos. |
+| `memory_propose` | **Implementado.** | Valida, grava e commita uma proposta Markdown no inbox depois da confirmacao conduzida pelo cliente. |
+| Tools de criacao, substituicao ou apply de memoria | **Removido.** | MCP nao cria, altera nem remove memoria canonica. |
+
+## Configuracao e layout
+
+| Funcionalidade | Estado atual |
+|---|---|
+| Repositorio local explicito | **Implementado.** O memory root deve ser a raiz de um worktree Git existente e possuir `HEAD`. Nao ha descoberta implicita pelo diretorio atual. |
+| Configuracao global | **Implementado.** `setup` salva o memory root na configuracao do usuario para uso por sessoes em outros repositorios de codigo. |
+| `gpm.json` obrigatorio | **Implementado.** A raiz deve declarar `schema_version: 1` e `memory_categories`. Campos desconhecidos, schema invalido ou conteudo adicional sao rejeitados. |
+| Categorias | **Implementado.** A lista deve ser nao vazia, sem duplicatas e composta por nomes lowercase kebab-case. |
+| Namespace canonico | **Implementado.** Somente `memories/<categoria-configurada>/**/*.md` participa da recuperacao. |
+| Exclusoes da recuperacao | **Implementado.** Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados. |
+| Inbox | **Implementado.** Propostas usam `proposals/<id>-<slug>.md`. |
+| Estado privado | **Implementado.** Locks ficam no state root derivado por repositorio e fora de worktrees Git. |
+
+## Markdown e recuperacao
+
+| Funcionalidade | Estado atual |
+|---|---|
+| Schema de memoria | **Implementado para leitura.** Documentos exigem UTF-8 valido, headings com `<!-- @id: slug -->`, IDs validos e unicos e ausencia de conflitos de merge nao resolvidos. |
+| Identidade de secao | **Implementado.** Handles usam path canonico, section ID e hash do conteudo. |
+| Busca textual | **Implementado.** O ranking conta termos distintos da query presentes no path, heading ou corpo e usa ordenacao deterministica para empates. |
+| Selecao de secoes | **Implementado.** A busca retorna apenas secoes folha; secoes estruturais com filhos nao competem como resultados independentes. |
+| Busca recursiva por categoria | **Implementado.** Subdiretorios abaixo de cada categoria configurada sao percorridos. |
+| Escopo por path | **Implementado.** Um prefixo relativo canonico pode restringir a busca; paths absolutos e escapes por `..` sao rejeitados. |
+| Budget | **Implementado.** O JSON retornado nunca excede `budget_bytes`; budget insuficiente retorna erro tipado. |
+| Expansao e obsolescencia | **Implementado.** `memory_expand` confirma section ID e content hash no estado atual antes de retornar o corpo. |
+| Leitura sem mutacao | **Implementado.** Search e expand nao criam state root, indice, proposal ou alteracao Git. |
+| Busca semantica, FTS ou vetorial | **Adiado.** Nao existe indice persistente, banco vetorial ou grafo. |
 
 ## Privacidade e captura
 
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| Intake Guard em memoria | Examinar todo o candidato antes de criar proposta, lock, log, spool, cache ou objeto Git. | **Implementado.** O guard opera antes da inicializacao mutavel do inbox. |
-| Schema fechado de captura | Rejeitar campos desconhecidos, incluindo sessao, prompt, resposta, transcript e rationale privada. | **Implementado.** A proposta aceita somente titulo, acao sugerida, target opcional, conhecimento e source paths. |
-| Deteccao de dados sensiveis | Rejeitar credenciais, PII e referencias de sessao no corpo e nos metadados. | **Implementado para a politica v1.** Ha detectores para chaves, tokens, email, telefone, CPF e referencias de sessao. |
-| Privacidade semantica | Reconhecer prompt, resposta ou transcript quando esse conteudo aparece dentro de um campo textual permitido. | **Parcial.** A politica v1 bloqueia campos e padroes conhecidos, mas nao classifica semanticamente texto livre. |
-| Fail-closed para captura | Nao persistir uma proposta quando schema, detector ou validacao forem inconclusivos. | **Implementado.** O candidato inteiro e rejeitado. |
-| Fail-open para a sessao | Uma falha da memoria deve ser visivel sem bloquear o trabalho no Claude Code. | **Implementado.** Erros das tools sao sanitizados e nao encerram o transporte MCP. |
-| Captura explicita | Permitir que a pessoa solicite o registro de um fato sem conceder curadoria ao agente. | **Implementado.** `memory_propose` cria um Markdown no inbox depois de confirmacao. |
-| Captura automatica por hooks | Gerar propostas uteis a partir de eventos do Claude Code sem persistir a sessao. | **Adiado para a Fase 4.** Nenhum hook de sessao e instalado atualmente. |
+| Funcionalidade | Estado atual |
+|---|---|
+| Schema fechado de proposta | **Implementado.** A entrada aceita somente `title`, `suggested_action`, `target` opcional, `knowledge` e `source_paths`. |
+| Acoes sugeridas | **Implementado.** Os valores aceitos sao `create`, `update` e `remove`; eles orientam a curadoria futura e nao alteram memoria por conta propria. |
+| Target opcional | **Implementado.** Quando informado, deve ser um path Markdown dentro de uma categoria configurada. |
+| Source paths | **Parcial.** Paths sao canonicalizados e examinados pela politica de privacidade, mas existencia e aderencia ao conhecimento nao sao verificadas. |
+| Intake Guard antes da persistencia | **Implementado.** Todo o payload e validado antes da criacao de lock, arquivo de proposta ou objeto Git. |
+| Deteccao normativa | **Implementado para a politica v1.** Bloqueia padroes conhecidos de chaves, tokens, autorizacao, email, telefone, CPF e referencias de sessao. |
+| Privacidade semantica | **Parcial.** Texto livre nao e classificado semanticamente como prompt, resposta ou transcript quando nao corresponde aos padroes normativos. |
+| Limites | **Implementado.** Candidato, titulo, conhecimento, paths e quantidade de fontes possuem limites fechados. |
+| Fail-closed da captura | **Implementado.** Schema, privacidade ou path invalidos encerram a chamada sem proposta. |
+| Idempotencia da captura | **Nao implementada.** Cada chamada aceita cria uma nova proposta; evitar duplicatas depende do `/remember` e da curadoria futura. |
 
-## Propostas e revisao
+## Inbox e Git
 
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| Proposta antes da mutacao | Criar um artefato observavel sem alterar Markdown canonico ou consumir staging alheio. | **Implementado.** A proposta e commitada como `proposals/<id>-<slug>.md` diretamente em `main`. |
-| Persistencia duravel da proposta | Permitir backup e revisao sem depender do state local. | **Implementado localmente.** A proposta faz parte do historico normal do repositorio e o push permanece humano. |
-| Integridade da proposta | Tornar alteracoes na proposta observaveis. | **Implementado pelo Git.** O commit contem exatamente o path retornado. |
-| Visualizacao | Permitir que a pessoa inspecione a proposta sem comando proprietario. | **Implementado.** O payload e Markdown legivel no worktree e por `git show`. |
-| Rejeicao explicita | Remover uma proposta descartada de forma auditavel. | **Adiado para curadoria.** |
-| Aceite explicito | Incorporar conhecimento aprovado na memoria canonica. | **Adiado para curadoria.** Nao existe comando `proposal apply`. |
-| Edicao de proposta | Ajustar uma proposta antes da curadoria. | **Disponivel via Markdown e Git comuns.** |
-| Consumo do payload | Remover propostas incorporadas junto com a atualizacao canonica. | **Adiado para curadoria.** Ambos deverao ocorrer no mesmo commit. |
-
-## Curadoria e recuperacao de falhas
-
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| Lock de captura | Impedir perda de propostas entre sessoes no mesmo clone. | **Implementado.** Escritores do inbox sao serializados e commitam sobre o `HEAD` mais recente. |
-| Concorrencia remota | Resolver propostas criadas em clones diferentes. | **Responsabilidade humana.** Conflitos non-fast-forward aparecem no push normal. |
-| Aplicacao, drift e recovery | Transformar propostas em estado canonico com seguranca. | **Adiado para curadoria.** |
-
-## Publicacao Git
-
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| Commit path-scoped | Criar um commit contendo somente a nova proposta. | **Implementado.** `git diff-tree` e coberto nos testes do inbox e MCP. |
-| Preservacao do indice | Nao consumir nem perder staging preexistente do usuario. | **Implementado.** O commit usa somente o path da proposta. |
-| Branch de captura | Exigir uma base local previsivel para commits concorrentes. | **Implementado.** Captura exige exatamente `main`. |
-| Operacoes remotas | Permitir push sem acesso remoto automatico. | **Parcial.** O push e humano; politica de PR e merge continua adiada. |
-
-## Recuperacao
-
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| Busca textual local | Encontrar memoria atual sem banco ou servico externo. | **Implementado.** A busca percorre recursivamente somente categorias declaradas em `gpm.json` e ranqueia secoes lexicalmente. |
-| Escopo | Restringir a busca por prefixo canonico de path. | **Implementado.** Paths absolutos e escapes por `..` sao rejeitados. |
-| Orcamento de contexto | Nunca ultrapassar silenciosamente o limite de bytes informado. | **Implementado.** Budget insuficiente retorna erro tipado. |
-| Handles expandiveis | Retornar path, section ID e hash para expansao posterior e deteccao de conteudo obsoleto. | **Implementado.** `memory_expand` rejeita handles stale. |
-| Recuperacao progressiva | Retornar excerpts compactos primeiro e carregar o conteudo integral somente sob demanda. | **Parcial.** Search e expand existem, mas a busca ainda retorna o corpo integral de cada secao selecionada, e nao um excerpt separado. |
-| Recuperacao em nova sessao | Encontrar o estado publicado sem acessar proposta, state root ou sessao que originou a descoberta. | **Implementado tecnicamente.** O E2E inicia um novo processo, cliente, HOME, configuracao e state root. |
-| Busca semantica e FTS | Melhorar ranking somente depois de falha medida da busca textual. | **Adiado.** Nao ha justificativa atual para introduzir indice, vetores ou grafo. |
+| Funcionalidade | Estado atual |
+|---|---|
+| Formato da proposta | **Implementado.** Markdown legivel com frontmatter `schema_version: 1`, acao sugerida, target opcional e source paths, seguido por titulo e conhecimento. |
+| Identidade | **Implementado.** Cada proposta recebe ID aleatorio hexadecimal e slug derivado do titulo. |
+| Branch obrigatoria | **Implementado.** A captura exige que o checkout esteja exatamente em `main`. |
+| Commit path-scoped | **Implementado.** O commit contem exatamente o novo arquivo de proposta e parte do `HEAD` mais recente. |
+| Preservacao de staging | **Implementado.** Alteracoes staged ou unstaged fora do path da proposta nao sao consumidas nem descartadas. |
+| Hooks Git | **Implementado como restricao.** O commit usa plumbing (`commit-tree` e `update-ref`) e nao executa hooks de commit. |
+| Concorrencia no mesmo clone | **Implementado.** Um lock do inbox serializa sessoes e o index lock impede interferencia de operacoes Git concorrentes durante a publicacao local. |
+| Protecao de `HEAD` | **Implementado.** Branch e parent sao revalidados e a atualizacao de `main` usa compare-and-swap. |
+| Operacoes remotas | **Nao executadas.** O produto nao faz fetch, pull, push nem cria pull request. |
+| Concorrencia entre clones | **Responsabilidade humana.** Um push non-fast-forward e resolvido pelo fluxo Git normal. |
 
 ## Integracao com Claude Code
 
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| MCP por stdio | Expor captura e recuperacao sem daemon ou porta local. | **Implementado.** O servidor publica `memory_search`, `memory_expand` e `memory_propose`. |
-| Setup global | Instalar MCP e `/remember` sem copia manual ou configuracao por projeto. | **Implementado.** `gpm setup <memory-root>` registra o MCP no escopo `user` e instala o skill embutido. |
-| Adapter sem autoridade propria | Reutilizar Intake Guard, Inbox e Retrieval sem criar stores ou escrita paralela. | **Implementado.** Os handlers MCP apenas traduzem entrada e saida dos modulos centrais. |
-| Restricao de autoridade | Nao expor curadoria ao agente. | **Implementado.** A unica escrita MCP adiciona uma proposta ao inbox. |
-| Fluxo `/remember` | Pesquisar, expandir candidatos, apresentar a proposta e pedir confirmacao antes de persistir. | **Implementado no contrato e em harness deterministico.** |
-| Fallback seguro | Falhar de forma visivel quando MCP estiver indisponivel, sem spool ou persistencia alternativa. | **Implementado no contrato e nos harnesses.** |
+| Funcionalidade | Estado atual |
+|---|---|
+| Setup global | **Implementado.** O MCP e `/remember` sao instalados no escopo do usuario. |
+| MCP por stdio | **Implementado.** Nao ha daemon, porta local ou container obrigatorio. |
+| `/remember` explicito | **Implementado.** O skill nao e invocado automaticamente pelo modelo. |
+| Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
+| Confirmacao humana | **Implementado no contrato.** Os campos exatos sao apresentados antes de uma unica chamada a `memory_propose`. |
+| Fallback seguro | **Implementado no contrato e nos harnesses.** Cancelamento, budget insuficiente, MCP ausente ou erro encerram o fluxo sem escrita alternativa. |
+| Captura automatica por hooks | **Adiado.** Nenhum hook de sessao e instalado. |
 
-## Evidencia, consolidacao e governanca futura
+## Curadoria e governanca
 
-| Funcionalidade | Comportamento esperado | Estado atual |
-|---|---|---|
-| Referencias de fonte | Associar paths de codigo que sustentam a proposta. | **Implementado parcialmente.** Propostas armazenam `source_paths` sanitizados. |
-| Proveniencia rica | Associar quote hashes, claims e relacoes `backed_by` e `contradicts` ao fato atual. | **Adiado.** Esses conceitos do Palinode ainda nao possuem contrato implementado. |
-| Deteccao de duplicidade | Identificar memoria equivalente antes de criar ou publicar uma nova afirmacao. | **Adiado para a Fase 3.** A busca auxilia a escolha humana, mas nao decide equivalencia. |
-| Deteccao de contradicao | Interromper ou encaminhar para revisao propostas incompatíveis com o estado atual. | **Adiado para a Fase 3.** Atualmente a consolidacao depende da operacao escolhida e da revisao humana. |
-| Revisao por pull request | Compartilhar uma proposta em branch e PR com historico auditavel. | **Adiado para a Fase 3.** |
-| Validacao por agentes | Executar validacao automatizada apenas em pontos sustentados por casos de uso e evidencia. | **Adiado.** Nenhum agente controla apply ou publicacao atualmente. |
+| Funcionalidade | Estado atual |
+|---|---|
+| Listagem e selecao de propostas | **Adiado.** Ainda nao existe interface de curadoria do inbox. |
+| Criacao, atualizacao e remocao de memoria canonica | **Adiado.** As acoes das propostas sao apenas sugestoes. |
+| Consumo atomico de propostas | **Adiado.** A Fase 3 devera atualizar memoria e remover propostas consumidas no mesmo commit. |
+| Descarte auditavel | **Adiado.** Ainda nao existe fluxo proprio para rejeitar ou remover propostas. |
+| Deteccao de duplicidade e contradicao | **Adiado.** Search orienta a captura, mas nao decide equivalencia ou conflito semantico. |
+| Validacao por agentes | **Adiado.** Nenhum agente possui autoridade de curadoria. |
+| Pull request e politica de merge | **Adiado.** Revisao e push atuais usam Git comum, sem automacao remota. |
+| Nova avaliacao de valor | **Pendente.** Os experimentos da Fase 2 avaliaram o lifecycle supersedido e nao foram repetidos com o inbox atual. |
 
-## Verificacao
+## Verificacao atual
 
-A matriz padrao do repositorio e executada por:
+`make verify` executa, em serie:
 
-```bash
-make verify
+```text
+go test ./...
+go test -race ./...
+go vet ./...
+go build ./...
 ```
 
-Depois que a toolchain e as dependencias estiverem disponiveis localmente, a
-mesma verificacao pode ser repetida sem acesso ao proxy de modulos:
-
-```bash
-make verify-offline
-```
-
-As duas matrizes executam testes, race detector, `go vet` e build. Os relatorios
-classificatorios da Fase 2 sao evidencia historica do lifecycle supersedido pela
-ADR 0004; seus runners nao fazem parte da verificacao atual.
+A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit do inbox, preservacao do indice, concorrencia local, erros MCP, contrato do `/remember` e execucao do MCP por um binario separado. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.

@@ -1,6 +1,6 @@
 # Git proposals and memory namespace
 
-Status: superseded by ADR 0004
+Status: accepted
 
 Memory pages are direct `memories/*.md` files, and retrieval ignores Markdown outside that namespace. Each accepted proposal payload is committed as `proposals/<id>.json` on its own `gpm/proposal/<id>` branch without changing the current branch, index, or worktree; locks and terminal receipts remain private local state. This supersedes the proposal-persistence and root-page decisions in ADRs 0001 and 0002 because proposals must survive local state cleanup and be pushable for team review, while repository metadata such as `README.md` must not break retrieval.
 
