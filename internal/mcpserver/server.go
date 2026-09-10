@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -29,7 +30,12 @@ type Server struct {
 	inboxMu   sync.Mutex
 	curator   *curation.Curator
 	curatorMu sync.Mutex
-	previews  map[string]curation.Preview
+	previews  map[string]pendingCuration
+}
+
+type pendingCuration struct {
+	Preview      curation.Preview
+	EvidenceHash [sha256.Size]byte
 }
 
 func New(cfg config.Config, version string) (*Server, error) {
@@ -57,7 +63,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_propose",
-		Description: "Add one reviewable Markdown proposal to the repository inbox and commit it on main.",
+		Description: "Add and commit one reviewable Markdown proposal on main, or return an existing byte-identical proposal without publishing a duplicate.",
 	}, server.addProposal)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_search",
@@ -73,7 +79,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}, server.listProposals)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_preview",
-		Description: "Preview creating, replacing, or removing canonical memory, or discarding one proposal, without writing.",
+		Description: "Preview one curation decision and its bounded canonical and inbox evidence without writing.",
 	}, server.previewCuration)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_apply",
@@ -122,7 +128,7 @@ type previewCurationInput struct {
 	ContentHash string `json:"content_hash,omitempty" jsonschema:"observed section content hash required by replace_section, remove_section, or remove_page"`
 	Heading     string `json:"heading,omitempty" jsonschema:"new section heading required only by create_section"`
 	Replacement string `json:"replacement,omitempty" jsonschema:"complete replacement body required only by replace_section"`
-	Reason      string `json:"reason,omitempty" jsonschema:"discard reason required only by discard_proposal: not_relevant, incorrect, sensitive, wrong_target, or superseded"`
+	Reason      string `json:"reason,omitempty" jsonschema:"discard reason required only by discard_proposal: not_relevant, incorrect, sensitive, wrong_target, superseded, or duplicate"`
 }
 
 type applyCurationInput struct {
@@ -130,9 +136,14 @@ type applyCurationInput struct {
 }
 
 type curationPreview struct {
-	PreviewToken  string                  `json:"preview_token"`
-	RelatedMemory retrieval.ContextBundle `json:"related_memory"`
+	PreviewToken string           `json:"preview_token"`
+	Evidence     curationEvidence `json:"evidence"`
 	curation.Preview
+}
+
+type curationEvidence struct {
+	CanonicalCandidates retrieval.ContextBundle   `json:"canonical_candidates"`
+	RelatedProposals    curation.RelatedProposals `json:"related_proposals"`
 }
 
 type proposalListResponse struct {
@@ -234,10 +245,15 @@ func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return curationPreviewFailure(curationErrorCode(err))
 	}
-	related, err := s.retriever.Retrieve(ctx, preview.Title+" "+preview.Knowledge, retrieval.Scope{}, 4096)
+	evidence, err := s.buildCurationEvidence(ctx, curator, preview)
 	if err != nil {
-		return curationPreviewFailure(retrieval.ErrorCode(err))
+		return curationPreviewFailure(curationEvidenceErrorCode(err))
 	}
+	encodedEvidence, err := json.Marshal(evidence)
+	if err != nil {
+		return curationPreviewFailure("curation_unavailable")
+	}
+	evidenceHash := sha256.Sum256(encodedEvidence)
 	tokenBytes := make([]byte, 16)
 	if _, err := rand.Read(tokenBytes); err != nil {
 		return curationPreviewFailure("curation_unavailable")
@@ -245,28 +261,56 @@ func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, in
 	token := hex.EncodeToString(tokenBytes)
 	s.curatorMu.Lock()
 	if s.previews == nil {
-		s.previews = make(map[string]curation.Preview)
+		s.previews = make(map[string]pendingCuration)
 	}
-	s.previews[token] = preview
+	s.previews[token] = pendingCuration{Preview: preview, EvidenceHash: evidenceHash}
 	s.curatorMu.Unlock()
-	response := curationPreview{PreviewToken: token, RelatedMemory: related, Preview: preview}
+	response := curationPreview{
+		PreviewToken: token,
+		Evidence:     evidence,
+		Preview:      preview,
+	}
 	return nil, curationPreviewResponse{SchemaVersion: 1, Data: &response}, nil
 }
 
 func (s *Server) applyCuration(ctx context.Context, _ *mcp.CallToolRequest, input applyCurationInput) (*mcp.CallToolResult, curationApplyResponse, error) {
 	s.curatorMu.Lock()
-	preview, found := s.previews[input.PreviewToken]
+	pending, found := s.previews[input.PreviewToken]
 	delete(s.previews, input.PreviewToken)
 	curator := s.curator
 	s.curatorMu.Unlock()
 	if !found || curator == nil {
 		return curationApplyFailure("invalid_preview")
 	}
-	result, err := curator.Apply(ctx, preview)
+	evidence, err := s.buildCurationEvidence(ctx, curator, pending.Preview)
+	if err != nil {
+		return curationApplyFailure("curation_drift")
+	}
+	encodedEvidence, err := json.Marshal(evidence)
+	if err != nil || sha256.Sum256(encodedEvidence) != pending.EvidenceHash {
+		return curationApplyFailure("curation_drift")
+	}
+	result, err := curator.Apply(ctx, pending.Preview)
 	if err != nil {
 		return curationApplyFailure(curationErrorCode(err))
 	}
 	return nil, curationApplyResponse{SchemaVersion: 1, Data: &result}, nil
+}
+
+func (s *Server) buildCurationEvidence(ctx context.Context, curator *curation.Curator, preview curation.Preview) (curationEvidence, error) {
+	query := preview.Title + " " + preview.Knowledge
+	canonicalCandidates, err := s.retriever.Retrieve(ctx, query, retrieval.Scope{}, 4096)
+	if err != nil {
+		return curationEvidence{}, err
+	}
+	relatedProposals, err := curator.RelatedProposals(ctx, preview, query)
+	if err != nil {
+		return curationEvidence{}, err
+	}
+	if err := curator.RevalidatePreview(ctx, preview); err != nil {
+		return curationEvidence{}, err
+	}
+	return curationEvidence{CanonicalCandidates: canonicalCandidates, RelatedProposals: relatedProposals}, nil
 }
 
 func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
@@ -357,6 +401,16 @@ func curationErrorCode(err error) string {
 			return rejection.Class + "_" + rejection.Reason
 		}
 		return "curation_failed"
+	}
+}
+
+func curationEvidenceErrorCode(err error) string {
+	switch {
+	case errors.Is(err, retrieval.ErrInvalidQuery), errors.Is(err, retrieval.ErrInvalidScope), errors.Is(err, retrieval.ErrInvalidBudget),
+		errors.Is(err, retrieval.ErrBudgetTooSmall), errors.Is(err, retrieval.ErrStaleHandle):
+		return retrieval.ErrorCode(err)
+	default:
+		return curationErrorCode(err)
 	}
 }
 

@@ -169,7 +169,7 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. Criação de página, criação de seção, substituição de seção, remoção individual e descarte auditável estão implementados; duplicidade e contradição formam o próximo incremento.
+**Estado atual:** em andamento. Os destinos individuais, dedupe exato e evidencia limitada para duplicidade e contradicao estao implementados; verificacao de referencias forma o proximo incremento.
 
 ### Resultado esperado
 

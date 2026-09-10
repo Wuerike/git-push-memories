@@ -105,6 +105,33 @@ func TestMemoryProposeCommitsMarkdownToInbox(t *testing.T) {
 	}
 }
 
+func TestMemoryProposeReturnsExistingExactDuplicateWithoutNewCommit(t *testing.T) {
+	memoryRoot := newGitRoot(t, nil)
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	arguments := map[string]any{
+		"title": "Checkout timeout", "suggested_action": "update", "target": "memories/domains/checkout-api.md",
+		"knowledge": "Checkout requests time out after five seconds.", "source_paths": []string{"services/checkout/config.yaml"},
+	}
+	firstResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_propose", Arguments: arguments})
+	if err != nil || firstResult.IsError {
+		t.Fatalf("first memory_propose = %+v, %v", firstResult, err)
+	}
+	first := decodeInboxResponse(t, firstResult).Data
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+	duplicateResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_propose", Arguments: arguments})
+	if err != nil || duplicateResult.IsError {
+		t.Fatalf("duplicate memory_propose = %+v, %v", duplicateResult, err)
+	}
+	duplicate := decodeInboxResponse(t, duplicateResult).Data
+	if duplicate == nil || !duplicate.Duplicate || duplicate.ID != first.ID || duplicate.Path != first.Path || duplicate.Commit != first.Commit {
+		t.Fatalf("duplicate response = %+v, first = %+v", duplicate, first)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("duplicate proposal advanced HEAD from %s to %s", head, current)
+	}
+}
+
 func TestMemoryProposeRejectsSensitiveKnowledgeWithoutState(t *testing.T) {
 	memoryRoot := newGitRoot(t, nil)
 	stateRoot := filepath.Join(t.TempDir(), "state")
@@ -1205,7 +1232,7 @@ func TestCurateDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t 
 
 	validResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview", Arguments: map[string]any{
-			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "wrong_target",
+			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "duplicate",
 		},
 	})
 	if err != nil || validResult.IsError {
@@ -1283,10 +1310,29 @@ func TestProposalListRejectsSensitiveCommittedProposalBeforeDisclosure(t *testin
 	}
 }
 
-func TestCuratePreviewReturnsRelatedCanonicalMemory(t *testing.T) {
+func TestCuratePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
+	relatedResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Alternative checkout timeout", "suggested_action": "update", "target": "memories/domains/checkout-api.md",
+			"knowledge": "Checkout timeout may be five seconds.", "source_paths": []string{},
+		},
+	})
+	if err != nil || relatedResult.IsError {
+		t.Fatalf("related memory_propose = %+v, %v", relatedResult, err)
+	}
+	related := decodeInboxResponse(t, relatedResult).Data
+	unrelatedResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Storage allocation", "suggested_action": "create",
+			"knowledge": "Partitions follow geography.", "source_paths": []string{},
+		},
+	})
+	if err != nil || unrelatedResult.IsError {
+		t.Fatalf("unrelated memory_propose = %+v, %v", unrelatedResult, err)
+	}
 	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose", Arguments: map[string]any{
 			"title": "Checkout timeout ownership", "suggested_action": "create",
@@ -1297,6 +1343,7 @@ func TestCuratePreviewReturnsRelatedCanonicalMemory(t *testing.T) {
 		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview", Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-ownership.md",
@@ -1307,12 +1354,89 @@ func TestCuratePreviewReturnsRelatedCanonicalMemory(t *testing.T) {
 	}
 	var preview struct {
 		Data struct {
-			RelatedMemory retrieval.ContextBundle `json:"related_memory"`
+			Evidence struct {
+				CanonicalCandidates retrieval.ContextBundle `json:"canonical_candidates"`
+				RelatedProposals    struct {
+					Items []struct {
+						ID        string `json:"id"`
+						Title     string `json:"title"`
+						Knowledge string `json:"knowledge"`
+						Score     int    `json:"score"`
+					} `json:"items"`
+					Truncated bool `json:"truncated"`
+				} `json:"related_proposals"`
+			} `json:"evidence"`
 		} `json:"data"`
 	}
 	decodeStructured(t, previewResult, &preview)
-	if len(preview.Data.RelatedMemory.Items) != 1 || preview.Data.RelatedMemory.Items[0].Handle.Path != "memories/domains/checkout-api.md" {
-		t.Fatalf("related memory = %+v", preview.Data.RelatedMemory)
+	if candidates := preview.Data.Evidence.CanonicalCandidates; len(candidates.Items) != 1 || candidates.Items[0].Handle.Path != "memories/domains/checkout-api.md" {
+		t.Fatalf("canonical candidates = %+v", candidates)
+	}
+	proposals := preview.Data.Evidence.RelatedProposals
+	if len(proposals.Items) != 1 || proposals.Items[0].ID != related.ID || proposals.Items[0].Title != related.Title || proposals.Items[0].Knowledge != related.Knowledge || proposals.Items[0].Score == 0 || proposals.Truncated {
+		t.Fatalf("related proposals = %+v", proposals)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("evidence preview changed HEAD from %s to %s", head, current)
+	}
+}
+
+func TestCurateApplyRejectsDriftInReviewedEvidence(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Checkout timeout note", "suggested_action": "create",
+			"knowledge": "Checkout timeout documentation belongs to operations.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-note.md",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+			Evidence     struct {
+				CanonicalCandidates retrieval.ContextBundle `json:"canonical_candidates"`
+			} `json:"evidence"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if len(preview.Data.Evidence.CanonicalCandidates.Items) != 1 {
+		t.Fatalf("preview evidence = %+v", preview.Data.Evidence)
+	}
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+	drifted := strings.Replace(memoryPage, "tres segundos", "quatro segundos", 1)
+	if err := os.WriteFile(filepath.Join(memoryRoot, "memories", "domains", "checkout-api.md"), []byte(drifted), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || !applyResult.IsError {
+		t.Fatalf("apply with evidence drift = %+v, %v", applyResult, err)
+	}
+	if code := decodeResponse(t, applyResult).Error.Code; code != "curation_drift" {
+		t.Fatalf("apply with evidence drift code = %q", code)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("evidence drift changed HEAD from %s to %s", head, current)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "domains", "checkout-timeout-note.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("evidence drift created target: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("evidence drift consumed proposal: %v", err)
 	}
 }
 

@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | [T1](phase-3/t1-create-page-curation.md) cria pagina, [T2](phase-3/t2-create-section-curation.md) cria secao, [T3](phase-3/t3-replace-section-curation.md) substitui secao e [T4](phase-3/t4-remove-and-discard-curation.md) remove conhecimento ou descarta proposta; as demais garantias continuam pendentes. |
+| Fase 3: curadoria e confianca | **Em andamento.** | T1-T4 entregam os destinos individuais e [T5](phase-3/t5-duplicate-and-contradiction-evidence.md) acrescenta dedupe exato e evidencia relacionada; as demais garantias continuam pendentes. |
 
 ## Superficie operacional
 
@@ -38,9 +38,9 @@ Os estados usados sao:
 |---|---|---|
 | `memory_search` | **Implementado.** | Busca secoes folha da memoria canonica dentro de um budget exato. |
 | `memory_expand` | **Implementado.** | Expande um handle de busca e rejeita handles obsoletos. |
-| `memory_propose` | **Implementado.** | Valida, grava e commita uma proposta Markdown no inbox depois da confirmacao conduzida pelo cliente. |
+| `memory_propose` | **Implementado.** | Valida, grava e commita uma proposta Markdown; payload canonico byte-identico retorna a proposta existente com `duplicate: true` sem novo commit. |
 | `memory_proposal_list` | **Implementado.** | Revalida schema e privacidade antes de listar propostas commitadas e categorias configuradas, sem criar estado privado ou alterar o repositorio. |
-| `memory_curate_preview` | **Implementado.** | Gera sem escrita o diff de `create_page`, `create_section`, `replace_section`, `remove_section`, `remove_page` ou `discard_proposal`. |
+| `memory_curate_preview` | **Implementado.** | Gera sem escrita o diff e evidencia separada em candidatos canonicos e propostas relacionadas, no mesmo `HEAD`. |
 | `memory_curate_apply` | **Implementado para destinos individuais.** | Consome uma vez um preview do mesmo processo, revalida drift e cria o commit exato de consumo ou descarte. |
 | Tools legadas `memory_propose_create_*` e `proposal_apply/publish` | **Removido.** | O lifecycle anterior continua ausente; a curadoria atual usa preview single-use e um commit do inbox para o canônico. |
 
@@ -85,7 +85,7 @@ Os estados usados sao:
 | Privacidade semantica | **Parcial.** Texto livre nao e classificado semanticamente como prompt, resposta ou transcript quando nao corresponde aos padroes normativos. |
 | Limites | **Implementado.** Candidato, titulo, conhecimento, paths e quantidade de fontes possuem limites fechados. |
 | Fail-closed da captura | **Implementado.** Schema, privacidade ou path invalidos encerram a chamada sem proposta. |
-| Idempotencia da captura | **Nao implementada.** Cada chamada aceita cria uma nova proposta; evitar duplicatas depende do `/remember` e da curadoria futura. |
+| Idempotencia da captura | **Implementada para igualdade exata.** O conteudo Markdown canonico completo e comparado sob lock; equivalencia semantica continua sendo evidencia para decisao humana. |
 
 ## Inbox e Git
 
@@ -109,6 +109,7 @@ Os estados usados sao:
 | Setup global | **Implementado.** O MCP e `/remember` sao instalados no escopo do usuario. |
 | MCP por stdio | **Implementado.** Nao ha daemon, porta local ou container obrigatorio. |
 | `/remember` explicito | **Implementado.** O skill nao e invocado automaticamente pelo modelo. |
+| Dedupe no `/remember` | **Implementado.** Resposta `duplicate: true` informa que ID, path e commit existentes foram reutilizados sem nova publicacao. |
 | `/curate` explicito | **Implementado para `create`, `update`, `remove` e descarte.** Pesquisa memoria, escolhe uma operacao, gera preview e exige confirmacao antes do apply. |
 | Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
 | Confirmacao humana | **Implementado no contrato.** Os campos exatos sao apresentados antes de uma unica chamada a `memory_propose`. |
@@ -126,7 +127,7 @@ Os estados usados sao:
 | Remocao de memoria canonica | **Implementado para destinos individuais.** `remove_section` exclui uma secao folha identificada; `remove_page` aceita somente a forma exata de uma pagina gerada com uma unica secao `Overview`. Nao ha cascade delete ou reparo de links. |
 | Consumo atomico de propostas | **Parcial.** `create`, `update` e `remove` alteram o target canonico e removem a proposta no mesmo commit exato; lotes ainda nao sao suportados. |
 | Descarte auditavel | **Implementado.** Remove somente a proposta e registra decisao e reason code fechado no commit Git. |
-| Deteccao de duplicidade e contradicao | **Adiado.** Search orienta a captura, mas nao decide equivalencia ou conflito semantico. |
+| Duplicidade e contradicao | **Parcial e observavel.** Dedupe exato bloqueia publicacao repetida; preview separa candidatos canonicos e propostas relacionadas; `/curate` classifica equivalencia ou contradicao como avaliacao assistida e exige escolha humana. Nao ha detector semantico completo. |
 | Validacao por agentes | **Adiado.** Nenhum agente possui autoridade de curadoria. |
 | Pull request e politica de merge | **Adiado.** Revisao e push atuais usam Git comum, sem automacao remota. |
 | Nova avaliacao de valor | **Pendente.** Os experimentos da Fase 2 avaliaram o lifecycle supersedido e nao foram repetidos com o inbox atual. |
@@ -142,4 +143,4 @@ go vet ./...
 go build ./...
 ```
 
-A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit do inbox, listagem privada do inbox, preview e apply de criacao, substituicao, remocao e descarte, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao da memoria curada por um novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.
+A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, listagem privada, evidencia relacionada, preview e apply de todos os destinos individuais, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao por novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.

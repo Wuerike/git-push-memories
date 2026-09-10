@@ -54,6 +54,7 @@ type Proposal struct {
 	Target          string   `json:"target,omitempty"`
 	Knowledge       string   `json:"knowledge"`
 	SourcePaths     []string `json:"source_paths"`
+	Duplicate       bool     `json:"duplicate,omitempty"`
 }
 
 type Inbox struct {
@@ -98,6 +99,31 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 		branch, err := inbox.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
 		if err != nil || branch != "main" {
 			return ErrNotMain
+		}
+		candidate := Proposal{
+			SchemaVersion: 1, Title: normalized.Title, SuggestedAction: normalized.SuggestedAction, Target: normalized.Target,
+			Knowledge: normalized.Knowledge, SourcePaths: append([]string(nil), normalized.SourcePaths...),
+		}
+		candidateContents := render(candidate)
+		existing, err := inbox.List(ctx)
+		if err != nil {
+			return err
+		}
+		for _, snapshot := range existing {
+			if !bytes.Equal(snapshot.Contents, candidateContents) {
+				continue
+			}
+			if err := inbox.Confirm(ctx, snapshot); err != nil {
+				return err
+			}
+			commit, err := inbox.gitText(ctx, nil, "log", "--format=%H", "--diff-filter=A", "--max-count=1", "--", snapshot.Proposal.Path)
+			if err != nil || commit == "" {
+				return ErrInvalidProposal
+			}
+			proposal = snapshot.Proposal
+			proposal.Commit = commit
+			proposal.Duplicate = true
+			return nil
 		}
 		id, err := identifier()
 		if err != nil {

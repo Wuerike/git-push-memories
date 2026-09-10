@@ -43,9 +43,14 @@ func TestCurateSkillGrantsOnlyCurationToolsAndConfirmsExactPreview(t *testing.T)
 			t.Fatalf("skill is missing update contract %q", contract)
 		}
 	}
-	for _, contract := range []string{"`remove_section`", "`remove_page`", "`discard_proposal`", "`not_relevant`, `incorrect`, `sensitive`, `wrong_target`, or `superseded`", "leaves the proposal unchanged"} {
+	for _, contract := range []string{"`remove_section`", "`remove_page`", "`discard_proposal`", "`not_relevant`, `incorrect`, `sensitive`, `wrong_target`, `superseded`, or `duplicate`", "leaves the proposal unchanged"} {
 		if !strings.Contains(text, contract) {
 			t.Fatalf("skill is missing remove/discard contract %q", contract)
+		}
+	}
+	for _, contract := range []string{"`equivalent`, `contradictory`, `related`, or `unrelated`", "ask the user to choose the resolution", "canonical candidate and related proposal", "limited evidence"} {
+		if !strings.Contains(text, contract) {
+			t.Fatalf("skill is missing classification contract %q", contract)
 		}
 	}
 }

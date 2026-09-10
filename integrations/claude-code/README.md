@@ -36,7 +36,7 @@ Em qualquer sessao do Claude Code:
 /remember <fato>
 ```
 
-O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como Markdown diretamente em `main`; memoria canonica e staging alheio permanecem inalterados. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
+O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como Markdown diretamente em `main`; uma proposta byte-identica existente e retornada com `duplicate: true` sem novo commit. Memoria canonica e staging alheio permanecem inalterados.
 
 Para consumir ou descartar uma proposta:
 
@@ -44,7 +44,7 @@ Para consumir ou descartar uma proposta:
 /curate [proposal-id]
 ```
 
-A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. Para `create`, escolhe `create_section` ou `create_page`; para `update`, usa `replace_section` somente com target folha inequivoco; para `remove`, usa `remove_section` ou `remove_page` quando a pagina possui a forma gerada elegivel. Propostas que nao devem virar memoria usam `discard_proposal` com reason code fechado. Somente depois de mostrar e confirmar o diff exato a skill aplica o preview. Um commit de consumo altera o target e remove a proposta; um descarte remove somente a proposta e registra a decisao. Staging alheio e preservado, o preview e single-use e qualquer drift exige uma nova invocacao explicita. Lotes ainda nao sao suportados.
+A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. O preview apresenta separadamente candidatos canonicos e propostas relacionadas, limitados e ranqueados por sobreposicao lexical. A skill sugere `equivalent`, `contradictory`, `related` ou `unrelated`; uma contradicao exige escolha humana da resolucao antes do preview, e o diff exato ainda exige confirmacao. Essa classificacao nao garante completude semantica. Staging alheio e preservado, o preview e single-use e qualquer drift exige uma nova invocacao explicita.
 
 O servidor expoe:
 

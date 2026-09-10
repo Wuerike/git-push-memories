@@ -160,9 +160,9 @@ O servidor publica seis tools:
 
 - `memory_search`, para buscar secoes nas categorias configuradas dentro de um orçamento em bytes;
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
-- `memory_propose`, para registrar uma proposta Markdown com titulo, acao sugerida, target opcional, conhecimento e paths de fonte.
+- `memory_propose`, para registrar uma proposta Markdown ou retornar a proposta byte-identica ja existente sem novo commit;
 - `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
-- `memory_curate_preview`, para gerar sem escrita o diff de criacao, substituicao ou remocao de memoria, ou de descarte da proposta;
+- `memory_curate_preview`, para gerar sem escrita o diff e evidencia separada de candidatos canonicos e propostas relacionadas;
 - `memory_curate_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
@@ -188,7 +188,7 @@ A curadoria e iniciada em uma sessao do Claude Code:
 /curate [proposal-id]
 ```
 
-Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. `create` pode gerar uma pagina ou acrescentar uma secao; `update` pode substituir o corpo de uma secao folha; `remove` pode excluir uma secao folha ou uma pagina gerada elegivel. Uma proposta invalida pode ser descartada com reason code fechado sem mudar memoria. O preview nao escreve; depois da confirmacao, o apply revalida o estado e cria um unico commit de consumo ou descarte. Lotes permanecem para as proximas tarefas da Fase 3.
+Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. O preview separa candidatos canonicos e propostas relacionadas para a skill sugerir `equivalent`, `contradictory`, `related` ou `unrelated`. Contradicao exige que a pessoa escolha a resolucao antes do preview e todo diff ainda exige confirmacao. A busca e lexical e limitada, sem garantia de completude semantica. Propostas byte-identicas sao deduplicadas no inbox; lotes permanecem para as proximas tarefas da Fase 3.
 
 ## Licença
 

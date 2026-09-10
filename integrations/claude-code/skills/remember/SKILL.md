@@ -25,7 +25,7 @@ Search is guidance, not authoritative duplicate or contradiction detection. When
 4. Prepare a concise `title`, one `suggested_action` (`create`, `update`, or `remove`), an optional canonical `target`, the self-contained `knowledge`, and only canonical code `source_paths` that support it. Do not include prompts, responses, transcript references, session IDs, or private reasoning.
 5. Show those exact fields and require explicit confirmation to create the proposal.
 6. After confirmation, call `memory_propose` exactly once. Cancellation, insufficient budget, missing MCP server, or any tool error ends the flow without another proposal call or fallback write. If the tool returns `not_on_main`, explain that the memory repository must be checked out on exactly `main` before a new explicit attempt.
-7. Return the proposal ID, Markdown path, and commit. Explain that the proposal is now committed locally on `main`; pushing remains a human action:
+7. Return the proposal ID, Markdown path, and commit. If `duplicate` is true, explain that the exact proposal already existed and no new file or commit was created. Otherwise explain that the proposal is now committed locally on `main`. Pushing remains a human action:
 
 ```bash
 git -C <memory-repository> push

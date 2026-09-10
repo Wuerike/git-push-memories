@@ -12,12 +12,14 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
+	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/unifieddiff"
 	"golang.org/x/sys/unix"
 )
@@ -48,6 +50,7 @@ const (
 	DiscardSensitive   DiscardReason = "sensitive"
 	DiscardWrongTarget DiscardReason = "wrong_target"
 	DiscardSuperseded  DiscardReason = "superseded"
+	DiscardDuplicate   DiscardReason = "duplicate"
 )
 
 type Summary struct {
@@ -64,6 +67,28 @@ type List struct {
 	Categories []string  `json:"categories"`
 	Proposals  []Summary `json:"proposals"`
 }
+
+type RelatedProposal struct {
+	ID                 string       `json:"id"`
+	Path               string       `json:"path"`
+	Title              string       `json:"title"`
+	SuggestedAction    inbox.Action `json:"suggested_action"`
+	Target             string       `json:"target,omitempty"`
+	Knowledge          string       `json:"knowledge"`
+	KnowledgeTruncated bool         `json:"knowledge_truncated,omitempty"`
+	Score              int          `json:"score"`
+}
+
+type RelatedProposals struct {
+	Items     []RelatedProposal `json:"items"`
+	Truncated bool              `json:"truncated"`
+}
+
+const (
+	relatedProposalLimit  = 3
+	relatedKnowledgeBytes = 256
+	relatedEvidenceBudget = 4096
+)
 
 type PreviewRequest struct {
 	Operation   Operation
@@ -182,6 +207,87 @@ func (curator *Curator) List(ctx context.Context) (List, error) {
 		}
 	}
 	return result, nil
+}
+
+func (curator *Curator) RelatedProposals(ctx context.Context, expected Preview, query string) (RelatedProposals, error) {
+	snapshots, err := curator.inbox.List(ctx)
+	if err != nil {
+		return RelatedProposals{}, err
+	}
+	candidates := make([]RelatedProposal, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		if snapshot.Head != expected.head {
+			return RelatedProposals{}, ErrDrift
+		}
+		proposal := snapshot.Proposal
+		if err := curator.inspect(proposal); err != nil {
+			return RelatedProposals{}, err
+		}
+		if proposal.ID == expected.ProposalID {
+			continue
+		}
+		score := retrieval.LexicalScore(query, proposal.Title+" "+proposal.Knowledge)
+		if score == 0 {
+			continue
+		}
+		knowledge := strings.TrimSuffix(proposal.Knowledge, "\n")
+		excerpt, truncated := utf8Excerpt(knowledge, relatedKnowledgeBytes)
+		candidates = append(candidates, RelatedProposal{
+			ID: proposal.ID, Path: proposal.Path, Title: proposal.Title, SuggestedAction: proposal.SuggestedAction, Target: proposal.Target,
+			Knowledge: excerpt, KnowledgeTruncated: truncated, Score: score,
+		})
+	}
+	slices.SortFunc(candidates, func(left, right RelatedProposal) int {
+		if left.Score != right.Score {
+			return right.Score - left.Score
+		}
+		return strings.Compare(left.Path, right.Path)
+	})
+	total := len(candidates)
+	if len(candidates) > relatedProposalLimit {
+		candidates = candidates[:relatedProposalLimit]
+	}
+	for count := len(candidates); count >= 0; count-- {
+		result := RelatedProposals{Items: append([]RelatedProposal(nil), candidates[:count]...), Truncated: count < total}
+		for _, candidate := range result.Items {
+			result.Truncated = result.Truncated || candidate.KnowledgeTruncated
+		}
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			return RelatedProposals{}, err
+		}
+		if len(encoded) <= relatedEvidenceBudget {
+			return result, nil
+		}
+	}
+	return RelatedProposals{}, fmt.Errorf("related proposal evidence exceeds budget")
+}
+
+func (curator *Curator) RevalidatePreview(ctx context.Context, expected Preview) error {
+	_, err := curator.revalidatePreview(ctx, expected)
+	return err
+}
+
+func (curator *Curator) revalidatePreview(ctx context.Context, expected Preview) (Preview, error) {
+	fresh, err := curator.preview(ctx, expected.proposal, expected.request)
+	if err != nil {
+		return Preview{}, err
+	}
+	if !samePreview(fresh, expected) {
+		return Preview{}, ErrDrift
+	}
+	return fresh, nil
+}
+
+func utf8Excerpt(value string, limit int) (string, bool) {
+	if len(value) <= limit {
+		return value, false
+	}
+	end := limit
+	for end > 0 && !utf8.ValidString(value[:end]) {
+		end--
+	}
+	return value[:end], true
 }
 
 func (curator *Curator) Preview(ctx context.Context, request PreviewRequest) (Preview, error) {
@@ -372,7 +478,7 @@ func supports(operation Operation, action inbox.Action) bool {
 
 func validDiscardReason(reason DiscardReason) bool {
 	switch reason {
-	case DiscardNotRelevant, DiscardIncorrect, DiscardSensitive, DiscardWrongTarget, DiscardSuperseded:
+	case DiscardNotRelevant, DiscardIncorrect, DiscardSensitive, DiscardWrongTarget, DiscardSuperseded, DiscardDuplicate:
 		return true
 	default:
 		return false
@@ -402,12 +508,9 @@ func (curator *Curator) confirmConfig(ctx context.Context, expectedHead string) 
 func (curator *Curator) Apply(ctx context.Context, expected Preview) (Result, error) {
 	var result Result
 	err := repolock.With(ctx, curator.cfg.StateRoot, func() error {
-		fresh, err := curator.preview(ctx, expected.proposal, expected.request)
+		fresh, err := curator.revalidatePreview(ctx, expected)
 		if err != nil {
 			return err
-		}
-		if !samePreview(fresh, expected) {
-			return ErrDrift
 		}
 		commit, err := curator.commit(ctx, fresh)
 		if err != nil {

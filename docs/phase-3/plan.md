@@ -1,6 +1,6 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1-T4 implementadas e verificadas; T5-T10 pendentes**.
+Status do plano: **T1-T5 implementadas e verificadas; T6-T10 pendentes**.
 
 ## Objetivo
 
@@ -134,7 +134,7 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 | [T2](t2-create-section-curation.md) | 3B | implementada | `create` pode acrescentar uma secao a uma pagina existente |
 | [T3](t3-replace-section-curation.md) | 3B | implementada | `update` substitui uma secao folha identificada sem acumular estado antigo |
 | [T4](t4-remove-and-discard-curation.md) | 3B | implementada | `remove` e descarte possuem preview, confirmacao e decisao Git observavel |
-| T5 | 3B | pendente | duplicidades e possiveis contradicoes aparecem no preview e exigem decisao |
+| [T5](t5-duplicate-and-contradiction-evidence.md) | 3B | implementada | duplicidades e possiveis contradicoes aparecem no preview e exigem decisao |
 | T6 | 3B | pendente | referencias identificam sua origem e sua integridade e verificada quando disponivel localmente |
 | T7 | 3B | pendente | lotes e falhas nas janelas de publicacao sao reconciliados sem commit duplicado ou lock indevido |
 | T8 | 3B | pendente | E2E reproduz todas as operacoes e garantias do gate tecnico vigente |
