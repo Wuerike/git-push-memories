@@ -167,7 +167,9 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 ## Fase 3: Curadoria e confiança
 
-**Estado atual:** em andamento. A entrada da fase está implementada pelo inbox Markdown e pela fronteira de privacidade; listar, avaliar e consumir propostas ainda está pendente.
+**Plano executável:** [Plano da Fase 3](phase-3/plan.md).
+
+**Estado atual:** em andamento. A Fase 3A está implementada para transformar uma proposta `create` em uma página canônica; a expansão das operações e garantias da Fase 3B é o próximo incremento.
 
 ### Resultado esperado
 

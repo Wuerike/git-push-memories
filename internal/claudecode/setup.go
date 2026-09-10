@@ -16,8 +16,9 @@ import (
 const managedMarker = "<!-- managed-by: git-push-memories -->"
 
 type Result struct {
-	MemoryRoot string
-	SkillPath  string
+	MemoryRoot      string
+	SkillPath       string
+	CurateSkillPath string
 }
 
 func Setup(ctx context.Context, memoryRoot string) (Result, error) {
@@ -32,18 +33,28 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if err != nil {
 		return Result{}, errors.New("executable path could not be resolved")
 	}
-	skillPath, err := rememberSkillPath()
+	rememberPath, err := rememberSkillPath()
 	if err != nil {
 		return Result{}, errors.New("Claude Code skill path could not be resolved")
 	}
-	if err := ensureSkillCanBeManaged(skillPath); err != nil {
+	curateSkillPath, err := skillPath("curate")
+	if err != nil {
+		return Result{}, errors.New("Claude Code skill path could not be resolved")
+	}
+	if err := ensureSkillCanBeManaged(rememberPath, claudeintegration.RememberSkill, "/remember"); err != nil {
+		return Result{}, err
+	}
+	if err := ensureSkillCanBeManaged(curateSkillPath, claudeintegration.CurateSkill, "/curate"); err != nil {
 		return Result{}, err
 	}
 	cfg, err := config.Save(memoryRoot)
 	if err != nil {
 		return Result{}, err
 	}
-	if err := installSkill(skillPath); err != nil {
+	if err := installSkill(rememberPath, claudeintegration.RememberSkill); err != nil {
+		return Result{}, err
+	}
+	if err := installSkill(curateSkillPath, claudeintegration.CurateSkill); err != nil {
 		return Result{}, err
 	}
 
@@ -57,10 +68,14 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if output, err := check.CombinedOutput(); err != nil {
 		return Result{}, fmt.Errorf("Claude Code MCP health check failed: %s", bytes.TrimSpace(output))
 	}
-	return Result{MemoryRoot: cfg.MemoryRoot, SkillPath: skillPath}, nil
+	return Result{MemoryRoot: cfg.MemoryRoot, SkillPath: rememberPath, CurateSkillPath: curateSkillPath}, nil
 }
 
 func rememberSkillPath() (string, error) {
+	return skillPath("remember")
+}
+
+func skillPath(name string) (string, error) {
 	root := os.Getenv("CLAUDE_CONFIG_DIR")
 	if root == "" {
 		home, err := os.UserHomeDir()
@@ -69,10 +84,10 @@ func rememberSkillPath() (string, error) {
 		}
 		root = filepath.Join(home, ".claude")
 	}
-	return filepath.Join(root, "skills", "remember", "SKILL.md"), nil
+	return filepath.Join(root, "skills", name, "SKILL.md"), nil
 }
 
-func ensureSkillCanBeManaged(path string) error {
+func ensureSkillCanBeManaged(path string, expected []byte, name string) error {
 	contents, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -80,13 +95,13 @@ func ensureSkillCanBeManaged(path string) error {
 	if err != nil {
 		return errors.New("existing Claude Code skill could not be read")
 	}
-	if bytes.Equal(contents, claudeintegration.RememberSkill) || bytes.Contains(contents, []byte(managedMarker)) {
+	if bytes.Equal(contents, expected) || bytes.Contains(contents, []byte(managedMarker)) {
 		return nil
 	}
-	return errors.New("Claude Code /remember skill already exists and is not managed by git-push-memories")
+	return fmt.Errorf("Claude Code %s skill already exists and is not managed by git-push-memories", name)
 }
 
-func installSkill(path string) error {
+func installSkill(path string, contents []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return errors.New("Claude Code skill directory could not be created")
 	}
@@ -100,7 +115,7 @@ func installSkill(path string) error {
 		temporary.Close()
 		return errors.New("Claude Code skill could not be secured")
 	}
-	if _, err := temporary.Write(claudeintegration.RememberSkill); err != nil {
+	if _, err := temporary.Write(contents); err != nil {
 		temporary.Close()
 		return errors.New("Claude Code skill could not be written")
 	}

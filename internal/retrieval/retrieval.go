@@ -20,7 +20,7 @@ func New(memoryRoot string, memoryCategories ...string) (*Retriever, error) {
 	if len(memoryCategories) == 0 {
 		return nil, ErrInvalidScope
 	}
-	repository, err := memory.NewReadOnly(memoryRoot)
+	repository, err := memory.Open(memoryRoot)
 	if err != nil {
 		return nil, err
 	}

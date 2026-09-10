@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,8 +11,10 @@ import (
 	"sync"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/curation"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
+	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -23,6 +27,9 @@ type Server struct {
 	stateRoot string
 	inbox     *inbox.Inbox
 	inboxMu   sync.Mutex
+	curator   *curation.Curator
+	curatorMu sync.Mutex
+	previews  map[string]curation.Preview
 }
 
 func New(cfg config.Config, version string) (*Server, error) {
@@ -60,12 +67,25 @@ func New(cfg config.Config, version string) (*Server, error) {
 		Name:        "memory_expand",
 		Description: "Expand one current memory section from a search handle within an exact byte budget.",
 	}, server.expand)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_proposal_list",
+		Description: "List committed Markdown proposals and configured memory categories for explicit human curation.",
+	}, server.listProposals)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_curate_preview",
+		Description: "Preview creating one canonical memory page and consuming its create proposal without writing.",
+	}, server.previewCuration)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_curate_apply",
+		Description: "Apply one previously previewed create curation after explicit human confirmation.",
+	}, server.applyCuration)
 	return server, nil
 }
 
 func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	defer s.retriever.Close()
 	defer s.closeInbox()
+	defer s.closeCurator()
 	transport := &mcp.IOTransport{
 		Reader: io.NopCloser(input),
 		Writer: nopWriteCloser{Writer: output},
@@ -90,6 +110,41 @@ type addProposalInput struct {
 	Target          string   `json:"target,omitempty" jsonschema:"optional canonical relative memory target"`
 	Knowledge       string   `json:"knowledge" jsonschema:"knowledge for a future curator to evaluate"`
 	SourcePaths     []string `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
+}
+
+type listProposalsInput struct{}
+
+type previewCurationInput struct {
+	ProposalID string `json:"proposal_id" jsonschema:"identifier of one committed create proposal"`
+	TargetPath string `json:"target_path" jsonschema:"new canonical page path inside a configured memory category"`
+}
+
+type applyCurationInput struct {
+	PreviewToken string `json:"preview_token" jsonschema:"single-use token returned by memory_curate_preview"`
+}
+
+type curationPreview struct {
+	PreviewToken  string                  `json:"preview_token"`
+	RelatedMemory retrieval.ContextBundle `json:"related_memory"`
+	curation.Preview
+}
+
+type proposalListResponse struct {
+	SchemaVersion int            `json:"schema_version"`
+	Data          *curation.List `json:"data,omitempty"`
+	Error         *toolError     `json:"error,omitempty"`
+}
+
+type curationPreviewResponse struct {
+	SchemaVersion int              `json:"schema_version"`
+	Data          *curationPreview `json:"data,omitempty"`
+	Error         *toolError       `json:"error,omitempty"`
+}
+
+type curationApplyResponse struct {
+	SchemaVersion int              `json:"schema_version"`
+	Data          *curation.Result `json:"data,omitempty"`
+	Error         *toolError       `json:"error,omitempty"`
 }
 
 type inboxToolResponse struct {
@@ -149,6 +204,62 @@ func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input 
 	return nil, inboxToolResponse{SchemaVersion: 1, Data: &stored}, nil
 }
 
+func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, _ listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
+	curator, err := s.proposalCurator()
+	if err != nil {
+		return proposalListFailure("curation_unavailable")
+	}
+	listed, err := curator.List(ctx)
+	if err != nil {
+		return proposalListFailure(curationErrorCode(err))
+	}
+	return nil, proposalListResponse{SchemaVersion: 1, Data: &listed}, nil
+}
+
+func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, input previewCurationInput) (*mcp.CallToolResult, curationPreviewResponse, error) {
+	curator, err := s.proposalCurator()
+	if err != nil {
+		return curationPreviewFailure("curation_unavailable")
+	}
+	preview, err := curator.PreviewCreate(ctx, input.ProposalID, input.TargetPath)
+	if err != nil {
+		return curationPreviewFailure(curationErrorCode(err))
+	}
+	related, err := s.retriever.Retrieve(ctx, preview.Title+" "+preview.Knowledge, retrieval.Scope{}, 4096)
+	if err != nil {
+		return curationPreviewFailure(retrieval.ErrorCode(err))
+	}
+	tokenBytes := make([]byte, 16)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return curationPreviewFailure("curation_unavailable")
+	}
+	token := hex.EncodeToString(tokenBytes)
+	s.curatorMu.Lock()
+	if s.previews == nil {
+		s.previews = make(map[string]curation.Preview)
+	}
+	s.previews[token] = preview
+	s.curatorMu.Unlock()
+	response := curationPreview{PreviewToken: token, RelatedMemory: related, Preview: preview}
+	return nil, curationPreviewResponse{SchemaVersion: 1, Data: &response}, nil
+}
+
+func (s *Server) applyCuration(ctx context.Context, _ *mcp.CallToolRequest, input applyCurationInput) (*mcp.CallToolResult, curationApplyResponse, error) {
+	s.curatorMu.Lock()
+	preview, found := s.previews[input.PreviewToken]
+	delete(s.previews, input.PreviewToken)
+	curator := s.curator
+	s.curatorMu.Unlock()
+	if !found || curator == nil {
+		return curationApplyFailure("invalid_preview")
+	}
+	result, err := curator.ApplyCreate(ctx, preview)
+	if err != nil {
+		return curationApplyFailure(curationErrorCode(err))
+	}
+	return nil, curationApplyResponse{SchemaVersion: 1, Data: &result}, nil
+}
+
 func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
 	bundle, err := s.retriever.Expand(ctx, input.Handle, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
@@ -159,6 +270,14 @@ func (s *Server) closeInbox() {
 	defer s.inboxMu.Unlock()
 	if s.inbox != nil {
 		_ = s.inbox.Close()
+	}
+}
+
+func (s *Server) closeCurator() {
+	s.curatorMu.Lock()
+	defer s.curatorMu.Unlock()
+	if s.curator != nil {
+		_ = s.curator.Close()
 	}
 }
 
@@ -176,8 +295,57 @@ func (s *Server) proposalInbox() (*inbox.Inbox, error) {
 	return proposalInbox, nil
 }
 
+func (s *Server) proposalCurator() (*curation.Curator, error) {
+	s.curatorMu.Lock()
+	defer s.curatorMu.Unlock()
+	if s.curator != nil {
+		return s.curator, nil
+	}
+	curator, err := curation.New(s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.curator = curator
+	return curator, nil
+}
+
 func inboxFailure(code string) (*mcp.CallToolResult, inboxToolResponse, error) {
 	return &mcp.CallToolResult{IsError: true}, inboxToolResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+}
+
+func proposalListFailure(code string) (*mcp.CallToolResult, proposalListResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, proposalListResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+}
+
+func curationPreviewFailure(code string) (*mcp.CallToolResult, curationPreviewResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, curationPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+}
+
+func curationApplyFailure(code string) (*mcp.CallToolResult, curationApplyResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, curationApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+}
+
+func curationErrorCode(err error) string {
+	switch {
+	case errors.Is(err, inbox.ErrNotMain):
+		return "not_on_main"
+	case errors.Is(err, inbox.ErrInvalidProposal):
+		return "invalid_proposal"
+	case errors.Is(err, curation.ErrUnsupported):
+		return "unsupported_action"
+	case errors.Is(err, curation.ErrLocked):
+		return "git_index_locked"
+	case errors.Is(err, inbox.ErrProposalDrift), errors.Is(err, curation.ErrDrift), errors.Is(err, memory.ErrDrift), errors.Is(err, memory.ErrTargetDirty), errors.Is(err, memory.ErrTargetExists):
+		return "curation_drift"
+	case errors.Is(err, memory.ErrInvalidPath), errors.Is(err, memory.ErrInvalidSchema), errors.Is(err, memory.ErrGeneratedIDTooLong):
+		return "invalid_target"
+	default:
+		var rejection intake.Rejection
+		if errors.As(err, &rejection) {
+			return rejection.Class + "_" + rejection.Reason
+		}
+		return "curation_failed"
+	}
 }
 
 func retrievalResponse(bundle retrieval.ContextBundle, err error) (*mcp.CallToolResult, toolResponse, error) {

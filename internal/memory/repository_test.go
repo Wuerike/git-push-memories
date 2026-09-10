@@ -120,7 +120,7 @@ func TestPreviewCreatePageRejectsInvalidStructure(t *testing.T) {
 		want    error
 	}{
 		{name: "root path", request: memory.CreatePageRequest{TargetPath: "page.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
-		{name: "nested path", request: memory.CreatePageRequest{TargetPath: "memories/nested/page.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
+		{name: "uppercase directory", request: memory.CreatePageRequest{TargetPath: "memories/Nested/page.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
 		{name: "missing extension", request: memory.CreatePageRequest{TargetPath: "page", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
 		{name: "uppercase filename", request: memory.CreatePageRequest{TargetPath: "Page.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},
 		{name: "reserved filename", request: memory.CreatePageRequest{TargetPath: "con.md", Title: "Page", Body: "Body."}, want: memory.ErrInvalidPath},

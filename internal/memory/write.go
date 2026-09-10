@@ -49,19 +49,38 @@ func durableCreate(rootFD int, relativePath string, content []byte, mode os.File
 	return durableWrite(rootFD, relativePath, content, mode, "", true, fault)
 }
 
-func ensureMemoryDirectory(rootFD int) error {
-	if err := unix.Mkdirat(rootFD, "memories", 0o755); err != nil && !errors.Is(err, unix.EEXIST) {
-		return err
-	}
-	directoryFD, err := unix.Openat2(rootFD, "memories", &unix.OpenHow{
-		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
-		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
-	})
+func ensureMemoryParentDirectories(rootFD int, targetPath string) error {
+	parent, _ := path.Split(targetPath)
+	segments := strings.Split(strings.TrimSuffix(parent, "/"), "/")
+	currentFD, err := unix.Dup(rootFD)
 	if err != nil {
 		return err
 	}
-	defer unix.Close(directoryFD)
-	return unix.Fsync(rootFD)
+	defer func() { _ = unix.Close(currentFD) }()
+	for _, segment := range segments {
+		created := false
+		if err := unix.Mkdirat(currentFD, segment, 0o755); err == nil {
+			created = true
+		} else if !errors.Is(err, unix.EEXIST) {
+			return err
+		}
+		nextFD, err := unix.Openat2(currentFD, segment, &unix.OpenHow{
+			Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
+			Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+		})
+		if err != nil {
+			return err
+		}
+		if created {
+			if err := unix.Fsync(currentFD); err != nil {
+				_ = unix.Close(nextFD)
+				return err
+			}
+		}
+		_ = unix.Close(currentFD)
+		currentFD = nextFD
+	}
+	return nil
 }
 
 func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileMode, expectedHash string, create bool, fault writeFault) error {

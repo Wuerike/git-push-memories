@@ -1,6 +1,6 @@
 # Claude Code
 
-Esta integracao usa MCP sobre stdio e o skill explicito `/remember`. Ela nao instala hooks, nao captura sessoes e nao altera memoria canonica durante a captura.
+Esta integracao usa MCP sobre stdio e os skills explicitos `/remember` e `/curate`. Ela nao instala hooks, nao captura sessoes e nao altera memoria canonica durante a captura.
 
 ## Configurar
 
@@ -15,7 +15,7 @@ O repositorio deve ser um worktree Git ja clonado, possuir pelo menos um commit 
 - salva o memory root na configuracao global do usuario;
 - deriva um state root privado em `$XDG_STATE_HOME/git-push-memories` ou `~/.local/state/git-push-memories`;
 - registra `gpm mcp` no escopo `user` do Claude Code;
-- instala o skill global em `~/.claude/skills/remember/SKILL.md`.
+- instala os skills globais em `~/.claude/skills/remember/SKILL.md` e `~/.claude/skills/curate/SKILL.md`.
 
 O setup e idempotente. Execute-o novamente depois de mover o binario ou para selecionar outro repositorio de memoria.
 
@@ -38,11 +38,22 @@ Em qualquer sessao do Claude Code:
 
 O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como Markdown diretamente em `main`; memoria canonica e staging alheio permanecem inalterados. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
 
-O servidor expoe somente:
+Para transformar uma proposta de criacao em memoria canonica:
+
+```text
+/curate [proposal-id]
+```
+
+A skill lista o inbox depois de revalidar sua privacidade, seleciona uma proposta `create`, mostra seu conteudo, escolhe uma pagina dentro das categorias configuradas e recupera memoria canonica relacionada antes de mostrar o diff exato. Somente depois de confirmacao explicita ela aplica o preview. O commit resultante adiciona a pagina canonica e remove a proposta consumida, sem incluir staging alheio. O preview e single-use e qualquer drift exige uma nova invocacao explicita. `update`, `remove`, descarte e lotes ainda nao sao suportados.
+
+O servidor expoe:
 
 - `memory_search`;
 - `memory_expand`;
 - `memory_propose`.
+- `memory_proposal_list`;
+- `memory_curate_preview`;
+- `memory_curate_apply`.
 
 O commit local pode ser revisado e enviado com Git comum:
 
@@ -51,6 +62,6 @@ git -C <memory-repository> show --stat HEAD
 git -C <memory-repository> push
 ```
 
-O push e sempre humano e o produto nao acessa remotos. A curadoria posterior do inbox e um fluxo separado.
+O push e sempre humano e o produto nao acessa remotos.
 
 Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.

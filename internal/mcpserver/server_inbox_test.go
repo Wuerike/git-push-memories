@@ -179,6 +179,322 @@ func TestMemoryProposeReportsGitIndexLock(t *testing.T) {
 	}
 }
 
+func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{
+		"staged.txt":   "before staged\n",
+		"unstaged.txt": "before unstaged\n",
+	})
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	session, stop := startServer(t, memoryRoot, stateRoot)
+	defer stop()
+
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose",
+		Arguments: map[string]any{
+			"title":            "Parcel dispatch retry policy",
+			"suggested_action": "create",
+			"knowledge":        "Parcel dispatch retries use exponential backoff and stop after three failures.",
+			"source_paths":     []string{"services/parcel/dispatch.go"},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	if proposal == nil {
+		t.Fatal("memory_propose returned no proposal")
+	}
+	proposalHead := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+
+	if err := os.WriteFile(filepath.Join(memoryRoot, "staged.txt"), []byte("after staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, memoryRoot, "add", "staged.txt")
+	if err := os.WriteFile(filepath.Join(memoryRoot, "unstaged.txt"), []byte("after unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	listResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_proposal_list", Arguments: map[string]any{},
+	})
+	if err != nil || listResult.IsError {
+		t.Fatalf("memory_proposal_list = %+v, %v", listResult, err)
+	}
+	var listed struct {
+		Data struct {
+			Categories []string `json:"categories"`
+			Proposals  []struct {
+				ID              string `json:"id"`
+				Title           string `json:"title"`
+				SuggestedAction string `json:"suggested_action"`
+			} `json:"proposals"`
+		} `json:"data"`
+	}
+	decodeStructured(t, listResult, &listed)
+	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposal.ID || listed.Data.Proposals[0].Title != proposal.Title || listed.Data.Proposals[0].SuggestedAction != "create" {
+		t.Fatalf("listed proposals = %+v", listed.Data.Proposals)
+	}
+	if strings.Join(listed.Data.Categories, ",") != "domains,decision" {
+		t.Fatalf("listed categories = %v", listed.Data.Categories)
+	}
+
+	target := "memories/domains/parcel-dispatch-retry-policy.md"
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview",
+		Arguments: map[string]any{
+			"proposal_id": proposal.ID,
+			"target_path": target,
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string   `json:"preview_token"`
+			ProposalID   string   `json:"proposal_id"`
+			Title        string   `json:"title"`
+			SourcePaths  []string `json:"source_paths"`
+			TargetPath   string   `json:"target_path"`
+			Diff         string   `json:"diff"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if preview.Data.PreviewToken == "" || preview.Data.ProposalID != proposal.ID || preview.Data.Title != proposal.Title || preview.Data.TargetPath != target {
+		t.Fatalf("preview = %+v", preview.Data)
+	}
+	if len(preview.Data.SourcePaths) != 1 || preview.Data.SourcePaths[0] != "services/parcel/dispatch.go" {
+		t.Fatalf("preview sources = %v", preview.Data.SourcePaths)
+	}
+	if !strings.Contains(preview.Data.Diff, "+++ b/"+target) || !strings.Contains(preview.Data.Diff, "--- a/"+proposal.Path) || !strings.Contains(preview.Data.Diff, "+++ /dev/null") {
+		t.Fatalf("preview diff = %s", preview.Data.Diff)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != proposalHead {
+		t.Fatalf("preview changed HEAD from %s to %s", proposalHead, current)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(target))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("preview created target: %v", err)
+	}
+
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply",
+		Arguments: map[string]any{
+			"preview_token": preview.Data.PreviewToken,
+		},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	var applied struct {
+		Data struct {
+			ProposalID string `json:"proposal_id"`
+			TargetPath string `json:"target_path"`
+			SectionID  string `json:"section_id"`
+			Commit     string `json:"commit"`
+		} `json:"data"`
+	}
+	decodeStructured(t, applyResult, &applied)
+	if applied.Data.ProposalID != proposal.ID || applied.Data.TargetPath != target || applied.Data.SectionID != "parcel-dispatch-retry-policy-overview" || applied.Data.Commit == "" {
+		t.Fatalf("apply = %+v", applied.Data)
+	}
+	if head := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); head != applied.Data.Commit {
+		t.Fatalf("HEAD = %s, commit = %s", head, applied.Data.Commit)
+	}
+	changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD")
+	wantChanged := "A\t" + target + "\nD\t" + proposal.Path
+	if changed != wantChanged {
+		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("consumed proposal remains: %v", err)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(target)))
+	if err != nil || !strings.Contains(string(page), "Parcel dispatch retries use exponential backoff") {
+		t.Fatalf("canonical page = %q, %v", page, err)
+	}
+	if staged := gitOutput(t, memoryRoot, "diff", "--cached", "--name-only"); staged != "staged.txt" {
+		t.Fatalf("staged changes = %q", staged)
+	}
+	if unstaged := gitOutput(t, memoryRoot, "diff", "--name-only"); unstaged != "unstaged.txt" {
+		t.Fatalf("unstaged changes = %q", unstaged)
+	}
+
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "parcel dispatch exponential backoff", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search after curation = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	if search.Data == nil || len(search.Data.Items) != 1 || search.Data.Items[0].Handle.Path != target {
+		t.Fatalf("curated search = %+v", search.Data)
+	}
+}
+
+func TestProposalListIsReadOnly(t *testing.T) {
+	const proposalID = "0123456789abcdef0123456789abcdef"
+	proposalPath := "proposals/" + proposalID + "-retry-policy.md"
+	memoryRoot := newGitRoot(t, map[string]string{
+		proposalPath: "---\nschema_version: 1\nsuggested_action: \"create\"\nsource_paths: []\n---\n\n# Retry policy\n\nRetries stop after three failures.\n",
+	})
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	session, stop := startServer(t, memoryRoot, stateRoot)
+	defer stop()
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_proposal_list", Arguments: map[string]any{}})
+	if err != nil || result.IsError {
+		t.Fatalf("memory_proposal_list = %+v, %v", result, err)
+	}
+	var listed struct {
+		Data struct {
+			Proposals []struct {
+				ID          string   `json:"id"`
+				Knowledge   string   `json:"knowledge"`
+				SourcePaths []string `json:"source_paths"`
+			} `json:"proposals"`
+		} `json:"data"`
+	}
+	decodeStructured(t, result, &listed)
+	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposalID || listed.Data.Proposals[0].Knowledge != "Retries stop after three failures.\n" || len(listed.Data.Proposals[0].SourcePaths) != 0 {
+		t.Fatalf("listed proposals = %+v", listed.Data.Proposals)
+	}
+	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("proposal list created private state: %v", err)
+	}
+}
+
+func TestProposalListRejectsSensitiveCommittedProposalBeforeDisclosure(t *testing.T) {
+	const proposalID = "0123456789abcdef0123456789abcdef"
+	memoryRoot := newGitRoot(t, map[string]string{
+		"proposals/" + proposalID + "-unsafe-fact.md": "---\nschema_version: 1\nsuggested_action: \"create\"\nsource_paths: []\n---\n\n# Unsafe fact\n\npassword=super-secret\n",
+	})
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	session, stop := startServer(t, memoryRoot, stateRoot)
+	defer stop()
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_proposal_list", Arguments: map[string]any{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Data  any `json:"data"`
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeStructured(t, result, &response)
+	if !result.IsError || response.Data != nil || response.Error == nil || response.Error.Code != "privacy_sensitive_content" {
+		t.Fatalf("sensitive proposal list = %+v, response = %+v", result, response)
+	}
+	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rejected proposal list created private state: %v", err)
+	}
+}
+
+func TestCuratePreviewReturnsRelatedCanonicalMemory(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Checkout timeout ownership", "suggested_action": "create",
+			"knowledge": "Checkout timeout is maintained by team-b.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-ownership.md",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			RelatedMemory retrieval.ContextBundle `json:"related_memory"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if len(preview.Data.RelatedMemory.Items) != 1 || preview.Data.RelatedMemory.Items[0].Handle.Path != "memories/domains/checkout-api.md" {
+		t.Fatalf("related memory = %+v", preview.Data.RelatedMemory)
+	}
+}
+
+func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
+	memoryRoot := newGitRoot(t, nil)
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Retry policy", "suggested_action": "create", "knowledge": "Retries stop after three failures.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"proposal_id": proposal.ID, "target_path": "memories/domains/retry-policy.md",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+
+	if err := os.WriteFile(filepath.Join(memoryRoot, "unrelated.txt"), []byte("new commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, memoryRoot, "add", "unrelated.txt")
+	runGit(t, memoryRoot, "commit", "--quiet", "-m", "advance HEAD")
+	advancedHead := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+
+	apply := func() (*mcp.CallToolResult, string) {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var response struct {
+			Error *struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		decodeStructured(t, result, &response)
+		if response.Error == nil {
+			t.Fatalf("apply response = %+v", result)
+		}
+		return result, response.Error.Code
+	}
+	if result, code := apply(); !result.IsError || code != "curation_drift" {
+		t.Fatalf("drift apply = %+v, code = %q", result, code)
+	}
+	if result, code := apply(); !result.IsError || code != "invalid_preview" {
+		t.Fatalf("reused token = %+v, code = %q", result, code)
+	}
+	if head := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); head != advancedHead {
+		t.Fatalf("failed apply changed HEAD from %s to %s", advancedHead, head)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "domains", "retry-policy.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed apply created memory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("failed apply removed proposal: %v", err)
+	}
+}
+
 type response struct {
 	SchemaVersion int                      `json:"schema_version"`
 	Data          *retrieval.ContextBundle `json:"data,omitempty"`
@@ -219,6 +535,17 @@ func decodeInboxResponse(t *testing.T, result *mcp.CallToolResult) inboxResponse
 		t.Fatal(err)
 	}
 	return decoded
+}
+
+func decodeStructured(t *testing.T, result *mcp.CallToolResult, target any) {
+	t.Helper()
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(encoded, target); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func startServer(t *testing.T, memoryRoot, stateRoot string) (*mcp.ClientSession, func()) {

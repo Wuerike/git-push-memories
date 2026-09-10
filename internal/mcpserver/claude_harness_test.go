@@ -63,6 +63,74 @@ func TestClaudeAdapterCommitsProposalToMemoryRepository(t *testing.T) {
 	}
 }
 
+func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T) {
+	memoryRoot := newGitRoot(t, nil)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if _, err := config.Save(memoryRoot); err != nil {
+		t.Fatal(err)
+	}
+	binary := buildBinary(t)
+
+	client := mcp.NewClient(&mcp.Implementation{Name: "claude-curation-harness", Version: "test"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(binary, "mcp")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Settlement retry policy", "suggested_action": "create",
+			"knowledge": "Settlement retries stop after three failures.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"proposal_id": proposal.ID, "target_path": "memories/domains/settlement-retry-policy.md",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	freshClient := mcp.NewClient(&mcp.Implementation{Name: "fresh-retrieval-harness", Version: "test"}, nil)
+	freshSession, err := freshClient.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(binary, "mcp")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchResult, err := freshSession.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "settlement retry failures", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("fresh memory_search = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	if search.Data == nil || len(search.Data.Items) != 1 || search.Data.Items[0].Handle.Path != "memories/domains/settlement-retry-policy.md" || !strings.Contains(search.Data.Items[0].Content, "Settlement retries stop after three failures") {
+		t.Fatalf("fresh search = %+v", search.Data)
+	}
+	if err := freshSession.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMissingClaudeMCPIsVisibleWithoutPersistingPayload(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-harness", Version: "test"}, nil)

@@ -14,10 +14,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Wuerike/git-push-memories/internal/repolock"
 	"golang.org/x/sys/unix"
 )
 
@@ -31,6 +31,7 @@ const (
 
 var (
 	ErrInvalidProposal = errors.New("invalid proposal")
+	ErrProposalDrift   = errors.New("proposal drifted")
 	ErrNotMain         = errors.New("memory repository must be on main")
 	ErrIndexLocked     = errors.New("Git index is locked")
 )
@@ -383,38 +384,7 @@ func render(proposal Proposal) []byte {
 }
 
 func (inbox *Inbox) withLock(ctx context.Context, action func() error) error {
-	if err := os.MkdirAll(inbox.stateRoot, 0o700); err != nil {
-		return fmt.Errorf("create inbox state")
-	}
-	if err := os.Chmod(inbox.stateRoot, 0o700); err != nil {
-		return fmt.Errorf("secure inbox state")
-	}
-	lockFD, err := unix.Open(filepath.Join(inbox.stateRoot, "inbox.lock"), unix.O_RDWR|unix.O_CREAT|unix.O_CLOEXEC|unix.O_NOFOLLOW|unix.O_NONBLOCK, 0o600)
-	if err != nil {
-		return fmt.Errorf("open inbox lock")
-	}
-	lock := os.NewFile(uintptr(lockFD), "inbox.lock")
-	if lock == nil {
-		_ = unix.Close(lockFD)
-		return fmt.Errorf("open inbox lock")
-	}
-	defer lock.Close()
-	for {
-		err := unix.Flock(lockFD, unix.LOCK_EX|unix.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
-			return fmt.Errorf("lock inbox")
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-	defer unix.Flock(lockFD, unix.LOCK_UN)
-	return action()
+	return repolock.With(ctx, inbox.stateRoot, action)
 }
 
 func (inbox *Inbox) gitText(ctx context.Context, input []byte, arguments ...string) (string, error) {

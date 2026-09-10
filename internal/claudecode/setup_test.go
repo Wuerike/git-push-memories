@@ -36,6 +36,10 @@ func TestSetupConfiguresGlobalMCPAndSkill(t *testing.T) {
 	if err != nil || !strings.Contains(string(contents), managedMarker) {
 		t.Fatalf("installed skill = %q, %v", contents, err)
 	}
+	curateContents, err := os.ReadFile(result.CurateSkillPath)
+	if err != nil || !strings.Contains(string(curateContents), managedMarker) {
+		t.Fatalf("installed curate skill = %q, %v", curateContents, err)
+	}
 	log, err := os.ReadFile(logPath)
 	if err != nil {
 		t.Fatal(err)

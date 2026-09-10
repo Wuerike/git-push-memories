@@ -57,7 +57,7 @@ func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "Configured memory at %s. Use /remember <fact> in any Claude Code session.\n", result.MemoryRoot)
+	fmt.Fprintf(stdout, "Configured memory at %s. Use /remember <fact> and /curate in any Claude Code session.\n", result.MemoryRoot)
 	return 0
 }
 

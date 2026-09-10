@@ -67,7 +67,7 @@ func TestSetupConfiguresGlobalCommands(t *testing.T) {
 	if exitCode := Run(context.Background(), []string{"setup", memoryRoot}, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 {
 		t.Fatalf("setup exit = %d, stderr = %q", exitCode, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "Use /remember <fact> in any Claude Code session") {
+	if !strings.Contains(stdout.String(), "Use /remember <fact> and /curate in any Claude Code session") {
 		t.Fatalf("setup output = %q", stdout.String())
 	}
 	if _, err := config.Load(); err != nil {
@@ -181,8 +181,14 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Tools) != 3 || result.Tools[0].Name != "memory_expand" || result.Tools[1].Name != "memory_propose" || result.Tools[2].Name != "memory_search" {
-		t.Fatalf("ListTools() = %+v, want only read and proposal tools", result.Tools)
+	wantTools := []string{"memory_curate_apply", "memory_curate_preview", "memory_expand", "memory_proposal_list", "memory_propose", "memory_search"}
+	if len(result.Tools) != len(wantTools) {
+		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
+	}
+	for index, want := range wantTools {
+		if result.Tools[index].Name != want {
+			t.Fatalf("ListTools()[%d] = %q, want %q", index, result.Tools[index].Name, want)
+		}
 	}
 	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_search",

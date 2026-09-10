@@ -54,6 +54,16 @@ func Create(filePath string, contents []byte) string {
 	return output.String()
 }
 
+func Delete(filePath string, contents []byte) string {
+	lines := splitLines(string(contents))
+	var output strings.Builder
+	fmt.Fprintf(&output, "--- a/%s\n+++ /dev/null\n@@ -1,%d +0,0 @@\n", filePath, len(lines))
+	for _, current := range lines {
+		writeLine(&output, '-', current)
+	}
+	return output.String()
+}
+
 func splitLines(value string) []line {
 	if value == "" {
 		return nil

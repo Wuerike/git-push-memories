@@ -22,7 +22,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-var createPagePath = regexp.MustCompile(`^memories/[a-z0-9]+(?:-[a-z0-9]+)*\.md$`)
+var createPagePath = regexp.MustCompile(`^memories/[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*\.md$`)
 
 var reservedPageNames = map[string]struct{}{
 	"aux": {}, "con": {}, "nul": {}, "prn": {},
@@ -53,7 +53,8 @@ func New(root string) (*Repository, error) {
 	return open(root, true)
 }
 
-func NewReadOnly(root string) (*Repository, error) {
+// Open avoids startup cleanup so callers can keep discovery and preview side-effect free.
+func Open(root string) (*Repository, error) {
 	return open(root, false)
 }
 
@@ -273,8 +274,8 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 		if err != nil || confirmedHead != request.Head {
 			return ErrDrift
 		}
-		if err := ensureMemoryDirectory(int(repository.root.Fd())); err != nil {
-			return fmt.Errorf("create memory directory: %w", err)
+		if err := ensureMemoryParentDirectories(int(repository.root.Fd()), targetPath); err != nil {
+			return fmt.Errorf("create memory directories: %w", err)
 		}
 		if err := durableCreate(int(repository.root.Fd()), targetPath, postState, 0o644, repository.fault); err != nil {
 			return fmt.Errorf("write memory file: %w", err)
