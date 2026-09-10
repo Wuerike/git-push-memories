@@ -175,33 +175,105 @@ Transformar propostas do inbox em memória canônica atual, coerente e recuperá
 
 Uma curadoria concluída deve produzir um commit auditável que atualize os arquivos canônicos necessários e remova, no mesmo commit, todas as propostas consumidas. Propostas descartadas também devem sair do inbox por uma decisão Git observável. O desenho da interface de curadoria deve ser definido por tracer bullets antes de escolher comandos, automação ou política de branches.
 
-### Capacidades
+### Fronteiras da fase
 
-- leitura e validação do schema Markdown das propostas no inbox;
-- detecção de duplicidades e possíveis contradições;
-- decisão entre criar, atualizar, remover ou descartar conhecimento;
-- escolha e validação dos targets dentro das categorias configuradas;
-- validações determinísticas de estrutura e referências;
-- validação por agente nos pontos em que ela agregar evidência;
-- apresentação clara do diff de curadoria antes da escrita;
-- commit atômico contendo memória canônica e remoção das propostas consumidas;
-- preservação de staging alheio e tratamento explícito de concorrência local;
-- revisão compartilhada pelo fluxo Git adotado pelo time, sem acesso remoto automático.
+- O Markdown e o histórico Git continuam sendo a única autoridade durável; estado temporário de preview ou execução não cria um lifecycle paralelo.
+- A ação e o target presentes em uma proposta são sugestões. A operação canônica é decidida durante a curadoria a partir da proposta e do estado atual.
+- O agente pode classificar significado, duplicidade e contradição, mas não escreve memória por conta própria. O GPM valida estrutura, paths, hashes, privacidade, concorrência e o conjunto exato de mudanças.
+- Nenhuma escrita ocorre antes da apresentação do diff e da confirmação explícita da pessoa.
+- Um commit de curadoria contém as alterações canônicas e a remoção das propostas consumidas ou descartadas. Seus IDs devem permanecer identificáveis no histórico Git.
+- Staging e mudanças alheias são preservados. O produto não executa fetch, pull, push, merge nem cria pull request.
+- Sessões, prompts e respostas não são entradas da curadoria e não são persistidos.
+- Captura automática, índice semântico e automação remota permanecem fora da fase.
 
-### Entregáveis
+As etapas abaixo são incrementos internos da Fase 3, não novas fases do roadmap. A Fase 3A corresponde ao primeiro tracer bullet prioritário; somente a conclusão da Fase 3C encerra a fase.
 
-- contrato de leitura e seleção de propostas do inbox;
-- política inicial de curadoria e descarte;
-- operações canônicas de criação, atualização e remoção de memória;
-- conjunto de validações estruturais, de privacidade e de referências;
-- commit path-scoped ou multi-path seguro que consome propostas e atualiza memória;
-- testes para privacidade, duplicidade, contradição e atualização;
-- fluxo documentado de revisão, curadoria e push humano;
-- nova avaliação de valor sobre o fluxo vigente.
+### Fase 3A: tracer bullet de curadoria
+
+**Hipótese:** uma proposta explícita de criação pode se tornar memória canônica recuperável por um fluxo curto, revisável e seguro, sem exigir edição manual de Markdown.
+
+**Cenário vertical:**
+
+```text
+proposta create no inbox
+-> listar e selecionar a proposta
+-> validar e ler seu conteúdo
+-> escolher categoria e path canônico
+-> gerar preview de criação de página
+-> apresentar diff e pedir confirmação
+-> revalidar proposta, HEAD, target e privacidade
+-> criar memória e remover proposta
+-> criar um commit contendo exatamente esses paths
+-> recuperar a nova seção em outro processo
+```
+
+**Inclui:**
+
+- parser e validação do schema Markdown vigente das propostas;
+- interface mínima para listar, selecionar e visualizar uma proposta;
+- operação inicial de criação de página, com IDs de seção gerados pelo produto;
+- preview vinculado ao conteúdo da proposta, ao `HEAD` e ao post-state esperado;
+- confirmação humana sobre o diff exato;
+- escrita e commit path-scoped que não consomem staging alheio;
+- remoção da proposta consumida no mesmo commit da memória criada;
+- detecção de drift entre preview e apply;
+- teste de ponta a ponta desde um memory root sem memória canônica até a recuperação em um novo processo.
+
+**Fora de escopo:** atualização e remoção de memória existente, descarte, lotes de propostas, análise semântica de duplicidade ou contradição, captura automática e operações remotas.
+
+**Critério de conclusão:** o cenário vertical é reproduzível; nenhuma recusa ou falha anterior à confirmação altera memória ou inbox; o commit aceito contém somente a página criada e a remoção da proposta; uma interrupção não pode publicar um commit parcial; e a memória criada é recuperável sem acesso à sessão original.
+
+**Decisão habilitada:** confirmar se a interface e a fronteira entre agente, GPM, pessoa e Git são adequadas antes de expandir as operações de curadoria.
+
+### Fase 3B: operações e confiança
+
+**Hipótese:** o mesmo fluxo pode tratar todo o inbox e manter uma representação coerente do estado atual sem transformar análise probabilística em escrita automática.
+
+**Inclui:**
+
+- operações canônicas de criar página, criar seção, substituir seção e remover seção;
+- descarte auditável de propostas sem alteração canônica;
+- target preciso o suficiente para identificar a seção observada em updates e removes, incluindo path, section ID e sinal de drift quando aplicável;
+- seleção de uma ou mais propostas e garantia de que todas as propostas selecionadas tenham um destino observável: consumir, descartar ou manter pendente sem alteração;
+- deduplicação determinística de propostas idênticas e recuperação de candidatos relacionados no canônico e no inbox;
+- análise assistida de possíveis equivalências e contradições sobre um conjunto limitado e explícito de candidatos;
+- decisão humana para conflitos semânticos; similaridade ou contradição sugerida pelo agente não autoriza escrita por si só;
+- definição não ambígua da origem de referências em cenários com múltiplos repositórios e validação determinística de existência, revisão e conteúdo quando a fonte estiver disponível localmente;
+- distinção explícita entre integridade da referência, validável pelo GPM, e sustentação semântica da afirmação, avaliada pelo agente e pela pessoa;
+- revalidação de schema, privacidade, targets, referências, hashes e `HEAD` imediatamente antes da escrita;
+- commits seguros para múltiplos paths, com preservação de staging alheio, serialização local e diagnóstico de interrupções;
+- testes de criação, atualização, remoção, descarte, duplicidade, contradição, referência inválida, drift, concorrência e privacidade.
+
+**Fora de escopo:** decidir contradições de forma autônoma, provar semanticamente toda afirmação, executar código arbitrário como evidência, capturar sessões, acessar remotos ou introduzir banco vetorial.
+
+**Critério de conclusão:** propostas válidas podem criar páginas ou seções, atualizar memória existente ou remover conhecimento de modo observável; propostas incorretas podem ser descartadas; duplicidades e contradições aparecem no preview e exigem decisão; referências inválidas não são apresentadas como verificadas; e nenhum commit aceito deixa no inbox uma proposta declarada como consumida.
+
+**Decisão habilitada:** confirmar que o fluxo possui garantias suficientes para ser submetido a uma avaliação de valor com uso real.
+
+### Fase 3C: fluxo compartilhado e avaliação de valor
+
+**Hipótese:** a memória consolidada pelo fluxo vigente melhora uma tarefa futura e o custo de curadoria permanece baixo o suficiente para justificar captura automática posteriormente.
+
+**Inclui:**
+
+- documentação do fluxo completo de captura explícita, curadoria, inspeção do commit e push humano;
+- definição do ponto de revisão compartilhada usando o fluxo Git do time, sem automação remota obrigatória;
+- protocolo reproduzível que compare tarefas com e sem a memória canônica produzida pela curadoria atual;
+- critérios definidos antes da execução para validade das runs e para a decisão do gate;
+- medição de relevância recuperada, efeito na tarefa, exploração evitada, tempo de curadoria e volume de contexto;
+- medição de propostas aceitas sem edição, aceitas com edição, descartadas, duplicadas ou contraditórias;
+- registro de falhas de referência, conteúdo desatualizado e incidentes ou quase incidentes de privacidade;
+- relatório com decisão explícita entre avançar para a Fase 4, revisar o fluxo ou interromper a expansão de escopo.
+
+**Fora de escopo:** implementar hooks de captura automática durante o experimento ou adicionar um índice novo para compensar falhas sem antes registrá-las.
+
+**Critério de conclusão:** o experimento é executado sobre o lifecycle vigente, seus resultados são reproduzíveis e existe uma decisão registrada a partir dos critérios previamente definidos.
+
+**Decisão habilitada:** autorizar a Fase 4, revisar novamente o fluxo ou interromper a expansão de escopo.
 
 ### Gate de decisão
 
-A fase termina quando propostas válidas puderem ser transformadas em memória canônica recuperável, propostas incorretas puderem ser descartadas, duplicidades e contradições forem tratadas de forma observável, e o processo inteiro mantiver histórico Git auditável sem deixar propostas consumidas no inbox. O gate de valor deve ser executado novamente sobre esse fluxo antes de avançar para captura automática.
+A fase termina somente depois da Fase 3C, quando propostas válidas puderem ser transformadas em memória canônica recuperável, propostas incorretas puderem ser descartadas, duplicidades e contradições forem tratadas de forma observável, e o processo inteiro mantiver histórico Git auditável sem deixar propostas consumidas no inbox. A avaliação de valor deve demonstrar resultado suficiente pelos critérios definidos no protocolo antes de autorizar a Fase 4. Caso contrário, a decisão permanece `revisar o fluxo` ou interrompe a expansão de escopo.
 
 ## Fase 4: Captura automática
 

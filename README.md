@@ -101,6 +101,7 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 ## Pesquisa
 
 - [Panorama de projetos de memória para IA](docs/ai-memory-projects-overview.md) — análise de projetos relacionados e recomendações para o primeiro ciclo.
+- [Comparação dos mecanismos de geração de memória](docs/memory-generation-mechanisms-comparison.md) — análise do pipeline atual e das sete referências, com implicações prováveis para a qualidade da memória.
 - [Aderência do claude-bedrock](docs/bedrock-fit-analysis.md) — comparação entre o plugin público e o objetivo deste projeto.
 
 ## Planejamento
