@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | [T1](phase-3/t1-create-page-curation.md) cria pagina e [T2](phase-3/t2-create-section-curation.md) cria secao; as demais operacoes e garantias do [plano da Fase 3](phase-3/plan.md) ainda estao pendentes. |
+| Fase 3: curadoria e confianca | **Em andamento.** | [T1](phase-3/t1-create-page-curation.md) cria pagina, [T2](phase-3/t2-create-section-curation.md) cria secao e [T3](phase-3/t3-replace-section-curation.md) substitui secao; remocao, descarte e demais garantias continuam pendentes. |
 
 ## Superficie operacional
 
@@ -40,8 +40,8 @@ Os estados usados sao:
 | `memory_expand` | **Implementado.** | Expande um handle de busca e rejeita handles obsoletos. |
 | `memory_propose` | **Implementado.** | Valida, grava e commita uma proposta Markdown no inbox depois da confirmacao conduzida pelo cliente. |
 | `memory_proposal_list` | **Implementado.** | Revalida schema e privacidade antes de listar propostas commitadas e categorias configuradas, sem criar estado privado ou alterar o repositorio. |
-| `memory_curate_preview` | **Implementado para `create`.** | Valida uma proposta, recupera memoria relacionada e gera sem escrita o diff de `create_page` ou `create_section` junto da remocao da proposta. |
-| `memory_curate_apply` | **Implementado para `create`.** | Consome uma vez um preview do mesmo processo, revalida drift e cria o commit de curadoria. |
+| `memory_curate_preview` | **Implementado para `create` e `update`.** | Gera sem escrita o diff de `create_page`, `create_section` ou `replace_section` junto da remocao da proposta. |
+| `memory_curate_apply` | **Implementado para `create` e `update`.** | Consome uma vez um preview do mesmo processo, revalida drift e cria o commit de curadoria. |
 | Tools legadas `memory_propose_create_*` e `proposal_apply/publish` | **Removido.** | O lifecycle anterior continua ausente; a curadoria atual usa preview single-use e um commit do inbox para o canônico. |
 
 ## Configuracao e layout
@@ -109,7 +109,7 @@ Os estados usados sao:
 | Setup global | **Implementado.** O MCP e `/remember` sao instalados no escopo do usuario. |
 | MCP por stdio | **Implementado.** Nao ha daemon, porta local ou container obrigatorio. |
 | `/remember` explicito | **Implementado.** O skill nao e invocado automaticamente pelo modelo. |
-| `/curate` explicito | **Implementado para `create`.** Pesquisa memoria, escolhe entre pagina ou secao, gera preview e exige confirmacao antes de uma unica chamada de apply. |
+| `/curate` explicito | **Implementado para `create` e `update`.** Pesquisa memoria, escolhe pagina, nova secao ou secao folha existente, gera preview e exige confirmacao antes do apply. |
 | Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
 | Confirmacao humana | **Implementado no contrato.** Os campos exatos sao apresentados antes de uma unica chamada a `memory_propose`. |
 | Fallback seguro | **Implementado no contrato e nos harnesses.** Cancelamento, budget insuficiente, MCP ausente ou erro encerram o fluxo sem escrita alternativa. |
@@ -122,7 +122,8 @@ Os estados usados sao:
 | Listagem e selecao de propostas | **Implementado.** `/curate` lista o inbox e conduz a selecao de uma proposta. |
 | Criacao de pagina canonica | **Implementado.** Uma proposta `create` pode gerar uma pagina nova dentro de uma categoria configurada. |
 | Criacao de secao canonica | **Implementado.** Uma proposta `create` pode acrescentar uma secao H2 com ID derivado a uma pagina existente. |
-| Atualizacao e remocao de memoria canonica | **Adiado.** Permanecem para a Fase 3B. |
+| Atualizacao de secao canonica | **Implementado.** Uma proposta `update` pode substituir somente o corpo completo de uma secao folha identificada e vinculada ao content hash observado. |
+| Remocao de memoria canonica | **Adiado.** Permanece para a T4 da Fase 3B. |
 | Consumo atomico de propostas | **Parcial.** O fluxo `create` adiciona a pagina e remove a proposta no mesmo commit; lotes ainda nao sao suportados. |
 | Descarte auditavel | **Adiado.** Ainda nao existe fluxo proprio para rejeitar ou remover propostas. |
 | Deteccao de duplicidade e contradicao | **Adiado.** Search orienta a captura, mas nao decide equivalencia ou conflito semantico. |

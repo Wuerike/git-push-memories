@@ -169,7 +169,7 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. A Fase 3A e a criação de seção da Fase 3B estão implementadas; substituição de seção é o próximo incremento.
+**Estado atual:** em andamento. Criação de página, criação de seção e substituição de seção estão implementadas; remoção e descarte formam o próximo incremento.
 
 ### Resultado esperado
 

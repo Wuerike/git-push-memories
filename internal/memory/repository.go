@@ -162,7 +162,7 @@ func (repository *Repository) Apply(ctx context.Context, change ChangeSet) (Rece
 	return receipt, err
 }
 
-func (repository *Repository) Preview(ctx context.Context, request PreviewRequest) (Preview, error) {
+func (repository *Repository) PreviewReplaceSection(ctx context.Context, request PreviewRequest) (Preview, error) {
 	var preview Preview
 	err := repository.withLock(ctx, false, func() error {
 		state, err := repository.load(ctx, request.Target.Path)
@@ -179,11 +179,22 @@ func (repository *Repository) Preview(ctx context.Context, request PreviewReques
 		if err := repository.confirmPreviewState(ctx, state.snapshot); err != nil {
 			return err
 		}
+		sectionHash := ""
+		for _, section := range state.snapshot.Sections {
+			if section.ID == request.Target.SectionID {
+				sectionHash = section.ContentHash
+				break
+			}
+		}
+		if sectionHash == "" {
+			return ErrSectionNotFound
+		}
 		preview = Preview{
 			Target:       Target{Path: state.snapshot.Path, SectionID: request.Target.SectionID},
-			BaselineHash: state.snapshot.FileHash, PostStateHash: hash(postState),
+			BaselineHash: state.snapshot.FileHash, SectionHash: sectionHash, PostStateHash: hash(postState),
 			Head: state.snapshot.Head, Blob: state.snapshot.Blob,
 			Baseline: append([]byte(nil), state.source...), PostState: postState,
+			Diff: unifieddiff.Between(state.snapshot.Path, state.source, postState),
 		}
 		return nil
 	})
@@ -540,7 +551,7 @@ func hasDisallowedControl(value string, allowLayout bool) bool {
 	return false
 }
 
-func (repository *Repository) ReconcileApply(ctx context.Context, request ReconcileRequest) (ReconcileResult, error) {
+func (repository *Repository) ReconcileReplaceSection(ctx context.Context, request ReconcileRequest) (ReconcileResult, error) {
 	var result ReconcileResult
 	err := repository.withLock(ctx, true, func() error {
 		if request.Preflight != nil {

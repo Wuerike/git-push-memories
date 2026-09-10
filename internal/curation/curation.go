@@ -31,8 +31,9 @@ var (
 type Operation string
 
 const (
-	OperationCreatePage    Operation = "create_page"
-	OperationCreateSection Operation = "create_section"
+	OperationCreatePage     Operation = "create_page"
+	OperationCreateSection  Operation = "create_section"
+	OperationReplaceSection Operation = "replace_section"
 )
 
 type Summary struct {
@@ -50,6 +51,16 @@ type List struct {
 	Proposals  []Summary `json:"proposals"`
 }
 
+type PreviewRequest struct {
+	Operation   Operation
+	ProposalID  string
+	TargetPath  string
+	SectionID   string
+	ContentHash string
+	Heading     string
+	Replacement string
+}
+
 type Preview struct {
 	Operation    Operation    `json:"operation"`
 	ProposalID   string       `json:"proposal_id"`
@@ -60,7 +71,9 @@ type Preview struct {
 	SourcePaths  []string     `json:"source_paths"`
 	TargetPath   string       `json:"target_path"`
 	SectionID    string       `json:"section_id"`
+	ContentHash  string       `json:"content_hash,omitempty"`
 	Heading      string       `json:"heading,omitempty"`
+	Replacement  string       `json:"replacement,omitempty"`
 	Diff         string       `json:"diff"`
 
 	head          string
@@ -71,6 +84,7 @@ type Preview struct {
 	postStateHash string
 	postState     []byte
 	proposal      inbox.Snapshot
+	request       PreviewRequest
 }
 
 type Result struct {
@@ -151,16 +165,17 @@ func (curator *Curator) List(ctx context.Context) (List, error) {
 	return result, nil
 }
 
-func (curator *Curator) Preview(ctx context.Context, operation Operation, proposalID, targetPath, heading string) (Preview, error) {
-	snapshot, err := curator.inbox.Read(ctx, proposalID)
+func (curator *Curator) Preview(ctx context.Context, request PreviewRequest) (Preview, error) {
+	snapshot, err := curator.inbox.Read(ctx, request.ProposalID)
 	if err != nil {
 		return Preview{}, err
 	}
-	return curator.preview(ctx, snapshot, operation, targetPath, heading)
+	return curator.preview(ctx, snapshot, request)
 }
 
-func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, operation Operation, targetPath, heading string) (Preview, error) {
-	if snapshot.Proposal.SuggestedAction != inbox.ActionCreate {
+func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, request PreviewRequest) (Preview, error) {
+	operation, targetPath, sectionID, heading := request.Operation, request.TargetPath, request.SectionID, request.Heading
+	if !supports(operation, snapshot.Proposal.SuggestedAction) {
 		return Preview{}, ErrUnsupported
 	}
 	if err := curator.confirmConfig(ctx, snapshot.Head); err != nil {
@@ -178,12 +193,12 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, op
 	preview := Preview{
 		Operation: operation, ProposalID: snapshot.Proposal.ID, ProposalPath: snapshot.Proposal.Path, Title: snapshot.Proposal.Title,
 		Action: snapshot.Proposal.SuggestedAction, Knowledge: snapshot.Proposal.Knowledge, SourcePaths: append([]string(nil), snapshot.Proposal.SourcePaths...),
-		TargetPath: targetPath, Heading: heading, proposal: snapshot,
+		TargetPath: targetPath, ContentHash: request.ContentHash, Heading: heading, Replacement: request.Replacement, proposal: snapshot, request: request,
 	}
 	var targetDiff string
 	switch operation {
 	case OperationCreatePage:
-		if heading != "" || !memory.IsCreatePagePath(targetPath) {
+		if sectionID != "" || request.ContentHash != "" || heading != "" || request.Replacement != "" || !memory.IsCreatePagePath(targetPath) {
 			return Preview{}, memory.ErrInvalidPath
 		}
 		page, err := curator.repository.PreviewCreatePage(ctx, memory.CreatePageRequest{
@@ -199,6 +214,9 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, op
 		preview.postState = append([]byte(nil), page.PostState...)
 		targetDiff = page.Diff
 	case OperationCreateSection:
+		if sectionID != "" || request.ContentHash != "" || heading == "" || request.Replacement != "" {
+			return Preview{}, memory.ErrInvalidPath
+		}
 		section, err := curator.repository.PreviewCreateSection(ctx, memory.CreateSectionRequest{
 			TargetPath: targetPath, Heading: heading, Body: snapshot.Proposal.Knowledge,
 		})
@@ -218,6 +236,35 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, op
 		preview.postStateHash = section.PostStateHash
 		preview.postState = append([]byte(nil), section.PostState...)
 		targetDiff = section.Diff
+	case OperationReplaceSection:
+		if sectionID == "" || request.ContentHash == "" || heading != "" || request.Replacement == "" {
+			return Preview{}, memory.ErrInvalidPath
+		}
+		preview.SectionID = sectionID
+		if err := curator.inspectKnowledge(snapshot.Proposal, request.Replacement); err != nil {
+			return Preview{}, err
+		}
+		replacement, err := curator.repository.PreviewReplaceSection(ctx, memory.PreviewRequest{
+			Target: memory.Target{Path: targetPath, SectionID: sectionID}, Replacement: request.Replacement,
+		})
+		if err != nil {
+			return Preview{}, err
+		}
+		if replacement.SectionHash != request.ContentHash {
+			return Preview{}, ErrDrift
+		}
+		mode, blob, err := curator.treeEntry(ctx, replacement.Head, targetPath)
+		if err != nil || blob != replacement.Blob {
+			return Preview{}, ErrDrift
+		}
+		preview.gitMode = mode
+		preview.head = replacement.Head
+		preview.baselineHash = replacement.BaselineHash
+		preview.baselineBlob = replacement.Blob
+		preview.baseline = append([]byte(nil), replacement.Baseline...)
+		preview.postStateHash = replacement.PostStateHash
+		preview.postState = append([]byte(nil), replacement.PostState...)
+		targetDiff = replacement.Diff
 	default:
 		return Preview{}, ErrUnsupported
 	}
@@ -226,6 +273,17 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, op
 	}
 	preview.Diff = targetDiff + "\n" + unifieddiff.Delete(snapshot.Proposal.Path, snapshot.Contents)
 	return preview, nil
+}
+
+func supports(operation Operation, action inbox.Action) bool {
+	switch operation {
+	case OperationCreatePage, OperationCreateSection:
+		return action == inbox.ActionCreate
+	case OperationReplaceSection:
+		return action == inbox.ActionUpdate
+	default:
+		return false
+	}
 }
 
 func (curator *Curator) confirmConfig(ctx context.Context, expectedHead string) error {
@@ -251,7 +309,7 @@ func (curator *Curator) confirmConfig(ctx context.Context, expectedHead string) 
 func (curator *Curator) Apply(ctx context.Context, expected Preview) (Result, error) {
 	var result Result
 	err := repolock.With(ctx, curator.cfg.StateRoot, func() error {
-		fresh, err := curator.preview(ctx, expected.proposal, expected.Operation, expected.TargetPath, expected.Heading)
+		fresh, err := curator.preview(ctx, expected.proposal, expected.request)
 		if err != nil {
 			return err
 		}
@@ -270,20 +328,24 @@ func (curator *Curator) Apply(ctx context.Context, expected Preview) (Result, er
 
 func samePreview(left, right Preview) bool {
 	return left.Operation == right.Operation && left.ProposalID == right.ProposalID && left.ProposalPath == right.ProposalPath && left.Title == right.Title && left.Action == right.Action && left.Knowledge == right.Knowledge &&
-		slices.Equal(left.SourcePaths, right.SourcePaths) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.Diff == right.Diff &&
+		slices.Equal(left.SourcePaths, right.SourcePaths) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Diff == right.Diff &&
 		left.Heading == right.Heading && left.head == right.head && left.gitMode == right.gitMode && left.baselineHash == right.baselineHash && left.baselineBlob == right.baselineBlob && bytes.Equal(left.baseline, right.baseline) &&
 		left.postStateHash == right.postStateHash && bytes.Equal(left.postState, right.postState) &&
-		left.proposal.Head == right.proposal.Head && left.proposal.Blob == right.proposal.Blob && bytes.Equal(left.proposal.Contents, right.proposal.Contents)
+		left.proposal.Head == right.proposal.Head && left.proposal.Blob == right.proposal.Blob && bytes.Equal(left.proposal.Contents, right.proposal.Contents) && left.request == right.request
 }
 
 func (curator *Curator) inspect(proposal inbox.Proposal) error {
+	return curator.inspectKnowledge(proposal, proposal.Knowledge)
+}
+
+func (curator *Curator) inspectKnowledge(proposal inbox.Proposal, knowledge string) error {
 	candidate := struct {
 		Title           string   `json:"title"`
 		SuggestedAction string   `json:"suggested_action"`
 		Target          string   `json:"target,omitempty"`
 		Knowledge       string   `json:"knowledge"`
 		SourcePaths     []string `json:"source_paths"`
-	}{proposal.Title, string(proposal.SuggestedAction), proposal.Target, proposal.Knowledge, proposal.SourcePaths}
+	}{proposal.Title, string(proposal.SuggestedAction), proposal.Target, knowledge, proposal.SourcePaths}
 	raw, err := json.Marshal(candidate)
 	if err != nil {
 		return err
@@ -431,6 +493,19 @@ func (curator *Curator) commit(ctx context.Context, preview Preview) (string, er
 			},
 			Mode: memory.ApplyBaseline,
 		})
+	case OperationReplaceSection:
+		reconciled, err = curator.repository.ReconcileReplaceSection(ctx, memory.ReconcileRequest{
+			Target: memory.Target{Path: preview.TargetPath, SectionID: preview.SectionID}, Replacement: preview.Replacement,
+			BaselineHash: preview.baselineHash, PostStateHash: preview.postStateHash, Head: preview.head, Blob: preview.baselineBlob,
+			Preflight: preflight,
+			Validate: func(baseline, postState []byte) error {
+				if !bytes.Equal(baseline, preview.baseline) {
+					return ErrDrift
+				}
+				return validate(postState)
+			},
+			Mode: memory.ApplyBaseline,
+		})
 	default:
 		return "", ErrUnsupported
 	}
@@ -468,7 +543,7 @@ func (curator *Curator) verifyCommit(ctx context.Context, commit string, preview
 		return fmt.Errorf("verify curation commit")
 	}
 	status := "A"
-	if preview.Operation == OperationCreateSection {
+	if preview.Operation == OperationCreateSection || preview.Operation == OperationReplaceSection {
 		status = "M"
 	}
 	want := []string{status + "\t" + preview.TargetPath, "D\t" + preview.ProposalPath}
@@ -510,7 +585,7 @@ func (curator *Curator) rollback(ctx context.Context, preview Preview) error {
 	switch preview.Operation {
 	case OperationCreatePage:
 		return curator.repository.Rollback(ctx, memory.RollbackRequest{TargetPath: preview.TargetPath, PostState: preview.postState})
-	case OperationCreateSection:
+	case OperationCreateSection, OperationReplaceSection:
 		return curator.repository.Rollback(ctx, memory.RollbackRequest{TargetPath: preview.TargetPath, Baseline: preview.baseline, PostState: preview.postState})
 	default:
 		return ErrUnsupported

@@ -64,6 +64,7 @@ type PreviewRequest struct {
 type Preview struct {
 	Target        Target
 	BaselineHash  string
+	SectionHash   string
 	PostStateHash string
 	Head          string
 	Blob          string

@@ -38,4 +38,9 @@ func TestCurateSkillGrantsOnlyCurationToolsAndConfirmsExactPreview(t *testing.T)
 	if preview < 0 || confirmation < preview || apply < confirmation {
 		t.Fatalf("skill does not require preview, confirmation, and apply in order")
 	}
+	for _, contract := range []string{"complete replacement body", "preserving every still-valid fact", "section_id`, `content_hash`, and complete `replacement` only for `replace_section`"} {
+		if !strings.Contains(text, contract) {
+			t.Fatalf("skill is missing update contract %q", contract)
+		}
+	}
 }

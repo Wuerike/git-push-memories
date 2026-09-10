@@ -152,7 +152,7 @@ As categorias devem ser unicas e usar lowercase kebab-case. Configure o reposito
 gpm setup /path/to/memory-repository
 ```
 
-O setup registra o MCP e instala `/remember` e `/curate` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode propor um fato e curar uma proposta de criacao.
+O setup registra o MCP e instala `/remember` e `/curate` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode propor um fato e curar uma proposta de criacao ou atualizacao.
 
 Memorias canonicas ficam em `memories/<categoria-configurada>/**/*.md`. Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. Propostas ficam em `proposals/<id>-<slug>.md` e recebem um commit path-scoped diretamente na `main`, sem consumir staging alheio.
 
@@ -162,12 +162,12 @@ O servidor publica seis tools:
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
 - `memory_propose`, para registrar uma proposta Markdown com titulo, acao sugerida, target opcional, conhecimento e paths de fonte.
 - `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
-- `memory_curate_preview`, para gerar sem escrita o diff de criacao de uma pagina ou secao canonica e consumo da proposta;
+- `memory_curate_preview`, para gerar sem escrita o diff de criacao de pagina, criacao de secao ou substituicao de secao e consumo da proposta;
 - `memory_curate_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
 
-O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria suporta uma proposta `create` por vez e exige confirmacao do diff antes de criar uma pagina ou secao.
+O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria suporta uma proposta `create` ou `update` por vez e exige confirmacao do diff antes de alterar memoria.
 
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
@@ -188,7 +188,7 @@ A curadoria e iniciada em uma sessao do Claude Code:
 /curate [proposal-id]
 ```
 
-Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. Nesta entrega somente `create` pode gerar uma pagina nova ou acrescentar uma secao a uma pagina existente em `memories/<categoria-configurada>/**/*.md`. O preview nao escreve; depois da confirmacao, o apply revalida o estado e cria um unico commit contendo a alteracao canonica e a remocao da proposta. `update`, `remove`, descarte e lotes permanecem para as proximas tarefas da Fase 3.
+Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. `create` pode gerar uma pagina ou acrescentar uma secao; `update` pode substituir o corpo de uma secao folha identificada. O preview nao escreve; depois da confirmacao, o apply revalida o estado e cria um unico commit contendo a alteracao canonica e a remocao da proposta. `remove`, descarte e lotes permanecem para as proximas tarefas da Fase 3.
 
 ## Licença
 

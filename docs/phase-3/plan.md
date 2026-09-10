@@ -1,6 +1,6 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1-T2 implementadas e verificadas; T3-T10 pendentes**.
+Status do plano: **T1-T3 implementadas e verificadas; T4-T10 pendentes**.
 
 ## Objetivo
 
@@ -67,7 +67,7 @@ memory_curate_preview
 memory_curate_apply
 ```
 
-`memory_curate_preview` aceita uma proposta com `suggested_action: create` e exige uma operacao explicita. `create_page` recebe um path novo em categoria configurada; `create_section` recebe uma pagina existente e um heading novo. O retorno inclui proposta, fontes, memoria relacionada, operacao, target, section ID, diff e token single-use. `memory_curate_apply` aceita somente esse token e o invalida na primeira tentativa, inclusive quando ocorre drift.
+`memory_curate_preview` exige uma operacao explicita. Para uma proposta `create`, `create_page` recebe um path novo em categoria configurada e `create_section` recebe uma pagina existente e um heading novo. Para uma proposta `update`, `replace_section` recebe pagina e section ID de uma secao folha. O retorno inclui proposta, fontes, memoria relacionada, operacao, target, section ID, diff e token single-use. `memory_curate_apply` aceita somente esse token e o invalida na primeira tentativa, inclusive quando ocorre drift.
 
 Os nomes podem ser estendidos sem criar um caminho alternativo que aplique conteudo sem preview e confirmacao. O servidor nao consegue provar por si so que a confirmacao foi humana; essa sequencia pertence ao contrato testado da skill, como ja ocorre em `/remember`.
 
@@ -81,14 +81,16 @@ confirm(snapshot) -> Current | Drift
 
 Curation
 list() -> Categories + ProposalSummary[]
-preview(operation, proposalId, targetPath, heading?) -> CurationPreview
+preview(operation, proposalId, targetPath, sectionId?, contentHash?, heading?, replacement?) -> CurationPreview
 apply(preview) -> CurationResult | Drift
 
 Memory Repository
 previewCreatePage(request) -> CanonicalPostState + Diff
 previewCreateSection(request) -> CanonicalPostState + Diff
+previewReplaceSection(request) -> CanonicalPostState + Diff
 reconcileCreatePage(expected) -> Baseline | PostState | Drift
 reconcileCreateSection(expected) -> Baseline | PostState | Drift
+reconcileReplaceSection(expected) -> Baseline | PostState | Drift
 rollback(expectedPostState, baseline?) -> Restored | Drift
 
 Retrieval
@@ -130,7 +132,7 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 |---|---|---|---|
 | [T1](t1-create-page-curation.md) | 3A | implementada | uma proposta `create` vira pagina canonica e e consumida no mesmo commit |
 | [T2](t2-create-section-curation.md) | 3B | implementada | `create` pode acrescentar uma secao a uma pagina existente |
-| T3 | 3B | pendente | `update` substitui uma secao folha identificada sem acumular estado antigo |
+| [T3](t3-replace-section-curation.md) | 3B | implementada | `update` substitui uma secao folha identificada sem acumular estado antigo |
 | T4 | 3B | pendente | `remove` e descarte possuem preview, confirmacao e decisao Git observavel |
 | T5 | 3B | pendente | duplicidades e possiveis contradicoes aparecem no preview e exigem decisao |
 | T6 | 3B | pendente | referencias identificam sua origem e sua integridade e verificada quando disponivel localmente |
@@ -157,7 +159,7 @@ T2-T7 devem receber documentos proprios quando seu tracer bullet iniciar. T8-T10
 
 **Cenario ou hipotese:** uma proposta `update` pode substituir o corpo de uma secao folha e manter somente o estado atual como autoritativo.
 
-**Escopo:** target com path, section ID e sinal de drift; recuperacao do estado corrente; preview byte-preserving; apply e consumo no mesmo commit.
+**Escopo:** target com path, section ID e content hash observado; construcao de corpo substituto completo que preserve fatos ainda validos; preview byte-preserving; apply e consumo no mesmo commit.
 
 **Fora de escopo:** editar headings ou anchors, atualizar secoes nao folha e merge automatico de contradicoes.
 

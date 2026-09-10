@@ -131,6 +131,86 @@ func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T
 	}
 }
 
+func TestClaudeAdapterCuratesUpdateForFreshProcessRetrieval(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if _, err := config.Save(memoryRoot); err != nil {
+		t.Fatal(err)
+	}
+	binary := buildBinary(t)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claude-update-harness", Version: "test"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(binary, "mcp")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout team-b", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	if search.Data == nil || len(search.Data.Items) != 1 {
+		t.Fatalf("memory_search = %+v", search.Data)
+	}
+	handle := search.Data.Items[0].Handle
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Update checkout timeout", "suggested_action": "update", "target": handle.Path,
+			"knowledge": "The checkout timeout is five seconds.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "replace_section", "proposal_id": proposal.ID, "target_path": handle.Path,
+			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
+			"replacement": "- timeout: cinco segundos\n- owner: team-b\n",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	freshClient := mcp.NewClient(&mcp.Implementation{Name: "fresh-update-retrieval", Version: "test"}, nil)
+	freshSession, err := freshClient.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(binary, "mcp")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	freshResult, err := freshSession.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "checkout cinco team-b", "budget_bytes": 2048},
+	})
+	if err != nil || freshResult.IsError {
+		t.Fatalf("fresh memory_search = %+v, %v", freshResult, err)
+	}
+	fresh := decodeResponse(t, freshResult)
+	if fresh.Data == nil || len(fresh.Data.Items) != 1 || !strings.Contains(fresh.Data.Items[0].Content, "cinco segundos") || strings.Contains(fresh.Data.Items[0].Content, "tres segundos") {
+		t.Fatalf("fresh update search = %+v", fresh.Data)
+	}
+	if err := freshSession.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMissingClaudeMCPIsVisibleWithoutPersistingPayload(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-harness", Version: "test"}, nil)
