@@ -7,7 +7,41 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"golang.org/x/sys/unix"
 )
+
+func TestDurableRemoveRejectsFIFOWithoutBlockingOrDeletingIt(t *testing.T) {
+	root := t.TempDir()
+	if err := unix.Mkfifo(filepath.Join(root, "target"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rootHandle, err := os.Open(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rootHandle.Close()
+	done := make(chan error, 1)
+	go func() {
+		done <- durableRemove(int(rootHandle.Fd()), "target", hash(nil), 0o600)
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrDrift) {
+			t.Fatalf("durableRemove() error = %v, want ErrDrift", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("durableRemove() blocked on FIFO")
+	}
+	info, err := os.Lstat(filepath.Join(root, "target"))
+	if err != nil {
+		t.Fatalf("durableRemove() did not restore FIFO: %v", err)
+	}
+	if info.Mode()&os.ModeNamedPipe == 0 {
+		t.Fatalf("durableRemove() restored mode %v, want named pipe", info.Mode())
+	}
+}
 
 func TestApplyLeavesBaselineWhenAtomicWriterFails(t *testing.T) {
 	root := t.TempDir()

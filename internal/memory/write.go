@@ -49,7 +49,7 @@ func durableCreate(rootFD int, relativePath string, content []byte, mode os.File
 	return durableWrite(rootFD, relativePath, content, mode, "", true, fault)
 }
 
-func durableRemove(rootFD int, relativePath, expectedHash string) error {
+func durableRemove(rootFD int, relativePath, expectedHash string, expectedMode os.FileMode) error {
 	parentPath, base := path.Split(relativePath)
 	parentPath = strings.TrimSuffix(parentPath, "/")
 	if parentPath == "" {
@@ -63,24 +63,106 @@ func durableRemove(rootFD int, relativePath, expectedHash string) error {
 		return ErrDrift
 	}
 	defer unix.Close(parentFD)
-	currentFD, err := unix.Openat(parentFD, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	quarantine, err := quarantineAt(parentFD, base)
 	if err != nil {
 		return ErrDrift
 	}
-	current := os.NewFile(uintptr(currentFD), base)
+	if err := quarantine.validate(expectedHash, expectedMode); err != nil {
+		return errors.Join(err, quarantine.restore(base))
+	}
+	var replacement unix.Stat_t
+	if err := unix.Fstatat(parentFD, base, &replacement, unix.AT_SYMLINK_NOFOLLOW); !errors.Is(err, unix.ENOENT) {
+		return errors.Join(ErrDrift, quarantine.restore(base))
+	}
+	return quarantine.remove()
+}
+
+type fileQuarantine struct {
+	parentFD      int
+	directoryFD   int
+	directoryName string
+}
+
+const quarantinedFile = "target"
+
+func quarantineAt(parentFD int, base string) (*fileQuarantine, error) {
+	for range 10 {
+		var random [8]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			return nil, err
+		}
+		name := ".git-push-memories-quarantine-" + hex.EncodeToString(random[:])
+		if err := unix.Mkdirat(parentFD, name, 0o700); errors.Is(err, unix.EEXIST) {
+			continue
+		} else if err != nil {
+			return nil, err
+		}
+		directoryFD, err := unix.Openat(parentFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+		if err != nil {
+			_ = unix.Unlinkat(parentFD, name, unix.AT_REMOVEDIR)
+			return nil, err
+		}
+		if err := unix.Renameat2(parentFD, base, directoryFD, quarantinedFile, unix.RENAME_NOREPLACE); err != nil {
+			_ = unix.Close(directoryFD)
+			_ = unix.Unlinkat(parentFD, name, unix.AT_REMOVEDIR)
+			return nil, err
+		}
+		return &fileQuarantine{parentFD: parentFD, directoryFD: directoryFD, directoryName: name}, nil
+	}
+	return nil, fmt.Errorf("create unique memory quarantine")
+}
+
+func (quarantine *fileQuarantine) validate(expectedHash string, expectedMode os.FileMode) error {
+	currentFD, err := unix.Openat(quarantine.directoryFD, quarantinedFile, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return ErrDrift
+	}
+	current := os.NewFile(uintptr(currentFD), quarantinedFile)
 	if current == nil {
 		_ = unix.Close(currentFD)
 		return ErrDrift
 	}
+	info, statErr := current.Stat()
+	if statErr != nil || !info.Mode().IsRegular() {
+		_ = current.Close()
+		return ErrDrift
+	}
 	contents, readErr := io.ReadAll(current)
 	closeErr := current.Close()
-	if readErr != nil || closeErr != nil || hash(contents) != expectedHash {
+	if readErr != nil || closeErr != nil || hash(contents) != expectedHash || expectedMode != 0 && info.Mode().Perm() != expectedMode.Perm() {
 		return ErrDrift
 	}
-	if err := unix.Unlinkat(parentFD, base, 0); err != nil {
+	return nil
+}
+
+func (quarantine *fileQuarantine) restore(base string) error {
+	if err := unix.Renameat2(quarantine.directoryFD, quarantinedFile, quarantine.parentFD, base, unix.RENAME_NOREPLACE); err != nil {
+		_ = unix.Close(quarantine.directoryFD)
+		return fmt.Errorf("restore quarantined memory file: %w", err)
+	}
+	return quarantine.removeDirectory()
+}
+
+func (quarantine *fileQuarantine) remove() error {
+	if err := unix.Unlinkat(quarantine.directoryFD, quarantinedFile, 0); err != nil {
+		_ = unix.Close(quarantine.directoryFD)
 		return ErrDrift
 	}
-	return unix.Fsync(parentFD)
+	if err := unix.Fsync(quarantine.directoryFD); err != nil {
+		_ = unix.Close(quarantine.directoryFD)
+		return err
+	}
+	return quarantine.removeDirectory()
+}
+
+func (quarantine *fileQuarantine) removeDirectory() error {
+	if err := unix.Close(quarantine.directoryFD); err != nil {
+		return err
+	}
+	if err := unix.Unlinkat(quarantine.parentFD, quarantine.directoryName, unix.AT_REMOVEDIR); err != nil {
+		return err
+	}
+	return unix.Fsync(quarantine.parentFD)
 }
 
 func targetAbsent(rootFD int, relativePath string) bool {
@@ -166,33 +248,27 @@ func durableWrite(rootFD int, relativePath string, content []byte, mode os.FileM
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if !create {
-		currentFD, err := unix.Openat(parentFD, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if create {
+		if err := unix.Renameat2(parentFD, temporaryName, parentFD, base, unix.RENAME_NOREPLACE); err != nil {
+			if errors.Is(err, unix.EEXIST) {
+				return ErrDrift
+			}
+			return err
+		}
+	} else {
+		quarantine, err := quarantineAt(parentFD, base)
 		if err != nil {
 			return ErrDrift
 		}
-		current := os.NewFile(uintptr(currentFD), base)
-		if current == nil {
-			_ = unix.Close(currentFD)
-			return ErrDrift
+		if err := quarantine.validate(expectedHash, mode); err != nil {
+			return errors.Join(err, quarantine.restore(base))
 		}
-		contents, readErr := io.ReadAll(current)
-		closeErr := current.Close()
-		if readErr != nil || closeErr != nil || hash(contents) != expectedHash {
-			return ErrDrift
+		if err := unix.Renameat2(parentFD, temporaryName, parentFD, base, unix.RENAME_NOREPLACE); err != nil {
+			return errors.Join(err, quarantine.restore(base))
 		}
-	}
-	var renameErr error
-	if create {
-		renameErr = unix.Renameat2(parentFD, temporaryName, parentFD, base, unix.RENAME_NOREPLACE)
-	} else {
-		renameErr = unix.Renameat(parentFD, temporaryName, parentFD, base)
-	}
-	if renameErr != nil {
-		if create && errors.Is(renameErr, unix.EEXIST) {
-			return ErrDrift
+		if err := quarantine.remove(); err != nil {
+			return err
 		}
-		return renameErr
 	}
 	if err := injectWriteFault(fault, writeRenamed); err != nil {
 		return err

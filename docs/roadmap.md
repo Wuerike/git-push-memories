@@ -161,7 +161,7 @@ captura explícita com /remember
 -> recuperação em sessões futuras
 ```
 
-O produto atual entrega o fluxo até o commit da proposta. O repositório de memória declara categorias em `gpm.json`; a recuperação lê somente `memories/<categoria-configurada>/**/*.md`; propostas usam `proposals/<id>-<slug>.md`. Não existem branches de proposta, receipts, nem comandos `proposal show`, `proposal apply` ou `proposal publish`. O push permanece uma ação humana e a curadoria ainda não está implementada.
+O produto atual entrega captura, recuperacao e os destinos individuais de curadoria. O repositório de memória declara categorias em `gpm.json`; a recuperação lê somente `memories/<categoria-configurada>/**/*.md`; propostas usam `proposals/<id>-<slug>.md`. Não existem branches de proposta, receipts, nem comandos `proposal show`, `proposal apply` ou `proposal publish`. O push permanece uma ação humana.
 
 Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 não foi convertido em aprovação retroativa e deverá ser reavaliado depois que existir um fluxo de curadoria utilizável.
 
@@ -169,7 +169,7 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. Criação de página, criação de seção e substituição de seção estão implementadas; remoção e descarte formam o próximo incremento.
+**Estado atual:** em andamento. Criação de página, criação de seção, substituição de seção, remoção individual e descarte auditável estão implementados; duplicidade e contradição formam o próximo incremento.
 
 ### Resultado esperado
 

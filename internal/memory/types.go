@@ -3,6 +3,7 @@ package memory
 import (
 	"errors"
 	"fmt"
+	"os"
 )
 
 var (
@@ -16,6 +17,7 @@ var (
 	ErrInvalidID          = errors.New("invalid generated memory ID")
 	ErrGeneratedIDTooLong = fmt.Errorf("%w: generated section ID exceeds 64 characters", ErrInvalidID)
 	ErrSectionExists      = errors.New("memory section already exists")
+	ErrPageNotEligible    = errors.New("memory page is not eligible for removal")
 )
 
 type Scope struct {
@@ -71,6 +73,7 @@ type Preview struct {
 	Baseline      []byte
 	PostState     []byte
 	Diff          string
+	FileMode      os.FileMode
 }
 
 type CreatePageRequest struct {
@@ -115,6 +118,39 @@ type ReconcileCreateSectionRequest struct {
 	Mode              ReconcileMode
 }
 
+type RemoveSectionRequest struct {
+	Target      Target
+	ContentHash string
+}
+
+type ReconcileRemoveSectionRequest struct {
+	RemoveSectionRequest
+	BaselineHash  string
+	PostStateHash string
+	Head          string
+	Blob          string
+	Preflight     func() error
+	Validate      func(baseline, postState []byte) error
+	Mode          ReconcileMode
+}
+
+type RemovePageRequest struct {
+	Target      Target
+	ContentHash string
+}
+
+type ReconcileRemovePageRequest struct {
+	RemovePageRequest
+	BaselineHash  string
+	PostStateHash string
+	Head          string
+	Blob          string
+	FileMode      os.FileMode
+	Preflight     func() error
+	Validate      func(baseline, postState []byte) error
+	Mode          ReconcileMode
+}
+
 type ReconcileRequest struct {
 	Target        Target
 	Replacement   string
@@ -152,4 +188,5 @@ type RollbackRequest struct {
 	TargetPath string
 	Baseline   []byte
 	PostState  []byte
+	FileMode   os.FileMode
 }

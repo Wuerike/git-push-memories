@@ -229,7 +229,159 @@ func TestPreviewCreateSectionAppendsCanonicalH2WithoutWriting(t *testing.T) {
 	}
 }
 
-func TestRollbackRestoresCreatedPageAndExistingPageSection(t *testing.T) {
+func TestPreviewRemoveSectionDeletesOnlyRequestedLeafWithoutWriting(t *testing.T) {
+	root := newMemoryRoot(t, validPage)
+	repository := openRepository(t, root)
+	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, root)
+	preview, err := repository.PreviewRemoveSection(context.Background(), memory.RemoveSectionRequest{
+		Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "# Checkout API\n<!-- @id: checkout-api -->\nOverview.\n\n"
+	if string(preview.Baseline) != validPage || string(preview.PostState) != want {
+		t.Fatalf("remove preview changed bytes outside target\nbaseline:\n%s\npost-state:\n%s", preview.Baseline, preview.PostState)
+	}
+	if got := fingerprint(t, root); got != before {
+		t.Fatal("PreviewRemoveSection() modified memory")
+	}
+}
+
+func TestPreviewRemoveSectionRejectsNonLeafAndStaleIdentity(t *testing.T) {
+	root := newMemoryRoot(t, validPage)
+	repository := openRepository(t, root)
+	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := fingerprint(t, root)
+	tests := []struct {
+		name    string
+		target  memory.Target
+		hash    string
+		wantErr error
+	}{
+		{name: "non-leaf root", target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[0].ID}, hash: snapshot.Sections[0].ContentHash, wantErr: memory.ErrSectionNotLeaf},
+		{name: "stale content hash", target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, hash: "sha256:stale", wantErr: memory.ErrDrift},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := repository.PreviewRemoveSection(context.Background(), memory.RemoveSectionRequest{Target: test.target, ContentHash: test.hash})
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("PreviewRemoveSection() error = %v, want %v", err, test.wantErr)
+			}
+		})
+	}
+	if got := fingerprint(t, root); got != before {
+		t.Fatal("rejected remove preview modified memory")
+	}
+}
+
+func TestPreviewRemovePageRequiresSingleCanonicalOverview(t *testing.T) {
+	const removable = "# Checkout API\n<!-- @id: checkout-api -->\n\n## Overview\n<!-- @id: checkout-api-overview -->\nRetired knowledge.\n"
+	t.Run("eligible", func(t *testing.T) {
+		root := newMemoryRoot(t, removable)
+		repository := openRepository(t, root)
+		snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := fingerprint(t, root)
+		preview, err := repository.PreviewRemovePage(context.Background(), memory.RemovePageRequest{
+			Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(preview.Baseline) != removable || preview.PostState != nil || !strings.Contains(preview.Diff, "+++ /dev/null") {
+			t.Fatalf("remove page preview = %+v", preview)
+		}
+		if got := fingerprint(t, root); got != before {
+			t.Fatal("PreviewRemovePage() modified memory")
+		}
+	})
+
+	t.Run("eligible formatted title", func(t *testing.T) {
+		const formatted = "# Checkout **API**\n<!-- @id: checkout-api -->\n\n## Overview\n<!-- @id: checkout-api-overview -->\nRetired knowledge.\n"
+		root := newMemoryRoot(t, formatted)
+		repository := openRepository(t, root)
+		snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.PreviewRemovePage(context.Background(), memory.RemovePageRequest{
+			Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash,
+		}); err != nil {
+			t.Fatalf("PreviewRemovePage() rejected generated formatted title: %v", err)
+		}
+	})
+
+	t.Run("ineligible rich page", func(t *testing.T) {
+		root := newMemoryRoot(t, validPage)
+		repository := openRepository(t, root)
+		snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = repository.PreviewRemovePage(context.Background(), memory.RemovePageRequest{
+			Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash,
+		})
+		if !errors.Is(err, memory.ErrPageNotEligible) {
+			t.Fatalf("PreviewRemovePage() error = %v, want ErrPageNotEligible", err)
+		}
+	})
+
+	t.Run("ineligible H1 body", func(t *testing.T) {
+		const hiddenH1Knowledge = "# Checkout API\n<!-- @id: checkout-api -->\nDo not delete this page-level fact.\n\n## Overview\n<!-- @id: checkout-api-overview -->\nRetired knowledge.\n"
+		root := newMemoryRoot(t, hiddenH1Knowledge)
+		repository := openRepository(t, root)
+		snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = repository.PreviewRemovePage(context.Background(), memory.RemovePageRequest{
+			Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash,
+		})
+		if !errors.Is(err, memory.ErrPageNotEligible) {
+			t.Fatalf("PreviewRemovePage() error = %v, want ErrPageNotEligible", err)
+		}
+	})
+
+	t.Run("mode drift", func(t *testing.T) {
+		root := newMemoryRoot(t, removable)
+		repository := openRepository(t, root)
+		snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := memory.RemovePageRequest{Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash}
+		preview, err := repository.PreviewRemovePage(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pagePath := filepath.Join(root, "memories", "checkout-api.md")
+		if err := os.Chmod(pagePath, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err = repository.ReconcileRemovePage(context.Background(), memory.ReconcileRemovePageRequest{
+			RemovePageRequest: request, BaselineHash: preview.BaselineHash, PostStateHash: preview.PostStateHash,
+			Head: preview.Head, Blob: preview.Blob, FileMode: preview.FileMode, Mode: memory.ApplyBaseline,
+		})
+		if !errors.Is(err, memory.ErrDrift) {
+			t.Fatalf("ReconcileRemovePage() error = %v, want ErrDrift", err)
+		}
+		if _, err := os.Stat(pagePath); err != nil {
+			t.Fatalf("mode drift removed page: %v", err)
+		}
+	})
+}
+
+func TestRollbackRestoresCreatedSectionAndRemovedPage(t *testing.T) {
 	t.Run("created page", func(t *testing.T) {
 		root := newEmptyMemoryRoot(t)
 		repository := openRepository(t, root)
@@ -281,6 +433,42 @@ func TestRollbackRestoresCreatedPageAndExistingPageSection(t *testing.T) {
 		}
 		if string(contents) != validPage || info.Mode().Perm() != 0o755 {
 			t.Fatalf("Rollback() = %q, mode = %v", contents, info.Mode().Perm())
+		}
+	})
+
+	t.Run("removed page", func(t *testing.T) {
+		const removable = "# Checkout API\n<!-- @id: checkout-api -->\n\n## Overview\n<!-- @id: checkout-api-overview -->\nRetired knowledge.\n"
+		root := newMemoryRoot(t, removable)
+		pagePath := filepath.Join(root, "memories", "checkout-api.md")
+		if err := os.Chmod(pagePath, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		repository := openRepository(t, root)
+		snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := memory.RemovePageRequest{Target: memory.Target{Path: snapshot.Path, SectionID: snapshot.Sections[1].ID}, ContentHash: snapshot.Sections[1].ContentHash}
+		preview, err := repository.PreviewRemovePage(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ReconcileRemovePage(context.Background(), memory.ReconcileRemovePageRequest{
+			RemovePageRequest: request, BaselineHash: preview.BaselineHash, PostStateHash: preview.PostStateHash,
+			Head: preview.Head, Blob: preview.Blob, FileMode: preview.FileMode, Mode: memory.ApplyBaseline,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.Rollback(context.Background(), memory.RollbackRequest{TargetPath: request.Target.Path, Baseline: preview.Baseline, FileMode: preview.FileMode}); err != nil {
+			t.Fatal(err)
+		}
+		contents, err := os.ReadFile(pagePath)
+		info, statErr := os.Stat(pagePath)
+		if err != nil || statErr != nil {
+			t.Fatalf("Rollback() read err = %v, stat err = %v", err, statErr)
+		}
+		if string(contents) != removable || info.Mode().Perm() != 0o600 {
+			t.Fatalf("Rollback() restored %q with mode %v", contents, info.Mode().Perm())
 		}
 	})
 }

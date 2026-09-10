@@ -29,6 +29,18 @@ const memoryPage = `# checkout-api
 - owner: team-b
 `
 
+const removableMemoryPage = `# Checkout API
+<!-- @id: checkout-api -->
+
+## Operation
+<!-- @id: checkout-api-operation -->
+Timeout is three seconds.
+
+## Ownership
+<!-- @id: checkout-api-ownership -->
+Owned by team-b.
+`
+
 func TestMemorySearchAndExpandConfiguredCategory(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
@@ -308,6 +320,9 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("consumed proposal remains: %v", err)
 	}
+	if message := gitOutput(t, memoryRoot, "show", "-s", "--format=%B", "HEAD"); !strings.Contains(message, "Git-Push-Memories-Decision: consumed") {
+		t.Fatalf("consumption commit does not record its decision:\n%s", message)
+	}
 	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(target)))
 	if err != nil || !strings.Contains(string(page), "Parcel dispatch retries use exponential backoff") {
 		t.Fatalf("canonical page = %q, %v", page, err)
@@ -528,6 +543,19 @@ func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T
 		t.Fatalf("memory_search before curation = %+v", beforeBundle.Data)
 	}
 	contentHash := beforeBundle.Data.Items[0].Handle.ContentHash
+	invalidConsumption, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "replace_section", "proposal_id": proposal.ID, "target_path": target,
+			"section_id": "checkout-api-operation", "content_hash": contentHash,
+			"replacement": "Timeout is five seconds.\nOwned by team-b.", "reason": "incorrect",
+		},
+	})
+	if err != nil || !invalidConsumption.IsError {
+		t.Fatalf("consumption with discard reason = %+v, %v", invalidConsumption, err)
+	}
+	if code := decodeResponse(t, invalidConsumption).Error.Code; code != "invalid_target" {
+		t.Fatalf("consumption with discard reason code = %q", code)
+	}
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview", Arguments: map[string]any{
@@ -750,6 +778,448 @@ func TestCurateReplaceSectionRejectsCreateProposal(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
 		t.Fatalf("wrong-action preview removed proposal: %v", err)
+	}
+}
+
+func TestCurateRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": removableMemoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "operation timeout seconds", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	if search.Data == nil || len(search.Data.Items) != 1 {
+		t.Fatalf("memory_search = %+v", search.Data)
+	}
+	handle := search.Data.Items[0].Handle
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Remove obsolete checkout timeout", "suggested_action": "remove", "target": handle.Path,
+			"knowledge": "The checkout timeout section is obsolete and must be removed.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "remove_section", "proposal_id": proposal.ID, "target_path": handle.Path,
+			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+			Operation    string `json:"operation"`
+			Diff         string `json:"diff"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if preview.Data.PreviewToken == "" || preview.Data.Operation != "remove_section" {
+		t.Fatalf("preview = %+v", preview.Data)
+	}
+	for _, fragment := range []string{"-## Operation", "-<!-- @id: checkout-api-operation -->", "-Timeout is three seconds.", "--- a/" + proposal.Path} {
+		if !strings.Contains(preview.Data.Diff, fragment) {
+			t.Fatalf("preview diff missing %q:\n%s", fragment, preview.Data.Diff)
+		}
+	}
+	beforeApply, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path)))
+	if err != nil || string(beforeApply) != removableMemoryPage {
+		t.Fatalf("preview changed target: %q, %v", beforeApply, err)
+	}
+
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	wantChanged := "M\t" + handle.Path + "\nD\t" + proposal.Path
+	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
+		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+	}
+	wantPage := "# Checkout API\n<!-- @id: checkout-api -->\n\n## Ownership\n<!-- @id: checkout-api-ownership -->\nOwned by team-b.\n"
+	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path)))
+	if err != nil || string(page) != wantPage {
+		t.Fatalf("canonical page = %q, want %q, err = %v", page, wantPage, err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("consumed proposal remains: %v", err)
+	}
+	removedResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "timeout seconds", "budget_bytes": 2048},
+	})
+	if err != nil || removedResult.IsError {
+		t.Fatalf("memory_search after removal = %+v, %v", removedResult, err)
+	}
+	removed := decodeResponse(t, removedResult)
+	if removed.Data == nil || len(removed.Data.Items) != 0 {
+		t.Fatalf("removed knowledge remains retrievable: %+v", removed.Data)
+	}
+}
+
+func TestCurateRemovePageDeletesEligiblePageAndConsumesProposal(t *testing.T) {
+	const page = `# Legacy Retry Policy
+<!-- @id: legacy-retry-policy -->
+
+## Overview
+<!-- @id: legacy-retry-policy-overview -->
+Retries use the retired queue.
+`
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/legacy-retry-policy.md": page})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "retired queue", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	if search.Data == nil || len(search.Data.Items) != 1 {
+		t.Fatalf("memory_search = %+v", search.Data)
+	}
+	handle := search.Data.Items[0].Handle
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Remove retired retry policy", "suggested_action": "remove", "target": handle.Path,
+			"knowledge": "The legacy retry policy page is obsolete and must be removed.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "remove_page", "proposal_id": proposal.ID, "target_path": handle.Path,
+			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+			Operation    string `json:"operation"`
+			Diff         string `json:"diff"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if preview.Data.PreviewToken == "" || preview.Data.Operation != "remove_page" {
+		t.Fatalf("preview = %+v", preview.Data)
+	}
+	for _, fragment := range []string{"-# Legacy Retry Policy", "-Retries use the retired queue.", "--- a/" + proposal.Path} {
+		if !strings.Contains(preview.Data.Diff, fragment) {
+			t.Fatalf("preview diff missing %q:\n%s", fragment, preview.Data.Diff)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path))); err != nil {
+		t.Fatalf("preview removed target: %v", err)
+	}
+
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	wantChanged := "D\t" + handle.Path + "\nD\t" + proposal.Path
+	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
+		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("removed page remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("consumed proposal remains: %v", err)
+	}
+	removedResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "retired queue", "budget_bytes": 2048},
+	})
+	if err != nil || removedResult.IsError {
+		t.Fatalf("memory_search after removal = %+v, %v", removedResult, err)
+	}
+	removed := decodeResponse(t, removedResult)
+	if removed.Data == nil || len(removed.Data.Items) != 0 {
+		t.Fatalf("removed page remains retrievable: %+v", removed.Data)
+	}
+}
+
+func TestCurateRemovePageRejectsIneligiblePageWithoutWriting(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": removableMemoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "operation timeout seconds", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	if search.Data == nil || len(search.Data.Items) != 1 {
+		t.Fatalf("memory_search = %+v", search.Data)
+	}
+	handle := search.Data.Items[0].Handle
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Remove checkout page", "suggested_action": "remove", "target": handle.Path,
+			"knowledge": "The selected checkout timeout is obsolete.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "remove_page", "proposal_id": proposal.ID, "target_path": handle.Path,
+			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
+		},
+	})
+	if err != nil || !previewResult.IsError {
+		t.Fatalf("ineligible remove_page = %+v, %v", previewResult, err)
+	}
+	if code := decodeResponse(t, previewResult).Error.Code; code != "invalid_target" {
+		t.Fatalf("ineligible remove_page code = %q", code)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("rejected remove_page changed HEAD from %s to %s", head, current)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path)))
+	if err != nil || string(page) != removableMemoryPage {
+		t.Fatalf("rejected remove_page changed page: %q, %v", page, err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("rejected remove_page removed proposal: %v", err)
+	}
+}
+
+func TestCurateRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": removableMemoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "operation timeout seconds", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	handle := search.Data.Items[0].Handle
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Remove checkout timeout", "suggested_action": "remove", "target": handle.Path,
+			"knowledge": "The checkout timeout is obsolete.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "remove_section", "proposal_id": proposal.ID, "target_path": handle.Path,
+			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+	driftedPage := removableMemoryPage + "external drift\n"
+	if err := os.WriteFile(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path)), []byte(driftedPage), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	apply := func() (*mcp.CallToolResult, string) {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result, decodeResponse(t, result).Error.Code
+	}
+	if result, code := apply(); !result.IsError || code != "curation_drift" {
+		t.Fatalf("drifted remove apply = %+v, code = %q", result, code)
+	}
+	if result, code := apply(); !result.IsError || code != "invalid_preview" {
+		t.Fatalf("reused remove token = %+v, code = %q", result, code)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("failed remove changed HEAD from %s to %s", head, current)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path)))
+	if err != nil || string(page) != driftedPage {
+		t.Fatalf("failed remove overwrote drift: %q, %v", page, err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("failed remove consumed proposal: %v", err)
+	}
+}
+
+func TestCurateDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{
+		"memories/domains/checkout-api.md": memoryPage,
+		"staged.txt":                       "before staged\n",
+		"unstaged.txt":                     "before unstaged\n",
+	})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Add incorrect checkout note", "suggested_action": "create",
+			"knowledge": "This knowledge was found to be incorrect.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	if err := os.WriteFile(filepath.Join(memoryRoot, "staged.txt"), []byte("after staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, memoryRoot, "add", "staged.txt")
+	if err := os.WriteFile(filepath.Join(memoryRoot, "unstaged.txt"), []byte("after unstaged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "incorrect",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+			Operation    string `json:"operation"`
+			Reason       string `json:"reason"`
+			Diff         string `json:"diff"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if preview.Data.PreviewToken == "" || preview.Data.Operation != "discard_proposal" || preview.Data.Reason != "incorrect" {
+		t.Fatalf("preview = %+v", preview.Data)
+	}
+	if !strings.Contains(preview.Data.Diff, "--- a/"+proposal.Path) || strings.Contains(preview.Data.Diff, "memories/domains/checkout-api.md") {
+		t.Fatalf("discard diff changed memory:\n%s", preview.Data.Diff)
+	}
+
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	var applied struct {
+		Data struct {
+			Decision string `json:"decision"`
+			Reason   string `json:"reason"`
+			Commit   string `json:"commit"`
+		} `json:"data"`
+	}
+	decodeStructured(t, applyResult, &applied)
+	if applied.Data.Decision != "discarded" || applied.Data.Reason != "incorrect" || applied.Data.Commit == "" {
+		t.Fatalf("discard result = %+v", applied.Data)
+	}
+	wantChanged := "D\t" + proposal.Path
+	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
+		t.Fatalf("discard changed %q, want %q", changed, wantChanged)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "domains", "checkout-api.md"))
+	if err != nil || string(page) != memoryPage {
+		t.Fatalf("discard changed canonical memory: %q, %v", page, err)
+	}
+	if staged := gitOutput(t, memoryRoot, "diff", "--cached", "--name-only"); staged != "staged.txt" {
+		t.Fatalf("discard changed staged paths: %q", staged)
+	}
+	if unstaged := gitOutput(t, memoryRoot, "diff", "--name-only"); unstaged != "unstaged.txt" {
+		t.Fatalf("discard changed unstaged paths: %q", unstaged)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("discarded proposal remains: %v", err)
+	}
+	message := gitOutput(t, memoryRoot, "show", "-s", "--format=%B", "HEAD")
+	for _, fragment := range []string{"Discard memory proposal", "Git-Push-Memories-Decision: discarded", "Git-Push-Memories-Reason: incorrect"} {
+		if !strings.Contains(message, fragment) {
+			t.Fatalf("discard commit message missing %q:\n%s", fragment, message)
+		}
+	}
+}
+
+func TestCurateDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Questionable checkout note", "suggested_action": "update", "target": "memories/domains/checkout-api.md",
+			"knowledge": "This note requires a curation decision.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+
+	invalidResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "maybe_later",
+		},
+	})
+	if err != nil || !invalidResult.IsError {
+		t.Fatalf("invalid discard preview = %+v, %v", invalidResult, err)
+	}
+	var invalid struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeStructured(t, invalidResult, &invalid)
+	if invalid.Error.Code != "invalid_discard_reason" {
+		t.Fatalf("invalid discard error = %q", invalid.Error.Code)
+	}
+
+	validResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "wrong_target",
+		},
+	})
+	if err != nil || validResult.IsError {
+		t.Fatalf("valid discard preview = %+v, %v", validResult, err)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("cancelled preview changed HEAD from %s to %s", head, current)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("cancelled preview removed proposal: %v", err)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "domains", "checkout-api.md"))
+	if err != nil || string(page) != memoryPage {
+		t.Fatalf("discard previews changed memory: %q, %v", page, err)
 	}
 }
 

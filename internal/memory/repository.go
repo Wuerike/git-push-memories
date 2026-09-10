@@ -201,6 +201,76 @@ func (repository *Repository) PreviewReplaceSection(ctx context.Context, request
 	return preview, err
 }
 
+func (repository *Repository) PreviewRemoveSection(ctx context.Context, request RemoveSectionRequest) (Preview, error) {
+	var preview Preview
+	err := repository.withLock(ctx, false, func() error {
+		state, err := repository.load(ctx, request.Target.Path)
+		if err != nil {
+			return err
+		}
+		if err := repository.ensureTargetClean(ctx, state.snapshot.Path, state.snapshot.Head); err != nil {
+			return err
+		}
+		sectionHash := ""
+		for _, section := range state.snapshot.Sections {
+			if section.ID == request.Target.SectionID {
+				sectionHash = section.ContentHash
+				break
+			}
+		}
+		if sectionHash == "" {
+			return ErrSectionNotFound
+		}
+		if sectionHash != request.ContentHash {
+			return ErrDrift
+		}
+		postState, err := removeSection(state.source, state.parsed, request.Target.SectionID)
+		if err != nil {
+			return err
+		}
+		if err := repository.confirmPreviewState(ctx, state.snapshot); err != nil {
+			return err
+		}
+		preview = Preview{
+			Target: Target{Path: state.snapshot.Path, SectionID: request.Target.SectionID}, BaselineHash: state.snapshot.FileHash,
+			SectionHash: sectionHash, PostStateHash: hash(postState), Head: state.snapshot.Head, Blob: state.snapshot.Blob,
+			Baseline: append([]byte(nil), state.source...), PostState: postState, Diff: unifieddiff.Between(state.snapshot.Path, state.source, postState),
+		}
+		return nil
+	})
+	return preview, err
+}
+
+func (repository *Repository) PreviewRemovePage(ctx context.Context, request RemovePageRequest) (Preview, error) {
+	var preview Preview
+	err := repository.withLock(ctx, false, func() error {
+		state, err := repository.load(ctx, request.Target.Path)
+		if err != nil {
+			return err
+		}
+		if err := removablePage(state.snapshot.Path, state.source, state.parsed, request.Target.SectionID, request.ContentHash); err != nil {
+			return err
+		}
+		if err := repository.ensureTargetClean(ctx, state.snapshot.Path, state.snapshot.Head); err != nil {
+			return err
+		}
+		if err := repository.confirmPreviewState(ctx, state.snapshot); err != nil {
+			return err
+		}
+		_, _, confirmedMode, err := repository.read(state.snapshot.Path)
+		if err != nil || confirmedMode.Perm() != state.mode.Perm() {
+			return ErrTargetDirty
+		}
+		preview = Preview{
+			Target: Target{Path: state.snapshot.Path, SectionID: request.Target.SectionID}, BaselineHash: state.snapshot.FileHash,
+			SectionHash: request.ContentHash, PostStateHash: hash(nil), Head: state.snapshot.Head, Blob: state.snapshot.Blob,
+			Baseline: append([]byte(nil), state.source...), Diff: unifieddiff.Delete(state.snapshot.Path, state.source), FileMode: state.mode,
+		}
+		return nil
+	})
+	return preview, err
+}
+
 func (repository *Repository) PreviewCreatePage(ctx context.Context, request CreatePageRequest) (CreatePagePreview, error) {
 	var preview CreatePagePreview
 	err := repository.withLock(ctx, false, func() error {
@@ -299,16 +369,31 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 
 func (repository *Repository) Rollback(ctx context.Context, request RollbackRequest) error {
 	return repository.withLock(ctx, true, func() error {
-		if !IsCanonicalPagePath(request.TargetPath) || len(request.PostState) == 0 {
+		if !IsCanonicalPagePath(request.TargetPath) || request.Baseline == nil && request.PostState == nil {
 			return ErrInvalidPath
 		}
-		if _, err := validateDocument(request.PostState); err != nil {
-			return err
+		if request.PostState != nil {
+			if _, err := validateDocument(request.PostState); err != nil {
+				return err
+			}
 		}
 		if request.Baseline != nil {
 			if _, err := validateDocument(request.Baseline); err != nil {
 				return err
 			}
+		}
+		if request.Baseline != nil && request.PostState == nil && targetAbsent(int(repository.root.Fd()), request.TargetPath) {
+			mode := request.FileMode
+			if mode == 0 {
+				mode = 0o644
+			}
+			if err := ensureMemoryParentDirectories(int(repository.root.Fd()), request.TargetPath); err != nil {
+				return fmt.Errorf("restore memory directories: %w", err)
+			}
+			if err := durableCreate(int(repository.root.Fd()), request.TargetPath, request.Baseline, mode, repository.fault); err != nil {
+				return fmt.Errorf("restore removed memory file: %w", err)
+			}
+			return nil
 		}
 		canonicalPath, current, mode, err := repository.read(request.TargetPath)
 		if err != nil {
@@ -320,11 +405,11 @@ func (repository *Repository) Rollback(ctx context.Context, request RollbackRequ
 		if request.Baseline != nil && bytes.Equal(current, request.Baseline) {
 			return nil
 		}
-		if !bytes.Equal(current, request.PostState) {
+		if request.PostState == nil || !bytes.Equal(current, request.PostState) {
 			return ErrDrift
 		}
 		if request.Baseline == nil {
-			if err := durableRemove(int(repository.root.Fd()), canonicalPath, hash(request.PostState)); err != nil {
+			if err := durableRemove(int(repository.root.Fd()), canonicalPath, hash(request.PostState), 0); err != nil {
 				return fmt.Errorf("remove created memory file: %w", err)
 			}
 			return nil
@@ -552,6 +637,88 @@ func hasDisallowedControl(value string, allowLayout bool) bool {
 }
 
 func (repository *Repository) ReconcileReplaceSection(ctx context.Context, request ReconcileRequest) (ReconcileResult, error) {
+	return repository.reconcileSection(ctx, request.Target, request.BaselineHash, request.PostStateHash, request.Head, request.Blob, request.Preflight, request.Validate, request.Mode,
+		func(baseline []byte, parsed []markdown.Section) ([]byte, error) {
+			return replaceSection(baseline, parsed, request.Target.SectionID, request.Replacement)
+		})
+}
+
+func (repository *Repository) ReconcileRemoveSection(ctx context.Context, request ReconcileRemoveSectionRequest) (ReconcileResult, error) {
+	return repository.reconcileSection(ctx, request.Target, request.BaselineHash, request.PostStateHash, request.Head, request.Blob, request.Preflight, request.Validate, request.Mode,
+		func(baseline []byte, parsed []markdown.Section) ([]byte, error) {
+			if err := confirmSectionHash(parsed, request.Target.SectionID, request.ContentHash); err != nil {
+				return nil, err
+			}
+			return removeSection(baseline, parsed, request.Target.SectionID)
+		})
+}
+
+func (repository *Repository) reconcileSection(ctx context.Context, target Target, baselineHash, postStateHash, expectedHead, expectedBlob string, preflight func() error, validate func(baseline, postState []byte) error, reconcileMode ReconcileMode, mutate func([]byte, []markdown.Section) ([]byte, error)) (ReconcileResult, error) {
+	var result ReconcileResult
+	err := repository.withLock(ctx, true, func() error {
+		if preflight != nil {
+			if err := preflight(); err != nil {
+				return err
+			}
+		}
+		canonicalPath, current, mode, err := repository.read(target.Path)
+		if err != nil {
+			return err
+		}
+		head, blob, err := repository.gitIdentity(ctx, canonicalPath)
+		if err != nil || head != expectedHead || blob != expectedBlob {
+			return ErrDrift
+		}
+		baseline, err := repository.gitOutput(ctx, "cat-file", "blob", expectedBlob)
+		if err != nil || hash(baseline) != baselineHash {
+			return ErrDrift
+		}
+		parsed, err := validateDocument(baseline)
+		if err != nil {
+			return err
+		}
+		postState, err := mutate(baseline, parsed)
+		if err != nil {
+			return err
+		}
+		if hash(postState) != postStateHash {
+			return ErrDrift
+		}
+		result = ReconcileResult{Target: Target{Path: canonicalPath, SectionID: target.SectionID}, Baseline: append([]byte(nil), baseline...), PostState: postState}
+		if validate != nil {
+			if err := validate(result.Baseline, result.PostState); err != nil {
+				return err
+			}
+		}
+		switch hash(current) {
+		case postStateHash:
+			result.State = ReconcilePostState
+			return nil
+		case baselineHash:
+			result.State = ReconcileBaseline
+			if reconcileMode == ReconcileOnly {
+				return nil
+			}
+			if err := repository.ensureTargetClean(ctx, canonicalPath, expectedHead); err != nil {
+				return err
+			}
+			_, confirmed, _, err := repository.read(canonicalPath)
+			if err != nil || hash(confirmed) != baselineHash {
+				return ErrDrift
+			}
+			if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, baselineHash, repository.fault); err != nil {
+				return fmt.Errorf("write memory file: %w", err)
+			}
+			result.State = ReconcilePostState
+			return nil
+		default:
+			return ErrDrift
+		}
+	})
+	return result, err
+}
+
+func (repository *Repository) ReconcileRemovePage(ctx context.Context, request ReconcileRemovePageRequest) (ReconcileResult, error) {
 	var result ReconcileResult
 	err := repository.withLock(ctx, true, func() error {
 		if request.Preflight != nil {
@@ -559,9 +726,9 @@ func (repository *Repository) ReconcileReplaceSection(ctx context.Context, reque
 				return err
 			}
 		}
-		canonicalPath, current, mode, err := repository.read(request.Target.Path)
-		if err != nil {
-			return err
+		canonicalPath, err := canonicalRelativePath(request.Target.Path)
+		if err != nil || canonicalPath != request.Target.Path || request.PostStateHash != hash(nil) {
+			return ErrInvalidPath
 		}
 		head, blob, err := repository.gitIdentity(ctx, canonicalPath)
 		if err != nil || head != request.Head || blob != request.Blob {
@@ -575,48 +742,85 @@ func (repository *Repository) ReconcileReplaceSection(ctx context.Context, reque
 		if err != nil {
 			return err
 		}
-		postState, err := replaceSection(baseline, parsed, request.Target.SectionID, request.Replacement)
-		if err != nil {
+		if err := removablePage(canonicalPath, baseline, parsed, request.Target.SectionID, request.ContentHash); err != nil {
 			return err
 		}
-		if hash(postState) != request.PostStateHash {
-			return ErrDrift
-		}
-		result = ReconcileResult{
-			Target:   memoryTarget(canonicalPath, request.Target.SectionID),
-			Baseline: append([]byte(nil), baseline...), PostState: postState,
-		}
+		result = ReconcileResult{Target: Target{Path: canonicalPath, SectionID: request.Target.SectionID}, Baseline: append([]byte(nil), baseline...)}
 		if request.Validate != nil {
-			if err := request.Validate(result.Baseline, result.PostState); err != nil {
+			if err := request.Validate(result.Baseline, nil); err != nil {
 				return err
 			}
 		}
-		switch hash(current) {
-		case request.PostStateHash:
-			result.State = ReconcilePostState
-			return nil
-		case request.BaselineHash:
-			result.State = ReconcileBaseline
-			if request.Mode == ReconcileOnly {
+		_, current, currentMode, readErr := repository.read(canonicalPath)
+		if readErr != nil {
+			if targetAbsent(int(repository.root.Fd()), canonicalPath) {
+				result.State = ReconcilePostState
 				return nil
 			}
-			if err := repository.ensureTargetClean(ctx, canonicalPath, request.Head); err != nil {
-				return err
-			}
-			_, confirmed, _, err := repository.read(canonicalPath)
-			if err != nil || hash(confirmed) != request.BaselineHash {
-				return ErrDrift
-			}
-			if err := durableReplace(int(repository.root.Fd()), canonicalPath, postState, mode, request.BaselineHash, repository.fault); err != nil {
-				return fmt.Errorf("write memory file: %w", err)
-			}
-			result.State = ReconcilePostState
-			return nil
-		default:
 			return ErrDrift
 		}
+		if hash(current) != request.BaselineHash {
+			return ErrDrift
+		}
+		if currentMode.Perm() != request.FileMode.Perm() {
+			return ErrDrift
+		}
+		result.State = ReconcileBaseline
+		if request.Mode == ReconcileOnly {
+			return nil
+		}
+		if err := repository.ensureTargetClean(ctx, canonicalPath, request.Head); err != nil {
+			return err
+		}
+		_, confirmed, confirmedMode, err := repository.read(canonicalPath)
+		if err != nil || hash(confirmed) != request.BaselineHash || confirmedMode.Perm() != request.FileMode.Perm() {
+			return ErrDrift
+		}
+		if err := durableRemove(int(repository.root.Fd()), canonicalPath, request.BaselineHash, request.FileMode); err != nil {
+			return fmt.Errorf("remove memory file: %w", err)
+		}
+		if !targetAbsent(int(repository.root.Fd()), canonicalPath) {
+			return ErrDrift
+		}
+		result.State = ReconcilePostState
+		return nil
 	})
 	return result, err
+}
+
+func removablePage(targetPath string, source []byte, parsed []markdown.Section, sectionID, contentHash string) error {
+	if len(parsed) != 2 || parsed[0].HeadingLevel != 1 || parsed[0].AnchorID != PageID(targetPath) || parsed[1].HeadingLevel != 2 || parsed[1].HeadingText != "Overview" || parsed[1].AnchorID != parsed[0].AnchorID+"-overview" || parsed[1].AnchorID != sectionID {
+		return ErrPageNotEligible
+	}
+	if parsed[1].ContentHash != contentHash {
+		return ErrDrift
+	}
+	headingLine := source[parsed[0].ByteStart:parsed[0].HeadingEnd]
+	if parsed[0].ByteStart != 0 || len(headingLine) < 4 || !bytes.HasPrefix(headingLine, []byte("# ")) || !bytes.HasSuffix(headingLine, []byte("\n")) {
+		return ErrPageNotEligible
+	}
+	rawTitle := string(headingLine[2 : len(headingLine)-1])
+	body, err := markdown.SectionContent(source, parsed[1])
+	if err != nil {
+		return ErrPageNotEligible
+	}
+	generated, err := renderPage(parsed[0].AnchorID, rawTitle, string(body))
+	if err != nil || !bytes.Equal(source, generated) {
+		return ErrPageNotEligible
+	}
+	return nil
+}
+
+func confirmSectionHash(parsed []markdown.Section, sectionID, contentHash string) error {
+	for _, section := range parsed {
+		if section.AnchorID == sectionID {
+			if section.ContentHash != contentHash {
+				return ErrDrift
+			}
+			return nil
+		}
+	}
+	return ErrSectionNotFound
 }
 
 func memoryTarget(path, sectionID string) Target {
@@ -682,6 +886,41 @@ func replaceSection(source []byte, parsed []markdown.Section, sectionID, replace
 	postSections, err := validateDocument(postState)
 	if err != nil || !sameDocumentShape(parsed, postSections) {
 		return nil, fmt.Errorf("%w: replacement changes document structure", ErrInvalidSchema)
+	}
+	return postState, nil
+}
+
+func removeSection(source []byte, parsed []markdown.Section, sectionID string) ([]byte, error) {
+	targetIndex := -1
+	for index, section := range parsed {
+		if section.AnchorID == sectionID {
+			targetIndex = index
+			break
+		}
+	}
+	if targetIndex < 0 {
+		return nil, ErrSectionNotFound
+	}
+	target := parsed[targetIndex]
+	if target.HeadingLevel == 1 || targetIndex+1 < len(parsed) && parsed[targetIndex+1].ByteStart < target.ByteEnd {
+		return nil, ErrSectionNotLeaf
+	}
+	postState, err := markdown.Splice(source, []markdown.SpliceOp{{ByteStart: target.ByteStart, ByteEnd: target.ByteEnd}})
+	if err != nil {
+		return nil, fmt.Errorf("remove section: %w", ErrInvalidSchema)
+	}
+	postSections, err := validateDocument(postState)
+	if err != nil || len(postSections) != len(parsed)-1 {
+		return nil, fmt.Errorf("%w: removal changes document structure", ErrInvalidSchema)
+	}
+	for before, after := 0, 0; before < len(parsed); before++ {
+		if before == targetIndex {
+			continue
+		}
+		if parsed[before].HeadingText != postSections[after].HeadingText || parsed[before].HeadingLevel != postSections[after].HeadingLevel || parsed[before].AnchorID != postSections[after].AnchorID {
+			return nil, fmt.Errorf("%w: removal changes document structure", ErrInvalidSchema)
+		}
+		after++
 	}
 	return postState, nil
 }

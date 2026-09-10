@@ -38,13 +38,13 @@ Em qualquer sessao do Claude Code:
 
 O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como Markdown diretamente em `main`; memoria canonica e staging alheio permanecem inalterados. Busca ambigua, cancelamento, budget insuficiente ou falha MCP encerram o fluxo sem persistencia alternativa.
 
-Para transformar uma proposta de criacao em memoria canonica:
+Para consumir ou descartar uma proposta:
 
 ```text
 /curate [proposal-id]
 ```
 
-A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. Para `create`, escolhe `create_section` quando uma pagina existente deve receber o conhecimento ou `create_page` quando uma pagina nova e necessaria. Para `update`, escolhe `replace_section` somente quando uma secao folha expandida e o target inequivoco. Somente depois de mostrar e confirmar o diff exato ela aplica o preview. O commit altera a memoria canonica e remove a proposta consumida, sem incluir staging alheio. O preview e single-use e qualquer drift exige uma nova invocacao explicita. `remove`, descarte e lotes ainda nao sao suportados.
+A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. Para `create`, escolhe `create_section` ou `create_page`; para `update`, usa `replace_section` somente com target folha inequivoco; para `remove`, usa `remove_section` ou `remove_page` quando a pagina possui a forma gerada elegivel. Propostas que nao devem virar memoria usam `discard_proposal` com reason code fechado. Somente depois de mostrar e confirmar o diff exato a skill aplica o preview. Um commit de consumo altera o target e remove a proposta; um descarte remove somente a proposta e registra a decisao. Staging alheio e preservado, o preview e single-use e qualquer drift exige uma nova invocacao explicita. Lotes ainda nao sao suportados.
 
 O servidor expoe:
 
