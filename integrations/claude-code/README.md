@@ -44,7 +44,7 @@ Para transformar uma proposta de criacao em memoria canonica:
 /curate [proposal-id]
 ```
 
-A skill lista o inbox depois de revalidar sua privacidade, seleciona uma proposta `create`, mostra seu conteudo, escolhe uma pagina dentro das categorias configuradas e recupera memoria canonica relacionada antes de mostrar o diff exato. Somente depois de confirmacao explicita ela aplica o preview. O commit resultante adiciona a pagina canonica e remove a proposta consumida, sem incluir staging alheio. O preview e single-use e qualquer drift exige uma nova invocacao explicita. `update`, `remove`, descarte e lotes ainda nao sao suportados.
+A skill lista o inbox depois de revalidar sua privacidade, seleciona uma proposta `create`, mostra seu conteudo e pesquisa memoria relacionada. Quando uma pagina existente deve receber o conhecimento, escolhe `create_section` e um heading; caso contrario escolhe `create_page` e um path novo. Somente depois de mostrar e confirmar o diff exato ela aplica o preview. O commit resultante altera a memoria canonica e remove a proposta consumida, sem incluir staging alheio. O preview e single-use e qualquer drift exige uma nova invocacao explicita. `update`, `remove`, descarte e lotes ainda nao sao suportados.
 
 O servidor expoe:
 

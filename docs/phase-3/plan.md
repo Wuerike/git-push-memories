@@ -1,6 +1,6 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1 implementada e verificada; T2-T10 pendentes**.
+Status do plano: **T1-T2 implementadas e verificadas; T3-T10 pendentes**.
 
 ## Objetivo
 
@@ -67,7 +67,7 @@ memory_curate_preview
 memory_curate_apply
 ```
 
-Na T1, `memory_curate_preview` aceita somente uma proposta com `suggested_action: create` e um path novo em categoria configurada. O retorno inclui proposta, fontes, memoria relacionada, target, section ID, diff e token single-use. `memory_curate_apply` aceita somente esse token e o invalida na primeira tentativa, inclusive quando ocorre drift.
+`memory_curate_preview` aceita uma proposta com `suggested_action: create` e exige uma operacao explicita. `create_page` recebe um path novo em categoria configurada; `create_section` recebe uma pagina existente e um heading novo. O retorno inclui proposta, fontes, memoria relacionada, operacao, target, section ID, diff e token single-use. `memory_curate_apply` aceita somente esse token e o invalida na primeira tentativa, inclusive quando ocorre drift.
 
 Os nomes podem ser estendidos sem criar um caminho alternativo que aplique conteudo sem preview e confirmacao. O servidor nao consegue provar por si so que a confirmacao foi humana; essa sequencia pertence ao contrato testado da skill, como ja ocorre em `/remember`.
 
@@ -81,12 +81,15 @@ confirm(snapshot) -> Current | Drift
 
 Curation
 list() -> Categories + ProposalSummary[]
-previewCreate(proposalId, targetPath) -> CurationPreview
-applyCreate(preview) -> CurationResult | Drift
+preview(operation, proposalId, targetPath, heading?) -> CurationPreview
+apply(preview) -> CurationResult | Drift
 
 Memory Repository
 previewCreatePage(request) -> CanonicalPostState + Diff
+previewCreateSection(request) -> CanonicalPostState + Diff
 reconcileCreatePage(expected) -> Baseline | PostState | Drift
+reconcileCreateSection(expected) -> Baseline | PostState | Drift
+rollback(expectedPostState, baseline?) -> Restored | Drift
 
 Retrieval
 retrieve(proposalKnowledge, budget) -> RelatedMemory
@@ -126,7 +129,7 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 | Tarefa | Incremento | Estado | Resultado |
 |---|---|---|---|
 | [T1](t1-create-page-curation.md) | 3A | implementada | uma proposta `create` vira pagina canonica e e consumida no mesmo commit |
-| T2 | 3B | pendente | `create` pode acrescentar uma secao a uma pagina existente |
+| [T2](t2-create-section-curation.md) | 3B | implementada | `create` pode acrescentar uma secao a uma pagina existente |
 | T3 | 3B | pendente | `update` substitui uma secao folha identificada sem acumular estado antigo |
 | T4 | 3B | pendente | `remove` e descarte possuem preview, confirmacao e decisao Git observavel |
 | T5 | 3B | pendente | duplicidades e possiveis contradicoes aparecem no preview e exigem decisao |

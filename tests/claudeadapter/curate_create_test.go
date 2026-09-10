@@ -22,12 +22,12 @@ func TestCurateSkillGrantsOnlyCurationToolsAndConfirmsExactPreview(t *testing.T)
 		t.Fatal("invalid skill frontmatter")
 	}
 	frontmatter := text[:frontmatterEnd+4]
-	for _, tool := range []string{"memory_proposal_list", "memory_curate_preview", "memory_curate_apply"} {
+	for _, tool := range []string{"memory_proposal_list", "memory_search", "memory_expand", "memory_curate_preview", "memory_curate_apply"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)
 		}
 	}
-	for _, forbidden := range []string{"memory_propose", "memory_search", "memory_expand"} {
+	for _, forbidden := range []string{"memory_propose"} {
 		if strings.Contains(frontmatter, forbidden) {
 			t.Fatalf("curate skill grants non-curation tool %q", forbidden)
 		}

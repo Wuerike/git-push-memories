@@ -89,7 +89,7 @@ func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview", Arguments: map[string]any{
-			"proposal_id": proposal.ID, "target_path": "memories/domains/settlement-retry-policy.md",
+			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/settlement-retry-policy.md",
 		},
 	})
 	if err != nil || previewResult.IsError {

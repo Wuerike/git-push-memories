@@ -49,6 +49,45 @@ func durableCreate(rootFD int, relativePath string, content []byte, mode os.File
 	return durableWrite(rootFD, relativePath, content, mode, "", true, fault)
 }
 
+func durableRemove(rootFD int, relativePath, expectedHash string) error {
+	parentPath, base := path.Split(relativePath)
+	parentPath = strings.TrimSuffix(parentPath, "/")
+	if parentPath == "" {
+		parentPath = "."
+	}
+	parentFD, err := unix.Openat2(rootFD, parentPath, &unix.OpenHow{
+		Flags:   uint64(unix.O_RDONLY | unix.O_DIRECTORY | unix.O_CLOEXEC),
+		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	})
+	if err != nil {
+		return ErrDrift
+	}
+	defer unix.Close(parentFD)
+	currentFD, err := unix.Openat(parentFD, base, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
+	if err != nil {
+		return ErrDrift
+	}
+	current := os.NewFile(uintptr(currentFD), base)
+	if current == nil {
+		_ = unix.Close(currentFD)
+		return ErrDrift
+	}
+	contents, readErr := io.ReadAll(current)
+	closeErr := current.Close()
+	if readErr != nil || closeErr != nil || hash(contents) != expectedHash {
+		return ErrDrift
+	}
+	if err := unix.Unlinkat(parentFD, base, 0); err != nil {
+		return ErrDrift
+	}
+	return unix.Fsync(parentFD)
+}
+
+func targetAbsent(rootFD int, relativePath string) bool {
+	var stat unix.Stat_t
+	return errors.Is(unix.Fstatat(rootFD, relativePath, &stat, unix.AT_SYMLINK_NOFOLLOW), unix.ENOENT)
+}
+
 func ensureMemoryParentDirectories(rootFD int, targetPath string) error {
 	parent, _ := path.Split(targetPath)
 	segments := strings.Split(strings.TrimSuffix(parent, "/"), "/")

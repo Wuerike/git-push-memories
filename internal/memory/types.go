@@ -146,3 +146,9 @@ type ReconcileResult struct {
 	PostState []byte
 	State     ReconcileState
 }
+
+type RollbackRequest struct {
+	TargetPath string
+	Baseline   []byte
+	PostState  []byte
+}

@@ -162,12 +162,12 @@ O servidor publica seis tools:
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
 - `memory_propose`, para registrar uma proposta Markdown com titulo, acao sugerida, target opcional, conhecimento e paths de fonte.
 - `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
-- `memory_curate_preview`, para gerar sem escrita o diff de criacao de uma pagina canonica e consumo da proposta;
+- `memory_curate_preview`, para gerar sem escrita o diff de criacao de uma pagina ou secao canonica e consumo da proposta;
 - `memory_curate_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
 
-O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria inicial suporta uma proposta `create` por vez e exige confirmacao do diff antes de criar uma pagina.
+O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria suporta uma proposta `create` por vez e exige confirmacao do diff antes de criar uma pagina ou secao.
 
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
@@ -188,7 +188,7 @@ A curadoria e iniciada em uma sessao do Claude Code:
 /curate [proposal-id]
 ```
 
-Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. Nesta entrega somente `create` pode gerar uma pagina nova em `memories/<categoria-configurada>/**/*.md`. O preview nao escreve; depois da confirmacao, o apply revalida o estado e cria um unico commit contendo a pagina canonica e a remocao da proposta. `update`, `remove`, descarte e lotes permanecem para a proxima etapa da Fase 3.
+Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. Nesta entrega somente `create` pode gerar uma pagina nova ou acrescentar uma secao a uma pagina existente em `memories/<categoria-configurada>/**/*.md`. O preview nao escreve; depois da confirmacao, o apply revalida o estado e cria um unico commit contendo a alteracao canonica e a remocao da proposta. `update`, `remove`, descarte e lotes permanecem para as proximas tarefas da Fase 3.
 
 ## Licença
 

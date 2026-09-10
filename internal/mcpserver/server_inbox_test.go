@@ -242,7 +242,7 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview",
 		Arguments: map[string]any{
-			"proposal_id": proposal.ID,
+			"operation": "create_page", "proposal_id": proposal.ID,
 			"target_path": target,
 		},
 	})
@@ -331,6 +331,158 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	}
 }
 
+func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	target := "memories/domains/checkout-api.md"
+	if err := os.Chmod(filepath.Join(memoryRoot, filepath.FromSlash(target)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, memoryRoot, "add", target)
+	runGit(t, memoryRoot, "commit", "--quiet", "-m", "make memory executable")
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Checkout retry policy", "suggested_action": "create",
+			"knowledge": "Checkout retries stop after three failures.", "source_paths": []string{"services/checkout/retry.go"},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	if proposal == nil {
+		t.Fatal("memory_propose returned no proposal")
+	}
+
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "create_section", "proposal_id": proposal.ID, "target_path": target, "heading": "Retry Policy",
+		},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+			Operation    string `json:"operation"`
+			SectionID    string `json:"section_id"`
+			Diff         string `json:"diff"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if preview.Data.PreviewToken == "" || preview.Data.Operation != "create_section" || preview.Data.SectionID != "checkout-api-retry-policy" {
+		t.Fatalf("preview = %+v", preview.Data)
+	}
+	if !strings.Contains(preview.Data.Diff, "+## Retry Policy\n+<!-- @id: checkout-api-retry-policy -->") || !strings.Contains(preview.Data.Diff, "--- a/"+proposal.Path) {
+		t.Fatalf("preview diff = %s", preview.Data.Diff)
+	}
+	beforeApply, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(target)))
+	if err != nil || string(beforeApply) != memoryPage {
+		t.Fatalf("preview changed target: %q, %v", beforeApply, err)
+	}
+
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+	}
+	var applied struct {
+		Data struct {
+			ProposalID string `json:"proposal_id"`
+			TargetPath string `json:"target_path"`
+			SectionID  string `json:"section_id"`
+			Commit     string `json:"commit"`
+		} `json:"data"`
+	}
+	decodeStructured(t, applyResult, &applied)
+	if applied.Data.ProposalID != proposal.ID || applied.Data.TargetPath != target || applied.Data.SectionID != "checkout-api-retry-policy" || applied.Data.Commit == "" {
+		t.Fatalf("apply = %+v", applied.Data)
+	}
+	wantChanged := "M\t" + target + "\nD\t" + proposal.Path
+	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
+		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+	}
+	if treeEntry := gitOutput(t, memoryRoot, "ls-tree", "HEAD", "--", target); !strings.HasPrefix(treeEntry, "100755 blob ") {
+		t.Fatalf("curation changed target mode: %q", treeEntry)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(target)))
+	wantSuffix := "\n## Retry Policy\n<!-- @id: checkout-api-retry-policy -->\nCheckout retries stop after three failures.\n"
+	if err != nil || string(page) != memoryPage+wantSuffix {
+		t.Fatalf("canonical page = %q, want suffix %q, err = %v", page, wantSuffix, err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("consumed proposal remains: %v", err)
+	}
+
+	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_search", Arguments: map[string]any{"query": "checkout retries failures", "budget_bytes": 2048},
+	})
+	if err != nil || searchResult.IsError {
+		t.Fatalf("memory_search after curation = %+v, %v", searchResult, err)
+	}
+	search := decodeResponse(t, searchResult)
+	found := false
+	if search.Data != nil {
+		for _, item := range search.Data.Items {
+			if item.Handle.Path == target && item.Handle.SectionID == "checkout-api-retry-policy" && strings.Contains(item.Content, "three failures") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("curated section not retrieved: %+v", search.Data)
+	}
+}
+
+func TestCurateCreateSectionRejectsExistingHeadingWithoutWriting(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Duplicate operation", "suggested_action": "create", "knowledge": "Another operation description.", "source_paths": []string{},
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "create_section", "proposal_id": proposal.ID,
+			"target_path": "memories/domains/checkout-api.md", "heading": "Operacao",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Error *struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	decodeStructured(t, previewResult, &response)
+	if !previewResult.IsError || response.Error == nil || response.Error.Code != "invalid_target" {
+		t.Fatalf("collision preview = %+v, response = %+v", previewResult, response)
+	}
+	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
+		t.Fatalf("collision preview changed HEAD from %s to %s", head, current)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, "memories", "domains", "checkout-api.md"))
+	if err != nil || string(page) != memoryPage {
+		t.Fatalf("collision preview changed page: %q, %v", page, err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("collision preview removed proposal: %v", err)
+	}
+}
+
 func TestProposalListIsReadOnly(t *testing.T) {
 	const proposalID = "0123456789abcdef0123456789abcdef"
 	proposalPath := "proposals/" + proposalID + "-retry-policy.md"
@@ -407,7 +559,7 @@ func TestCuratePreviewReturnsRelatedCanonicalMemory(t *testing.T) {
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview", Arguments: map[string]any{
-			"proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-ownership.md",
+			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-ownership.md",
 		},
 	})
 	if err != nil || previewResult.IsError {
@@ -440,7 +592,7 @@ func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_curate_preview", Arguments: map[string]any{
-			"proposal_id": proposal.ID, "target_path": "memories/domains/retry-policy.md",
+			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/retry-policy.md",
 		},
 	})
 	if err != nil || previewResult.IsError {

@@ -73,7 +73,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}, server.listProposals)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_preview",
-		Description: "Preview creating one canonical memory page and consuming its create proposal without writing.",
+		Description: "Preview creating one canonical memory page or section and consuming its create proposal without writing.",
 	}, server.previewCuration)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_apply",
@@ -115,8 +115,10 @@ type addProposalInput struct {
 type listProposalsInput struct{}
 
 type previewCurationInput struct {
+	Operation  string `json:"operation" jsonschema:"canonical operation: create_page or create_section"`
 	ProposalID string `json:"proposal_id" jsonschema:"identifier of one committed create proposal"`
-	TargetPath string `json:"target_path" jsonschema:"new canonical page path inside a configured memory category"`
+	TargetPath string `json:"target_path" jsonschema:"canonical page path inside a configured memory category"`
+	Heading    string `json:"heading,omitempty" jsonschema:"new section heading required only by create_section"`
 }
 
 type applyCurationInput struct {
@@ -221,7 +223,7 @@ func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return curationPreviewFailure("curation_unavailable")
 	}
-	preview, err := curator.PreviewCreate(ctx, input.ProposalID, input.TargetPath)
+	preview, err := curator.Preview(ctx, curation.Operation(input.Operation), input.ProposalID, input.TargetPath, input.Heading)
 	if err != nil {
 		return curationPreviewFailure(curationErrorCode(err))
 	}
@@ -253,7 +255,7 @@ func (s *Server) applyCuration(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if !found || curator == nil {
 		return curationApplyFailure("invalid_preview")
 	}
-	result, err := curator.ApplyCreate(ctx, preview)
+	result, err := curator.Apply(ctx, preview)
 	if err != nil {
 		return curationApplyFailure(curationErrorCode(err))
 	}
@@ -337,7 +339,7 @@ func curationErrorCode(err error) string {
 		return "git_index_locked"
 	case errors.Is(err, inbox.ErrProposalDrift), errors.Is(err, curation.ErrDrift), errors.Is(err, memory.ErrDrift), errors.Is(err, memory.ErrTargetDirty), errors.Is(err, memory.ErrTargetExists):
 		return "curation_drift"
-	case errors.Is(err, memory.ErrInvalidPath), errors.Is(err, memory.ErrInvalidSchema), errors.Is(err, memory.ErrGeneratedIDTooLong):
+	case errors.Is(err, memory.ErrInvalidPath), errors.Is(err, memory.ErrInvalidSchema), errors.Is(err, memory.ErrInvalidID), errors.Is(err, memory.ErrSectionExists):
 		return "invalid_target"
 	default:
 		var rejection intake.Rejection

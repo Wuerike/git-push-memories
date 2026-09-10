@@ -286,6 +286,45 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 	return result, err
 }
 
+func (repository *Repository) Rollback(ctx context.Context, request RollbackRequest) error {
+	return repository.withLock(ctx, true, func() error {
+		if !IsCanonicalPagePath(request.TargetPath) || len(request.PostState) == 0 {
+			return ErrInvalidPath
+		}
+		if _, err := validateDocument(request.PostState); err != nil {
+			return err
+		}
+		if request.Baseline != nil {
+			if _, err := validateDocument(request.Baseline); err != nil {
+				return err
+			}
+		}
+		canonicalPath, current, mode, err := repository.read(request.TargetPath)
+		if err != nil {
+			if request.Baseline == nil && targetAbsent(int(repository.root.Fd()), request.TargetPath) {
+				return nil
+			}
+			return ErrDrift
+		}
+		if request.Baseline != nil && bytes.Equal(current, request.Baseline) {
+			return nil
+		}
+		if !bytes.Equal(current, request.PostState) {
+			return ErrDrift
+		}
+		if request.Baseline == nil {
+			if err := durableRemove(int(repository.root.Fd()), canonicalPath, hash(request.PostState)); err != nil {
+				return fmt.Errorf("remove created memory file: %w", err)
+			}
+			return nil
+		}
+		if err := durableReplace(int(repository.root.Fd()), canonicalPath, request.Baseline, mode, hash(request.PostState), repository.fault); err != nil {
+			return fmt.Errorf("restore memory file: %w", err)
+		}
+		return nil
+	})
+}
+
 func (repository *Repository) PreviewCreateSection(ctx context.Context, request CreateSectionRequest) (Preview, error) {
 	var preview Preview
 	err := repository.withLock(ctx, false, func() error {
@@ -422,6 +461,10 @@ func renderSection(source []byte, parsed []markdown.Section, heading, body strin
 	headingSections, err := markdown.ParseSections([]byte(heading))
 	if err != nil || len(headingSections) != 0 {
 		return nil, "", fmt.Errorf("%w: section heading contains heading", ErrInvalidSchema)
+	}
+	renderedHeading, err := markdown.ParseSections([]byte("## " + heading + "\n<!-- @id: probe -->\nBody.\n"))
+	if err != nil || len(renderedHeading) != 1 || renderedHeading[0].HeadingText != heading {
+		return nil, "", fmt.Errorf("%w: section heading is not canonical", ErrInvalidSchema)
 	}
 	normalizedBody := strings.ReplaceAll(body, "\r\n", "\n")
 	if normalizedBody == "" || !utf8.ValidString(normalizedBody) || hasDisallowedControl(normalizedBody, true) || strings.Contains(normalizedBody, "\r") ||

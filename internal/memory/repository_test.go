@@ -229,6 +229,62 @@ func TestPreviewCreateSectionAppendsCanonicalH2WithoutWriting(t *testing.T) {
 	}
 }
 
+func TestRollbackRestoresCreatedPageAndExistingPageSection(t *testing.T) {
+	t.Run("created page", func(t *testing.T) {
+		root := newEmptyMemoryRoot(t)
+		repository := openRepository(t, root)
+		request := memory.CreatePageRequest{TargetPath: "memories/domains/retry-policy.md", Title: "Retry Policy", Body: "Retries stop after three failures."}
+		preview, err := repository.PreviewCreatePage(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ReconcileCreatePage(context.Background(), memory.ReconcileCreatePageRequest{
+			CreatePageRequest: request, PostStateHash: preview.PostStateHash, Head: preview.Head, Mode: memory.ApplyBaseline,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.Rollback(context.Background(), memory.RollbackRequest{TargetPath: request.TargetPath, PostState: preview.PostState}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(request.TargetPath))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Rollback() left created page: %v", err)
+		}
+	})
+
+	t.Run("created section", func(t *testing.T) {
+		root := newMemoryRoot(t, validPage)
+		pagePath := filepath.Join(root, "memories", "checkout-api.md")
+		if err := os.Chmod(pagePath, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, root, "add", "memories/checkout-api.md")
+		runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "-m", "executable page")
+		repository := openRepository(t, root)
+		request := memory.CreateSectionRequest{TargetPath: "memories/checkout-api.md", Heading: "Retry Policy", Body: "Retries stop after three failures."}
+		preview, err := repository.PreviewCreateSection(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ReconcileCreateSection(context.Background(), memory.ReconcileCreateSectionRequest{
+			CreateSectionRequest: request, ExpectedSectionID: preview.Target.SectionID,
+			BaselineHash: preview.BaselineHash, PostStateHash: preview.PostStateHash, Head: preview.Head, Blob: preview.Blob, Mode: memory.ApplyBaseline,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := repository.Rollback(context.Background(), memory.RollbackRequest{TargetPath: request.TargetPath, Baseline: preview.Baseline, PostState: preview.PostState}); err != nil {
+			t.Fatal(err)
+		}
+		contents, err := os.ReadFile(pagePath)
+		info, statErr := os.Stat(pagePath)
+		if err != nil || statErr != nil {
+			t.Fatalf("Rollback() read err = %v, stat err = %v", err, statErr)
+		}
+		if string(contents) != validPage || info.Mode().Perm() != 0o755 {
+			t.Fatalf("Rollback() = %q, mode = %v", contents, info.Mode().Perm())
+		}
+	})
+}
+
 func TestPreviewCreateSectionRejectsCollisionInvalidContentAndDirtyTarget(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -237,6 +293,7 @@ func TestPreviewCreateSectionRejectsCollisionInvalidContentAndDirtyTarget(t *tes
 		want    error
 	}{
 		{name: "existing heading", heading: "Operation", body: "Body.", want: memory.ErrSectionExists},
+		{name: "heading syntax normalization", heading: "Operation ##", body: "Body.", want: memory.ErrInvalidSchema},
 		{name: "generated ID collision", heading: "Operation!", body: "Body.", want: memory.ErrSectionExists},
 		{name: "empty slug", heading: "---", body: "Body.", want: memory.ErrInvalidID},
 		{name: "generated ID over limit", heading: strings.Repeat("a", 60), body: "Body.", want: memory.ErrInvalidID},
