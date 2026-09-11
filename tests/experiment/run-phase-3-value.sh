@@ -53,7 +53,7 @@ printf 'Experiment: phase3-curated-memory-value-v2\n'
 printf 'Evidence: %s\n' "$EVIDENCE_ROOT"
 printf 'Maximum authenticated cost: USD 25.00\n'
 
-timeout 8h env GOTOOLCHAIN=go1.25.12 GOPROXY=off \
+timeout --foreground 8h env GOTOOLCHAIN=go1.25.12 GOPROXY=off \
   go -C "$ROOT" run ./tests/experiment/runner \
   --approved \
   --run-id "$RUN_ID" \

@@ -169,7 +169,7 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. A Fase 3B esta fechada pelo [E2E tecnico](phase-3/t8-technical-e2e.md), que compoe destinos, dedupe, conflitos, referencias e recovery. O [protocolo T9](phase-3/t9-value-evaluation-protocol.md) pre-registra corpus, isolamento, metricas, limiares e decisoes. [T10](phase-3/t10-value-evaluation-report.md) possui runner implementado e checks offline aprovados, mas a divergencia da versao de Git bloqueou o preflight; execucao autenticada e decisao do gate seguem pendentes.
+**Estado atual:** em andamento. A Fase 3B esta fechada pelo [E2E tecnico](phase-3/t8-technical-e2e.md), que compoe destinos, dedupe, conflitos, referencias e recovery. O [protocolo T9 v2](phase-3/t9-value-evaluation-protocol-v2.md) atualizou a versao de Git exigida. [T10](phase-3/t10-value-evaluation-report.md) passou os checks offline, mas a leitura interativa foi suspensa antes de inferencia: decisao operacional `revisar_o_fluxo`, sem amostra comparativa. O gate da Fase 4 continua sem aprovacao.
 
 ### Resultado esperado
 

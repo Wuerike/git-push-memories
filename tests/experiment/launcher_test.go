@@ -29,6 +29,13 @@ case "$3" in
   run)
     actual=$(umask)
     [ "$actual" = 0077 ] || [ "$actual" = 077 ] || exit 42
+    if [ -t 0 ]; then
+      foreground=$(ps -o tpgid= -p $$)
+      group=$(ps -o pgid= -p $$)
+      [ "$foreground" = "$group" ] || exit 44
+      IFS= read -r confirmation
+      [ "$confirmation" = human-confirmation ] || exit 45
+    fi
     printf 'private runtime\n'
     ;;
   *) exit 43 ;;
@@ -43,5 +50,15 @@ esac
 	}
 	if strings.Count(string(output), "verified\n") != 4 || !strings.Contains(string(output), "private runtime\n") {
 		t.Fatalf("launcher did not run four checks before the private runtime: %s", output)
+	}
+	terminal := exec.Command("script", "--quiet", "--return", "--command", "bash "+shellQuote(filepath.Join(repositoryRoot(t), "tests/experiment/run-phase-3-value.sh"))+" --approved launcher-terminal-test", "/dev/null")
+	terminal.Dir, terminal.Env = command.Dir, command.Env
+	terminal.Stdin = strings.NewReader("human-confirmation\n")
+	terminalOutput, err := terminal.CombinedOutput()
+	if err != nil {
+		t.Fatalf("launcher cannot read a human confirmation from its terminal: %v: %s", err, terminalOutput)
+	}
+	if !strings.Contains(string(terminalOutput), "private runtime") {
+		t.Fatal("interactive runtime did not complete")
 	}
 }
