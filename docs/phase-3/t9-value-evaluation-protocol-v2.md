@@ -1,11 +1,13 @@
 # T9: protocolo de valor v2 para o ambiente vigente
 
+> Registro historico. T9 e T10 foram retiradas do plano por decisao do usuario em 2026-09-11. O [plano revisado](plan.md#revisao-de-escopo-em-2026-09-11) prioriza o uso da ferramenta; a execucao descrita abaixo pertence a tentativa encerrada.
+
 Pre-registro preparado em 2026-09-11, antes de qualquer inferencia autenticada de T10.
 
 ## Identidade e mudanca
 
 - Experiment ID: `phase3-curated-memory-value-v2`.
-- Configuracao ativa: `testdata/phase-3/value-experiment/protocol.json`.
+- Configuracao do experimento: `testdata/phase-3/value-experiment/protocol.json`.
 - SHA-256: `8a11e309ebf53eebb8e2fe5d85f102d34995c73fdf503a51dfd6a3b239c57579`.
 - Produto avaliado: `e92a96b6bc4c6f2f169b8b8e96a419c9d9a1b9b2`.
 - Git exigido: `2.55.0`.
@@ -16,7 +18,7 @@ A divergencia entre Git `2.54.0` pre-registrado e `2.55.0` instalado encerrou as
 
 Todas as demais regras de v1 se aplicam integralmente, incluindo corpus, produto, ferramentas, isolamento, revisao humana, metricas, limiares, evidencia e decisao. O seed `gpm-phase3-value-v1` e seus assignments sao preservados: nenhuma sessao autenticada ou outcome foi observado nas tentativas anteriores. `TestPhase3ValueV2ChangesOnlyRuntimeIdentity` compara o JSON ativo com os bytes commitados de v1 e limita a mudanca aos dois campos acima.
 
-## Execucao autorizada
+## Execucao autorizada na tentativa v2
 
 Depois de commitar e verificar este pre-registro:
 
@@ -26,4 +28,4 @@ tests/experiment/run-phase-3-value.sh --approved 20260911-value-v2
 
 Evidence root: `.artifacts/phase-3/20260911-value-v2`. Limite global: USD 25,00 de consumo reportado do modelo, com os limites por sessao herdados de v1. A attestation de cegueira e as confirmacoes de captura e curadoria sao feitas pelo revisor humano, conforme T9.
 
-Os resultados efetivos e eventuais bloqueios serao registrados no [acompanhamento T10](t10-value-evaluation-report.md).
+Os resultados efetivos e bloqueios estao registrados no [acompanhamento historico de T10](t10-value-evaluation-report.md).

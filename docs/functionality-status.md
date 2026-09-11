@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | T1-T7 entregam o lifecycle tecnico, o [E2E de T8](phase-3/t8-technical-e2e.md) fecha a Fase 3B e o [protocolo T9 v2](phase-3/t9-value-evaluation-protocol-v2.md) atualiza o ambiente da avaliacao. [T10](phase-3/t10-value-evaluation-report.md) encerrou v2 com `revisar_o_fluxo` por interrupcao do terminal antes de inferencia; o launcher foi corrigido, mas nao ha amostra autenticada de valor. |
+| Fase 3: curadoria e confianca | **Concluida no escopo revisado.** | T1-T8 implementadas e verificadas. Por decisao do usuario em 2026-09-11, T9/T10 e o gate experimental foram retirados do [plano](phase-3/plan.md). A prioridade passa a ser o uso da ferramenta; novos desenvolvimentos dependerao do feedback desse uso. |
 
 ## Superficie operacional
 
@@ -139,7 +139,7 @@ Os estados usados sao:
 | Sustentacao semantica | **Decisao humana assistida.** `supports`, `contradicts` e `unclear` nao sao inferidos pelo verificador nem confundidos com integridade. |
 | Validacao por agentes | **Adiado.** Nenhum agente possui autoridade de curadoria. |
 | Pull request e politica de merge | **Adiado.** Revisao e push atuais usam Git comum, sem automacao remota. |
-| Nova avaliacao de valor | **Pendente.** Os experimentos da Fase 2 avaliaram o lifecycle supersedido e nao foram repetidos com o inbox atual. |
+| Avaliacao experimental de valor | **Retirada do escopo.** T9/T10 foram removidas do plano por decisao do usuario; os protocolos e tentativas permanecem como historico. O acompanhamento passa a ser pelo uso real da ferramenta. |
 
 ## Verificacao atual
 
@@ -154,4 +154,4 @@ go vet ./...
 go build ./...
 ```
 
-A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply individuais e em lote, fault injection e recovery, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate`, E2E tecnico por processos e recuperacao por usuario novo. Ainda nao existe experimento de valor para o fluxo introduzido pela ADR 0004.
+A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply individuais e em lote, fault injection e recovery, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate`, E2E tecnico por processos e recuperacao por usuario novo. As tentativas historicas de avaliacao do lifecycle atual nao produziram amostra autenticada comparativa; a avaliacao experimental deixou de ser uma tarefa do plano.

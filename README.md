@@ -109,6 +109,8 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 - [Roadmap](docs/roadmap.md) — sequência de resultados, avaliações e decisões que orientará o desenvolvimento.
 - [Plano da Fase 3](docs/phase-3/plan.md) — tarefas, dependencias e gates da curadoria e confianca.
 
+A Fase 3 foi concluída no escopo técnico de T1–T8. Por decisão do usuário, T9/T10 de avaliação experimental foram retiradas do plano. O foco atual é usar a ferramenta no trabalho e definir novos desenvolvimentos a partir desse uso.
+
 ## Desenvolvimento
 
 O walking skeleton da Fase 2 requer Go 1.25.0 ou superior e fixa a toolchain Go 1.25.12. Para verificar o projeto:

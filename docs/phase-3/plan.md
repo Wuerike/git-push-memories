@@ -1,6 +1,12 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1-T9 implementadas e verificadas; T10 v2 encerrada com decisao operacional `revisar_o_fluxo`, sem amostra autenticada**.
+Status do plano: **concluido no escopo revisado de T1-T8; desenvolvimento em pausa para uso da ferramenta**.
+
+## Revisao de escopo em 2026-09-11
+
+Por decisao do usuario, T9 (preparacao da avaliacao de valor) e T10 (execucao do experimento) foram retiradas do plano, junto com o incremento 3C e seu gate experimental. A Fase 3 encerra com as funcionalidades e garantias tecnicas implementadas e verificadas em T1-T8.
+
+O proximo passo e retomar o uso da ferramenta. Novos desenvolvimentos serao definidos a partir das necessidades observadas nesse uso. Os [protocolos de avaliacao](t9-value-evaluation-protocol.md), a [versao v2](t9-value-evaluation-protocol-v2.md) e o [relatorio das tentativas](t10-value-evaluation-report.md) ficam como registros historicos; a retirada das tarefas nao representa um resultado positivo do experimento.
 
 ## Objetivo
 
@@ -20,7 +26,7 @@ proposta commitada no inbox
 -> recuperacao em outro processo
 ```
 
-A fase possui tres incrementos. A Fase 3A fecha o primeiro ciclo para uma proposta `create`. A Fase 3B completa operacoes e garantias de confianca. A Fase 3C mede valor e custo de curadoria antes de autorizar captura automatica.
+A fase possui dois incrementos no escopo revisado. A Fase 3A fecha o primeiro ciclo para uma proposta `create`. A Fase 3B completa operacoes e garantias de confianca.
 
 ## Fontes de decisao
 
@@ -122,11 +128,9 @@ T2 + T3 + T4 -> T5 duplicidade e contradicao observaveis
 T3 + T5 -> T6 referencias verificaveis
 T2 + T3 + T4 + T5 + T6 -> T7 transacao multi-path e recovery
 T7 -> T8 E2E tecnico da Fase 3B
-T8 -> T9 protocolo de valor e custo de curadoria
-T9 -> T10 experimento, relatorio e decisao do gate
 ```
 
-Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experimento nao devem ser usados para acumular verificacoes que pertencem aos modulos implementados antes deles.
+Cada tarefa entrega testes e atualiza o inventario operacional. O E2E nao deve ser usado para acumular verificacoes que pertencem aos modulos implementados antes dele.
 
 ## Tarefas
 
@@ -140,10 +144,8 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 | [T6](t6-verifiable-source-references.md) | 3B | implementada | referencias identificam sua origem e sua integridade e verificada quando disponivel localmente |
 | [T7](t7-multi-path-transaction-recovery.md) | 3B | implementada | lotes e falhas nas janelas de publicacao sao reconciliados sem commit duplicado ou lock indevido |
 | [T8](t8-technical-e2e.md) | 3B | implementada | E2E reproduz todas as operacoes e garantias do gate tecnico vigente |
-| [T9](t9-value-evaluation-protocol.md) | 3C | implementada | protocolo pre-registra corpus, metricas, limiares e decisoes possiveis sem executar inferencia autenticada |
-| [T10](t10-value-evaluation-report.md) | 3C | `revisar_o_fluxo` | v2 passou o preflight de ambiente, mas o terminal suspendeu o runner antes de inferencia; relatorio operacional e correcao publicados |
 
-T2-T7 devem receber documentos proprios quando seu tracer bullet iniciar. T8-T10 devem criar, respectivamente, protocolo e relatorio tecnico ou de valor; resultados nao devem ser escritos antecipadamente.
+Os documentos de T1-T7 registram seus tracer bullets; T8 registra a verificacao tecnica integrada.
 
 ## T2: criar secao em pagina existente
 
@@ -225,27 +227,7 @@ T2-T7 devem receber documentos proprios quando seu tracer bullet iniciar. T8-T10
 
 **Criterio de conclusao:** create, update, remove e discard produzem o estado esperado; duplicidades e contradicoes sao observaveis; referencias possuem o status correto; reinicio e recovery convergem; a matriz completa de verificacao passa.
 
-**Dependencia e decisao habilitada:** depende de T7; fecha o gate tecnico e libera a pre-definicao do experimento de valor.
-
-## T9: preparar avaliacao de valor
-
-**Cenario ou hipotese:** criterios registrados antes das runs permitem decidir se a memoria consolidada melhora tarefas e se o custo de curadoria e aceitavel.
-
-**Escopo:** corpus, pares com/sem memoria, isolamento, metricas, limiares, tratamento de runs invalidas e decisoes `avancar`, `revisar o fluxo` ou `interromper`.
-
-**Criterio de conclusao:** outro avaliador consegue executar o protocolo sem criar novos criterios ou conhecer as sessoes que originaram as propostas.
-
-**Dependencia e decisao habilitada:** depende de T8; autoriza a execucao classificatoria, nao a Fase 4.
-
-## T10: executar avaliacao e decidir o gate
-
-**Cenario ou hipotese:** o fluxo atual fornece contexto util em uma sessao posterior com custo de manutencao baixo o suficiente para receber captura automatica.
-
-**Escopo:** executar o protocolo T9, preservar evidencias sanitizadas, publicar relatorio e registrar a decisao.
-
-**Criterio de conclusao:** todas as runs possuem validade explicada; resultados sao reproduziveis; metricas de tarefa, recuperacao, curadoria e privacidade estao ligadas aos limiares; existe uma decisao explicita.
-
-**Dependencia e decisao habilitada:** depende de T9. Somente resultado `avancar` autoriza iniciar a Fase 4.
+**Dependencia e decisao habilitada:** depende de T7; fecha o gate tecnico e conclui o escopo revisado da Fase 3 para uso da ferramenta.
 
 ## Verificacao
 
@@ -262,15 +244,13 @@ O comando normativo do repositorio e `make verify`. Testes focados devem conduzi
 
 ## Gate de conclusao
 
-A Fase 3 termina quando:
+A Fase 3 foi concluida no escopo revisado com os seguintes criterios tecnicos atendidos:
 
 - propostas validas podem criar, atualizar ou remover memoria canonica recuperavel;
 - propostas incorretas podem ser descartadas sem alterar memoria;
 - duplicidades e contradicoes sao tratadas de forma observavel;
 - referencias invalidas nao aparecem como verificadas;
 - commits e recovery preservam staging alheio e nao deixam propostas consumidas no inbox;
-- o fluxo compartilhado e o push humano estao documentados;
-- o experimento T10 foi executado sobre o lifecycle vigente;
-- a decisao `avancar` foi sustentada pelos criterios pre-registrados antes de iniciar a Fase 4.
+- o fluxo compartilhado e o push humano estao documentados.
 
-Se o experimento nao sustentar `avancar`, a fase permanece aberta com decisao `revisar o fluxo` ou encerra a expansao de escopo.
+O acompanhamento passa a ocorrer pelo uso real. A retomada do desenvolvimento e o escopo das proximas fases dependerao de novas demandas do usuario.

@@ -1,8 +1,10 @@
 # T10: acompanhamento da execucao de valor
 
-Status em 2026-09-11: **tentativa v2 encerrada com decisao operacional `revisar_o_fluxo`; avaliacao autenticada nao iniciada**.
+> Registro historico. Por decisao do usuario em 2026-09-11, T9 e T10 foram retiradas do plano e a Fase 3 foi encerrada no escopo tecnico de T1-T8. O proximo passo passou a ser usar a ferramenta e trazer feedback para futuros desenvolvimentos, conforme o [plano revisado](plan.md#revisao-de-escopo-em-2026-09-11).
 
-A regra 2 de T9 aplica-se a execucao incompleta. Nao houve amostra comparativa nem resultado de valor. A Fase 4 continua sem autorizacao do gate.
+Resultado historico em 2026-09-11: **tentativa v2 encerrada com decisao operacional `revisar_o_fluxo`; avaliacao autenticada nao iniciada**.
+
+A regra 2 de T9 aplicava-se a execucao incompleta. Nao houve amostra comparativa nem resultado de valor; o gate experimental entao vigente nao foi aprovado. A retirada posterior das tarefas e uma decisao de escopo, sem alterar esse resultado.
 
 ## Historico v1: identidade e comando autorizado
 
@@ -81,8 +83,8 @@ O diretorio temporario de runtime e o auth root tmpfs foram inspecionados e esta
 | `ledger.json` | `33eec9d68c5d0a35e5150a511abe27e8793996d03697761f49cd80d988e92243` |
 | `report.json` | `f9029f0c76f2499fccaf748d104b9cb9d7315161ed597d3cc571433a8183e1b1` |
 
-## Correcao e proximo passo
+## Correcao posterior a tentativa
 
 O launcher foi corrigido para `timeout --foreground 8h`. O teste `TestLauncherIsolatesVerificationUmaskFromPrivateRuntime` agora executa o launcher em um pseudoterminal com runtime sintetico, verifica que o runtime pertence ao grupo de primeiro plano e le uma confirmacao sintetica. Ele falhou com exit code 44 antes da correcao e passou depois.
 
-Essa correcao foi feita depois da interrupcao e nao e apresentada como comportamento observado em v2. A tentativa v2 nao sera substituida. Uma nova rodada exige novo pre-registro antes de inferencia; T10 nao demonstrou valor suficiente para autorizar a Fase 4.
+Essa correcao foi feita depois da interrupcao e nao e apresentada como comportamento observado em v2. O protocolo exigia novo pre-registro para outra rodada. Com a retirada de T9/T10 do plano, a continuidade do experimento deixou de ser uma tarefa pendente.

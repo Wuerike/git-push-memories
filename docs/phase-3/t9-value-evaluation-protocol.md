@@ -1,5 +1,7 @@
 # T9: protocolo pre-registrado de avaliacao de valor
 
+> Registro historico. T9 e T10 foram retiradas do plano por decisao do usuario em 2026-09-11. O [plano revisado](plan.md#revisao-de-escopo-em-2026-09-11) encerra a Fase 3 em T1-T8 e prioriza o uso da ferramenta. As regras abaixo descrevem o experimento anterior, sem tarefa de execucao pendente.
+
 Status: pre-registrado em 2026-09-11; nenhuma sessao autenticada ou run classificatoria foi executada.
 
 ## Ponto fixo e hipotese

@@ -163,13 +163,13 @@ captura explícita com /remember
 
 O produto atual entrega captura, recuperacao e os destinos individuais de curadoria. O repositório de memória declara categorias em `gpm.json`; a recuperação lê somente `memories/<categoria-configurada>/**/*.md`; propostas usam `proposals/<id>-<slug>.md`. Não existem branches de proposta, receipts, nem comandos `proposal show`, `proposal apply` ou `proposal publish`. O push permanece uma ação humana.
 
-Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 não foi convertido em aprovação retroativa e deverá ser reavaliado depois que existir um fluxo de curadoria utilizável.
+Essa mudança redefiniu o ponto de partida da Fase 3. O gate de valor da Fase 2 não foi convertido em aprovação retroativa. Em 2026-09-11, o usuário optou por acompanhar o valor pelo uso da ferramenta e retirou a avaliação experimental do escopo da Fase 3.
 
 ## Fase 3: Curadoria e confiança
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. A Fase 3B esta fechada pelo [E2E tecnico](phase-3/t8-technical-e2e.md), que compoe destinos, dedupe, conflitos, referencias e recovery. O [protocolo T9 v2](phase-3/t9-value-evaluation-protocol-v2.md) atualizou a versao de Git exigida. [T10](phase-3/t10-value-evaluation-report.md) passou os checks offline, mas a leitura interativa foi suspensa antes de inferencia: decisao operacional `revisar_o_fluxo`, sem amostra comparativa. O gate da Fase 4 continua sem aprovacao.
+**Estado atual:** concluída no escopo revisado de T1–T8. O [E2E técnico](phase-3/t8-technical-e2e.md) compõe destinos, dedupe, conflitos, referências e recovery. Em 2026-09-11, o usuário retirou T9/T10 e o gate experimental do plano para retomar o uso da ferramenta; novos desenvolvimentos serão definidos a partir desse uso.
 
 ### Resultado esperado
 
@@ -188,7 +188,7 @@ Uma curadoria concluída deve produzir um commit auditável que atualize os arqu
 - Sessões, prompts e respostas não são entradas da curadoria e não são persistidos.
 - Captura automática, índice semântico e automação remota permanecem fora da fase.
 
-As etapas abaixo são incrementos internos da Fase 3, não novas fases do roadmap. A Fase 3A corresponde ao primeiro tracer bullet prioritário; somente a conclusão da Fase 3C encerra a fase.
+As etapas abaixo são os dois incrementos internos do escopo revisado da Fase 3. A Fase 3A corresponde ao primeiro tracer bullet; a Fase 3B completa as operações e garantias técnicas.
 
 ### Fase 3A: tracer bullet de curadoria
 
@@ -250,34 +250,21 @@ proposta create no inbox
 
 **Critério de conclusão:** propostas válidas podem criar páginas ou seções, atualizar memória existente ou remover conhecimento de modo observável; propostas incorretas podem ser descartadas; duplicidades e contradições aparecem no preview e exigem decisão; referências inválidas não são apresentadas como verificadas; e nenhum commit aceito deixa no inbox uma proposta declarada como consumida.
 
-**Decisão habilitada:** confirmar que o fluxo possui garantias suficientes para ser submetido a uma avaliação de valor com uso real.
+**Decisão habilitada:** encerrar o desenvolvimento previsto para a Fase 3 e retomar o uso do fluxo completo de captura, curadoria, inspeção do commit e push humano.
 
-### Fase 3C: fluxo compartilhado e avaliação de valor
+### Retomada do uso
 
-**Hipótese:** a memória consolidada pelo fluxo vigente melhora uma tarefa futura e o custo de curadoria permanece baixo o suficiente para justificar captura automática posteriormente.
+O incremento 3C e as tarefas T9/T10 de avaliação experimental foram retirados do escopo por decisão do usuário em 2026-09-11. Os [protocolos](phase-3/t9-value-evaluation-protocol.md) e o [relatório das tentativas](phase-3/t10-value-evaluation-report.md) são registros históricos, sem pendência de nova execução.
 
-**Inclui:**
-
-- documentação do fluxo completo de captura explícita, curadoria, inspeção do commit e push humano;
-- definição do ponto de revisão compartilhada usando o fluxo Git do time, sem automação remota obrigatória;
-- protocolo reproduzível que compare tarefas com e sem a memória canônica produzida pela curadoria atual;
-- critérios definidos antes da execução para validade das runs e para a decisão do gate;
-- medição de relevância recuperada, efeito na tarefa, exploração evitada, tempo de curadoria e volume de contexto;
-- medição de propostas aceitas sem edição, aceitas com edição, descartadas, duplicadas ou contraditórias;
-- registro de falhas de referência, conteúdo desatualizado e incidentes ou quase incidentes de privacidade;
-- relatório com decisão explícita entre avançar para a Fase 4, revisar o fluxo ou interromper a expansão de escopo.
-
-**Fora de escopo:** implementar hooks de captura automática durante o experimento ou adicionar um índice novo para compensar falhas sem antes registrá-las.
-
-**Critério de conclusão:** o experimento é executado sobre o lifecycle vigente, seus resultados são reproduzíveis e existe uma decisão registrada a partir dos critérios previamente definidos.
-
-**Decisão habilitada:** autorizar a Fase 4, revisar novamente o fluxo ou interromper a expansão de escopo.
+A prioridade passa a ser usar a ferramenta no trabalho e trazer necessidades concretas para futuros desenvolvimentos. A conclusão técnica da fase não é apresentada como comprovação experimental de valor.
 
 ### Gate de decisão
 
-A fase termina somente depois da Fase 3C, quando propostas válidas puderem ser transformadas em memória canônica recuperável, propostas incorretas puderem ser descartadas, duplicidades e contradições forem tratadas de forma observável, e o processo inteiro mantiver histórico Git auditável sem deixar propostas consumidas no inbox. A avaliação de valor deve demonstrar resultado suficiente pelos critérios definidos no protocolo antes de autorizar a Fase 4. Caso contrário, a decisão permanece `revisar o fluxo` ou interrompe a expansão de escopo.
+O escopo revisado da fase está concluído: propostas válidas podem se tornar memória canônica recuperável, propostas incorretas podem ser descartadas, duplicidades e contradições são observáveis, e commits e recovery preservam o histórico auditável e o staging alheio. O fluxo de revisão e push humano está documentado. A avaliação experimental deixou de ser requisito de encerramento.
 
 ## Fase 4: Captura automática
+
+**Estado atual:** direção futura, a ser retomada conforme necessidades observadas no uso e nova decisão do usuário.
 
 ### Resultado esperado
 
@@ -305,6 +292,8 @@ Reduzir a dependência de comandos manuais sem transformar sessões completas em
 A fase termina quando a captura automática gerar propostas aproveitáveis com baixo custo de revisão e sem violar a política de privacidade.
 
 ## Fase 5: Recuperação e escala
+
+**Estado atual:** direção futura, a ser retomada conforme necessidades observadas no uso e nova decisão do usuário.
 
 ### Resultado esperado
 
