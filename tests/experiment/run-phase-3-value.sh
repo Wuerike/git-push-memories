@@ -49,7 +49,7 @@ run_check race 'go test -race ./...' timeout 3m env GOTOOLCHAIN=go1.25.12 GOPROX
 run_check vet 'go vet ./...' timeout 2m env GOTOOLCHAIN=go1.25.12 GOPROXY=off go -C "$ROOT" vet ./...
 run_check build 'go build ./...' timeout 2m env GOTOOLCHAIN=go1.25.12 GOPROXY=off go -C "$ROOT" build ./...
 
-printf 'Experiment: phase3-curated-memory-value-v1\n'
+printf 'Experiment: phase3-curated-memory-value-v2\n'
 printf 'Evidence: %s\n' "$EVIDENCE_ROOT"
 printf 'Maximum authenticated cost: USD 25.00\n'
 

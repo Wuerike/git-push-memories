@@ -95,6 +95,36 @@ type corpusFixture struct {
 	} `json:"capture_controls"`
 }
 
+func TestPhase3ValueV2ChangesOnlyRuntimeIdentity(t *testing.T) {
+	root := repositoryRoot(t)
+	command := exec.Command("git", "show", "938f38fa4a208cf5d277c3d5fb4f41265a69e1f8:testdata/phase-3/value-experiment/protocol.json")
+	command.Dir = root
+	baseline, err := command.Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(baseline)
+	if hex.EncodeToString(digest[:]) != "964e5a988af33b10f135a26258e66aeec33cf9b0e5694304434f70ab99bc149f" {
+		t.Fatal("historical v1 protocol changed")
+	}
+	var expected map[string]any
+	if err := json.Unmarshal(baseline, &expected); err != nil {
+		t.Fatal(err)
+	}
+	expected["experiment_id"] = "phase3-curated-memory-value-v2"
+	expected["environment"].(map[string]any)["git_version"] = "2.55.0"
+	actual := decodeJSON[map[string]any](t, filepath.Join(root, "testdata/phase-3/value-experiment/protocol.json"))
+	want, _ := json.Marshal(expected)
+	got, _ := json.Marshal(actual)
+	if !bytes.Equal(got, want) {
+		t.Fatal("v2 must change only the experiment ID and pinned Git version from v1")
+	}
+	config, err := loadRunnerConfig(root)
+	if err != nil || config.Protocol.ExperimentID != "phase3-curated-memory-value-v2" || config.Protocol.Environment.GitVersion != "2.55.0" {
+		t.Fatalf("runner did not load the v2 protocol: %v", err)
+	}
+}
+
 func TestPhase3ValueProtocolIsFrozenAndSelfConsistent(t *testing.T) {
 	root := repositoryRoot(t)
 	protocolPath := filepath.Join(root, "testdata/phase-3/value-experiment/protocol.json")
@@ -103,7 +133,7 @@ func TestPhase3ValueProtocolIsFrozenAndSelfConsistent(t *testing.T) {
 	}
 	protocol := decodeJSON[protocolFixture](t, protocolPath)
 	corpus := decodeJSON[corpusFixture](t, filepath.Join(root, protocol.CorpusPath))
-	if protocol.SchemaVersion != 1 || protocol.ExperimentID != "phase3-curated-memory-value-v1" || protocol.Status != "pre_registered_not_started" ||
+	if protocol.SchemaVersion != 1 || protocol.ExperimentID != "phase3-curated-memory-value-v2" || protocol.Status != "pre_registered_not_started" ||
 		protocol.ProductRevision != "e92a96b6bc4c6f2f169b8b8e96a419c9d9a1b9b2" || corpus.SchemaVersion != 1 || corpus.CorpusID != "phase3-held-out-policies-v1" {
 		t.Fatal("protocol identity is not frozen")
 	}

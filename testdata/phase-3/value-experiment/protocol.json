@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "experiment_id": "phase3-curated-memory-value-v1",
+  "experiment_id": "phase3-curated-memory-value-v2",
   "status": "pre_registered_not_started",
   "product_revision": "e92a96b6bc4c6f2f169b8b8e96a419c9d9a1b9b2",
   "corpus_path": "testdata/phase-3/value-experiment/corpus.json",
@@ -23,7 +23,7 @@
     "os": "linux",
     "architecture": "amd64",
     "go_version": "go1.25.12",
-    "git_version": "2.54.0",
+    "git_version": "2.55.0",
     "bubblewrap_version": "0.6.1",
     "socat_version": "1.7.4.1",
     "locale": "C.UTF-8",
