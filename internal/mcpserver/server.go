@@ -16,21 +16,23 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
+	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Server struct {
-	inner     *mcp.Server
-	retriever *retrieval.Retriever
-	guard     *intake.Guard
-	cfg       config.Config
-	stateRoot string
-	inbox     *inbox.Inbox
-	inboxMu   sync.Mutex
-	curator   *curation.Curator
-	curatorMu sync.Mutex
-	previews  map[string]pendingCuration
+	inner      *mcp.Server
+	retriever  *retrieval.Retriever
+	guard      *intake.Guard
+	cfg        config.Config
+	stateRoot  string
+	inbox      *inbox.Inbox
+	inboxMu    sync.Mutex
+	curator    *curation.Curator
+	curatorMu  sync.Mutex
+	previews   map[string]pendingCuration
+	references *reference.Verifier
 }
 
 type pendingCuration struct {
@@ -52,10 +54,11 @@ func New(cfg config.Config, version string) (*Server, error) {
 		return nil, err
 	}
 	server := &Server{
-		retriever: retriever,
-		guard:     guard,
-		cfg:       cfg,
-		stateRoot: cfg.StateRoot,
+		retriever:  retriever,
+		guard:      guard,
+		references: reference.New(),
+		cfg:        cfg,
+		stateRoot:  cfg.StateRoot,
 		inner: mcp.NewServer(&mcp.Implementation{
 			Name:    "git-push-memories",
 			Version: version,
@@ -73,6 +76,14 @@ func New(cfg config.Config, version string) (*Server, error) {
 		Name:        "memory_expand",
 		Description: "Expand one current memory section from a search handle within an exact byte budget.",
 	}, server.expand)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_reference_snapshot",
+		Description: "Snapshot immutable references to committed blobs in one explicit local Git repository without persisting its local root.",
+	}, server.snapshotReferences)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_reference_expand",
+		Description: "Read a bounded line range from the exact committed UTF-8 blob identified by a verified source reference without persisting content.",
+	}, server.expandReference)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_proposal_list",
 		Description: "List committed Markdown proposals and configured memory categories for explicit human curation.",
@@ -111,11 +122,24 @@ type expandInput struct {
 }
 
 type addProposalInput struct {
-	Title           string   `json:"title" jsonschema:"concise human-readable proposal title"`
-	SuggestedAction string   `json:"suggested_action" jsonschema:"suggested curation action: create, update, or remove"`
-	Target          string   `json:"target,omitempty" jsonschema:"optional canonical relative memory target"`
-	Knowledge       string   `json:"knowledge" jsonschema:"knowledge for a future curator to evaluate"`
-	SourcePaths     []string `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
+	Title            string                `json:"title" jsonschema:"concise human-readable proposal title"`
+	SuggestedAction  string                `json:"suggested_action" jsonschema:"suggested curation action: create, update, or remove"`
+	Target           string                `json:"target,omitempty" jsonschema:"optional canonical relative memory target"`
+	Knowledge        string                `json:"knowledge" jsonschema:"knowledge for a future curator to evaluate"`
+	SourcePaths      []string              `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
+	SourceReferences []reference.Reference `json:"source_references,omitempty" jsonschema:"immutable references returned by memory_reference_snapshot; source_paths must be empty"`
+}
+
+type snapshotReferencesInput struct {
+	RepositoryRoot string   `json:"repository_root" jsonschema:"absolute local Git worktree root used transiently and never persisted"`
+	Revision       string   `json:"revision,omitempty" jsonschema:"optional full commit object ID; defaults to HEAD"`
+	SourcePaths    []string `json:"source_paths" jsonschema:"one to sixteen canonical repository-relative blob paths"`
+}
+
+type expandReferenceInput struct {
+	Reference   reference.Reference `json:"reference" jsonschema:"source reference returned by memory_reference_snapshot"`
+	StartLine   int                 `json:"start_line" jsonschema:"one-based first line to return"`
+	BudgetBytes int                 `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the encoded excerpt"`
 }
 
 type listProposalsInput struct{}
@@ -144,6 +168,7 @@ type curationPreview struct {
 type curationEvidence struct {
 	CanonicalCandidates retrieval.ContextBundle   `json:"canonical_candidates"`
 	RelatedProposals    curation.RelatedProposals `json:"related_proposals"`
+	References          []reference.Evidence      `json:"references"`
 }
 
 type proposalListResponse struct {
@@ -168,6 +193,18 @@ type inboxToolResponse struct {
 	SchemaVersion int             `json:"schema_version"`
 	Data          *inbox.Proposal `json:"data,omitempty"`
 	Error         *toolError      `json:"error,omitempty"`
+}
+
+type referenceSnapshotResponse struct {
+	SchemaVersion int                 `json:"schema_version"`
+	Data          *reference.Snapshot `json:"data,omitempty"`
+	Error         *toolError          `json:"error,omitempty"`
+}
+
+type referenceExpandResponse struct {
+	SchemaVersion int                `json:"schema_version"`
+	Data          *reference.Excerpt `json:"data,omitempty"`
+	Error         *toolError         `json:"error,omitempty"`
 }
 
 type toolError struct {
@@ -207,7 +244,7 @@ func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input 
 	}
 	stored, err := proposalInbox.Add(ctx, inbox.Request{
 		Title: allowed.Title(), SuggestedAction: inbox.Action(allowed.SuggestedAction()), Target: allowed.Target(),
-		Knowledge: allowed.Knowledge(), SourcePaths: allowed.SourcePaths(),
+		Knowledge: allowed.Knowledge(), SourcePaths: allowed.SourcePaths(), SourceReferences: allowed.SourceReferences(),
 	})
 	if err != nil {
 		if errors.Is(err, inbox.ErrNotMain) {
@@ -219,6 +256,39 @@ func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input 
 		return inboxFailure("proposal_failed")
 	}
 	return nil, inboxToolResponse{SchemaVersion: 1, Data: &stored}, nil
+}
+
+func (s *Server) snapshotReferences(ctx context.Context, _ *mcp.CallToolRequest, input snapshotReferencesInput) (*mcp.CallToolResult, referenceSnapshotResponse, error) {
+	snapshot, err := s.references.Snapshot(ctx, input.RepositoryRoot, input.Revision, input.SourcePaths)
+	if err != nil {
+		code := "invalid_reference"
+		if errors.Is(err, reference.ErrInvalidRoot) {
+			code = "invalid_repository_root"
+		}
+		return &mcp.CallToolResult{IsError: true}, referenceSnapshotResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+	}
+	return nil, referenceSnapshotResponse{SchemaVersion: 1, Data: &snapshot}, nil
+}
+
+func (s *Server) expandReference(ctx context.Context, _ *mcp.CallToolRequest, input expandReferenceInput) (*mcp.CallToolResult, referenceExpandResponse, error) {
+	excerpt, err := s.references.Expand(ctx, input.Reference, input.StartLine, input.BudgetBytes)
+	if err != nil {
+		code := "reference_expand_failed"
+		switch {
+		case errors.Is(err, reference.ErrIntegrityUnavailable):
+			code = "reference_unavailable"
+		case errors.Is(err, reference.ErrIntegrityMismatch):
+			code = "reference_mismatch"
+		case errors.Is(err, reference.ErrInvalidRange):
+			code = "invalid_reference_range"
+		case errors.Is(err, reference.ErrBudgetTooSmall):
+			code = "budget_too_small"
+		case errors.Is(err, reference.ErrNonTextBlob):
+			code = "reference_not_text"
+		}
+		return &mcp.CallToolResult{IsError: true}, referenceExpandResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+	}
+	return nil, referenceExpandResponse{SchemaVersion: 1, Data: &excerpt}, nil
 }
 
 func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, _ listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
@@ -282,15 +352,17 @@ func (s *Server) applyCuration(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	if !found || curator == nil {
 		return curationApplyFailure("invalid_preview")
 	}
-	evidence, err := s.buildCurationEvidence(ctx, curator, pending.Preview)
-	if err != nil {
-		return curationApplyFailure("curation_drift")
-	}
-	encodedEvidence, err := json.Marshal(evidence)
-	if err != nil || sha256.Sum256(encodedEvidence) != pending.EvidenceHash {
-		return curationApplyFailure("curation_drift")
-	}
-	result, err := curator.Apply(ctx, pending.Preview)
+	result, err := curator.Apply(ctx, pending.Preview, func() error {
+		evidence, err := s.buildCurationEvidence(ctx, curator, pending.Preview)
+		if err != nil {
+			return curation.ErrDrift
+		}
+		encodedEvidence, err := json.Marshal(evidence)
+		if err != nil || sha256.Sum256(encodedEvidence) != pending.EvidenceHash {
+			return curation.ErrDrift
+		}
+		return nil
+	})
 	if err != nil {
 		return curationApplyFailure(curationErrorCode(err))
 	}
@@ -310,7 +382,15 @@ func (s *Server) buildCurationEvidence(ctx context.Context, curator *curation.Cu
 	if err := curator.RevalidatePreview(ctx, preview); err != nil {
 		return curationEvidence{}, err
 	}
-	return curationEvidence{CanonicalCandidates: canonicalCandidates, RelatedProposals: relatedProposals}, nil
+	references, err := s.references.Verify(ctx, preview.SourceReferences, preview.SourcePaths)
+	if err != nil {
+		return curationEvidence{}, err
+	}
+	return curationEvidence{
+		CanonicalCandidates: canonicalCandidates,
+		RelatedProposals:    relatedProposals,
+		References:          references,
+	}, nil
 }
 
 func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {

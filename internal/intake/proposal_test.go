@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Wuerike/git-push-memories/internal/intake"
+	"github.com/Wuerike/git-push-memories/internal/reference"
 )
 
 func TestGuardAllowsClosedProposalWithOptionalTarget(t *testing.T) {
@@ -32,6 +33,50 @@ func TestGuardAllowsClosedProposalWithOptionalTarget(t *testing.T) {
 	withoutTarget, err := guard.InspectProposal(intake.NewProposalCandidate(raw))
 	if err != nil || withoutTarget.Target() != "" {
 		t.Fatalf("targetless InspectProposal() = %+v, %v", withoutTarget, err)
+	}
+}
+
+func TestGuardAllowsStructuredSourceReferencesAndRejectsAmbiguousSources(t *testing.T) {
+	guard, err := intake.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := reference.Reference{
+		Repository: "git-lineage-sha256:" + strings.Repeat("a", 64), Revision: strings.Repeat("b", 40),
+		Path: "services/checkout/config.yaml", ContentHash: "sha256:" + strings.Repeat("c", 64),
+	}
+	raw, err := json.Marshal(map[string]any{
+		"title": "Checkout source", "suggested_action": "create", "knowledge": "Checkout uses a committed configuration.",
+		"source_paths": []string{}, "source_references": []reference.Reference{source},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed, err := guard.InspectProposal(intake.NewProposalCandidate(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := allowed.SourceReferences(); len(got) != 1 || got[0] != source || len(allowed.SourcePaths()) != 0 {
+		t.Fatalf("structured sources = %+v, legacy = %v", got, allowed.SourcePaths())
+	}
+
+	for _, mutation := range []map[string]any{
+		{"source_paths": []string{"legacy/path"}, "source_references": []reference.Reference{source}},
+		{"source_paths": []string{}, "source_references": []reference.Reference{{Repository: source.Repository, Revision: "HEAD", Path: source.Path, ContentHash: source.ContentHash}}},
+		{"source_paths": []string{}, "source_references": []reference.Reference{}},
+		{"source_paths": []string{}, "source_references": []reference.Reference{source, source}},
+	} {
+		candidate := map[string]any{"title": "Fact", "suggested_action": "create", "knowledge": "Knowledge."}
+		for key, value := range mutation {
+			candidate[key] = value
+		}
+		raw, err := json.Marshal(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := guard.InspectProposal(intake.NewProposalCandidate(raw)); err == nil {
+			t.Fatalf("InspectProposal() accepted ambiguous or invalid sources: %s", raw)
+		}
 	}
 }
 

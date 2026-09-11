@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wuerike/git-push-memories/internal/reference"
 )
 
 var proposalPathPattern = regexp.MustCompile(`^proposals/([0-9a-f]{32})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$`)
@@ -141,7 +143,11 @@ func parse(proposalPath string, contents []byte) (Proposal, error) {
 		return Proposal{}, ErrInvalidProposal
 	}
 	lines := strings.Split(string(contents), "\n")
-	if len(lines) < 8 || lines[0] != "---" || lines[1] != "schema_version: 1" || !strings.HasPrefix(lines[2], "suggested_action: ") {
+	if len(lines) < 8 || lines[0] != "---" || !strings.HasPrefix(lines[1], "schema_version: ") || !strings.HasPrefix(lines[2], "suggested_action: ") {
+		return Proposal{}, ErrInvalidProposal
+	}
+	schemaVersion, err := strconv.Atoi(strings.TrimPrefix(lines[1], "schema_version: "))
+	if err != nil || schemaVersion != 1 && schemaVersion != 2 || lines[1] != "schema_version: "+strconv.Itoa(schemaVersion) {
 		return Proposal{}, ErrInvalidProposal
 	}
 	action, err := quotedValue(lines[2], "suggested_action: ")
@@ -158,27 +164,52 @@ func parse(proposalPath string, contents []byte) (Proposal, error) {
 		line++
 	}
 	sourcePaths := make([]string, 0)
+	sourceReferences := make([]reference.Reference, 0)
 	if line >= len(lines) {
 		return Proposal{}, ErrInvalidProposal
 	}
-	switch lines[line] {
-	case "source_paths: []":
-		line++
-	case "source_paths:":
-		line++
-		for line < len(lines) && strings.HasPrefix(lines[line], "  - ") {
-			value, err := quotedValue(lines[line], "  - ")
-			if err != nil {
+	if schemaVersion == 1 {
+		switch lines[line] {
+		case "source_paths: []":
+			line++
+		case "source_paths:":
+			line++
+			for line < len(lines) && strings.HasPrefix(lines[line], "  - ") {
+				value, err := quotedValue(lines[line], "  - ")
+				if err != nil {
+					return Proposal{}, ErrInvalidProposal
+				}
+				sourcePaths = append(sourcePaths, value)
+				line++
+			}
+			if len(sourcePaths) == 0 {
 				return Proposal{}, ErrInvalidProposal
 			}
-			sourcePaths = append(sourcePaths, value)
-			line++
-		}
-		if len(sourcePaths) == 0 {
+		default:
 			return Proposal{}, ErrInvalidProposal
 		}
-	default:
-		return Proposal{}, ErrInvalidProposal
+	} else {
+		if lines[line] != "source_references:" {
+			return Proposal{}, ErrInvalidProposal
+		}
+		line++
+		for line < len(lines) && strings.HasPrefix(lines[line], "  - repository: ") {
+			if line+3 >= len(lines) {
+				return Proposal{}, ErrInvalidProposal
+			}
+			repository, repositoryErr := quotedValue(lines[line], "  - repository: ")
+			revision, revisionErr := quotedValue(lines[line+1], "    revision: ")
+			sourcePath, pathErr := quotedValue(lines[line+2], "    path: ")
+			contentHash, hashErr := quotedValue(lines[line+3], "    content_hash: ")
+			if repositoryErr != nil || revisionErr != nil || pathErr != nil || hashErr != nil {
+				return Proposal{}, ErrInvalidProposal
+			}
+			sourceReferences = append(sourceReferences, reference.Reference{Repository: repository, Revision: revision, Path: sourcePath, ContentHash: contentHash})
+			line += 4
+		}
+		if len(sourceReferences) == 0 {
+			return Proposal{}, ErrInvalidProposal
+		}
 	}
 	if line+4 > len(lines) || lines[line] != "---" || lines[line+1] != "" || !strings.HasPrefix(lines[line+2], "# ") || lines[line+3] != "" {
 		return Proposal{}, ErrInvalidProposal
@@ -186,13 +217,13 @@ func parse(proposalPath string, contents []byte) (Proposal, error) {
 	title := strings.TrimPrefix(lines[line+2], "# ")
 	knowledge := strings.Join(lines[line+4:], "\n")
 	proposal := Proposal{
-		SchemaVersion: 1, ID: matches[1], Path: proposalPath, Title: title,
-		SuggestedAction: Action(action), Target: target, Knowledge: knowledge, SourcePaths: sourcePaths,
+		SchemaVersion: schemaVersion, ID: matches[1], Path: proposalPath, Title: title,
+		SuggestedAction: Action(action), Target: target, Knowledge: knowledge, SourcePaths: sourcePaths, SourceReferences: sourceReferences,
 	}
 	if matches[2] != slug(title) {
 		return Proposal{}, ErrInvalidProposal
 	}
-	if _, err := validate(Request{Title: title, SuggestedAction: Action(action), Target: target, Knowledge: knowledge, SourcePaths: sourcePaths}); err != nil {
+	if _, err := validate(Request{Title: title, SuggestedAction: Action(action), Target: target, Knowledge: knowledge, SourcePaths: sourcePaths, SourceReferences: sourceReferences}); err != nil {
 		return Proposal{}, ErrInvalidProposal
 	}
 	if !bytes.Equal(render(proposal), contents) {

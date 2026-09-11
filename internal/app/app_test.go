@@ -181,7 +181,7 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTools := []string{"memory_curate_apply", "memory_curate_preview", "memory_expand", "memory_proposal_list", "memory_propose", "memory_search"}
+	wantTools := []string{"memory_curate_apply", "memory_curate_preview", "memory_expand", "memory_proposal_list", "memory_propose", "memory_reference_expand", "memory_reference_snapshot", "memory_search"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
 	}

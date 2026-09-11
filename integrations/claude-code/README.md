@@ -36,7 +36,7 @@ Em qualquer sessao do Claude Code:
 /remember <fato>
 ```
 
-O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta aprovada pelo Intake Guard e commitada como Markdown diretamente em `main`; uma proposta byte-identica existente e retornada com `duplicate: true` sem novo commit. Memoria canonica e staging alheio permanecem inalterados.
+O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. Fontes commitadas passam por `memory_reference_snapshot`; somente repository lineage, revisao completa, path relativo e hash do blob entram na proposta v2, nunca o root local. Uma proposta byte-identica existente e retornada com `duplicate: true` sem novo commit.
 
 Para consumir ou descartar uma proposta:
 
@@ -44,12 +44,14 @@ Para consumir ou descartar uma proposta:
 /curate [proposal-id]
 ```
 
-A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. O preview apresenta separadamente candidatos canonicos e propostas relacionadas, limitados e ranqueados por sobreposicao lexical. A skill sugere `equivalent`, `contradictory`, `related` ou `unrelated`; uma contradicao exige escolha humana da resolucao antes do preview, e o diff exato ainda exige confirmacao. Essa classificacao nao garante completude semantica. Staging alheio e preservado, o preview e single-use e qualquer drift exige uma nova invocacao explicita.
+A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. O preview apresenta candidatos canonicos, propostas relacionadas e referencia por referencia os estados `verified`, `unavailable`, `mismatch` ou `legacy_unverified`. Integridade nao implica que a fonte sustenta a afirmacao; a skill e a pessoa avaliam separadamente `supports`, `contradicts` ou `unclear`. O diff exato ainda exige confirmacao, staging alheio e preservado e qualquer mudanca de evidencia invalida o preview single-use.
 
 O servidor expoe:
 
 - `memory_search`;
 - `memory_expand`;
+- `memory_reference_snapshot`;
+- `memory_reference_expand`;
 - `memory_propose`.
 - `memory_proposal_list`;
 - `memory_curate_preview`;

@@ -156,11 +156,13 @@ O setup registra o MCP e instala `/remember` e `/curate` no escopo global do usu
 
 Memorias canonicas ficam em `memories/<categoria-configurada>/**/*.md`. Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. Propostas ficam em `proposals/<id>-<slug>.md` e recebem um commit path-scoped diretamente na `main`, sem consumir staging alheio.
 
-O servidor publica seis tools:
+O servidor publica oito tools:
 
 - `memory_search`, para buscar secoes nas categorias configuradas dentro de um orçamento em bytes;
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
-- `memory_propose`, para registrar uma proposta Markdown ou retornar a proposta byte-identica ja existente sem novo commit;
+- `memory_reference_snapshot`, para identificar blobs commitados por lineage, revisao, path e hash sem persistir o checkout local;
+- `memory_reference_expand`, para revisar linhas limitadas dos bytes commitados identificados sem persistir o conteudo;
+- `memory_propose`, para registrar uma proposta Markdown v1/v2 ou retornar a proposta byte-identica ja existente sem novo commit;
 - `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
 - `memory_curate_preview`, para gerar sem escrita o diff e evidencia separada de candidatos canonicos e propostas relacionadas;
 - `memory_curate_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP.
@@ -188,7 +190,7 @@ A curadoria e iniciada em uma sessao do Claude Code:
 /curate [proposal-id]
 ```
 
-Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. O preview separa candidatos canonicos e propostas relacionadas para a skill sugerir `equivalent`, `contradictory`, `related` ou `unrelated`. Contradicao exige que a pessoa escolha a resolucao antes do preview e todo diff ainda exige confirmacao. A busca e lexical e limitada, sem garantia de completude semantica. Propostas byte-identicas sao deduplicadas no inbox; lotes permanecem para as proximas tarefas da Fase 3.
+Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas no inbox; lotes e recovery permanecem para as proximas tarefas da Fase 3.
 
 ## Licença
 

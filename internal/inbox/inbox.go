@@ -17,6 +17,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
 	"golang.org/x/sys/unix"
 )
@@ -37,24 +38,26 @@ var (
 )
 
 type Request struct {
-	Title           string
-	SuggestedAction Action
-	Target          string
-	Knowledge       string
-	SourcePaths     []string
+	Title            string
+	SuggestedAction  Action
+	Target           string
+	Knowledge        string
+	SourcePaths      []string
+	SourceReferences []reference.Reference
 }
 
 type Proposal struct {
-	SchemaVersion   int      `json:"schema_version"`
-	ID              string   `json:"id"`
-	Path            string   `json:"path"`
-	Commit          string   `json:"commit"`
-	Title           string   `json:"title"`
-	SuggestedAction Action   `json:"suggested_action"`
-	Target          string   `json:"target,omitempty"`
-	Knowledge       string   `json:"knowledge"`
-	SourcePaths     []string `json:"source_paths"`
-	Duplicate       bool     `json:"duplicate,omitempty"`
+	SchemaVersion    int                   `json:"schema_version"`
+	ID               string                `json:"id"`
+	Path             string                `json:"path"`
+	Commit           string                `json:"commit"`
+	Title            string                `json:"title"`
+	SuggestedAction  Action                `json:"suggested_action"`
+	Target           string                `json:"target,omitempty"`
+	Knowledge        string                `json:"knowledge"`
+	SourcePaths      []string              `json:"source_paths"`
+	SourceReferences []reference.Reference `json:"source_references,omitempty"`
+	Duplicate        bool                  `json:"duplicate,omitempty"`
 }
 
 type Inbox struct {
@@ -100,9 +103,13 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 		if err != nil || branch != "main" {
 			return ErrNotMain
 		}
+		schemaVersion := 1
+		if len(normalized.SourceReferences) > 0 {
+			schemaVersion = 2
+		}
 		candidate := Proposal{
-			SchemaVersion: 1, Title: normalized.Title, SuggestedAction: normalized.SuggestedAction, Target: normalized.Target,
-			Knowledge: normalized.Knowledge, SourcePaths: append([]string(nil), normalized.SourcePaths...),
+			SchemaVersion: schemaVersion, Title: normalized.Title, SuggestedAction: normalized.SuggestedAction, Target: normalized.Target,
+			Knowledge: normalized.Knowledge, SourcePaths: append([]string(nil), normalized.SourcePaths...), SourceReferences: append([]reference.Reference(nil), normalized.SourceReferences...),
 		}
 		candidateContents := render(candidate)
 		existing, err := inbox.List(ctx)
@@ -130,14 +137,15 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 			return fmt.Errorf("create proposal identifier")
 		}
 		proposal = Proposal{
-			SchemaVersion:   1,
-			ID:              id,
-			Path:            path.Join("proposals", id+"-"+slug(normalized.Title)+".md"),
-			Title:           normalized.Title,
-			SuggestedAction: normalized.SuggestedAction,
-			Target:          normalized.Target,
-			Knowledge:       normalized.Knowledge,
-			SourcePaths:     append([]string(nil), normalized.SourcePaths...),
+			SchemaVersion:    schemaVersion,
+			ID:               id,
+			Path:             path.Join("proposals", id+"-"+slug(normalized.Title)+".md"),
+			Title:            normalized.Title,
+			SuggestedAction:  normalized.SuggestedAction,
+			Target:           normalized.Target,
+			Knowledge:        normalized.Knowledge,
+			SourcePaths:      append([]string(nil), normalized.SourcePaths...),
+			SourceReferences: append([]reference.Reference(nil), normalized.SourceReferences...),
 		}
 		contents := render(proposal)
 		root, err := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", inbox.memoryRoot.Fd()))
@@ -309,6 +317,12 @@ func validate(request Request) (Request, error) {
 	if len(request.SourcePaths) > 16 {
 		return Request{}, ErrInvalidProposal
 	}
+	if len(request.SourceReferences) > reference.MaxReferences || len(request.SourcePaths) > 0 && len(request.SourceReferences) > 0 {
+		return Request{}, ErrInvalidProposal
+	}
+	if len(request.SourceReferences) > 0 && reference.ValidateCollection(request.SourceReferences) != nil {
+		return Request{}, ErrInvalidProposal
+	}
 	for _, sourcePath := range request.SourcePaths {
 		if !canonicalPath(sourcePath) {
 			return Request{}, ErrInvalidProposal
@@ -382,7 +396,9 @@ func slug(title string) string {
 func render(proposal Proposal) []byte {
 	var result strings.Builder
 	result.WriteString("---\n")
-	result.WriteString("schema_version: 1\n")
+	result.WriteString("schema_version: ")
+	result.WriteString(strconv.Itoa(proposal.SchemaVersion))
+	result.WriteByte('\n')
 	result.WriteString("suggested_action: ")
 	result.WriteString(strconv.Quote(string(proposal.SuggestedAction)))
 	result.WriteByte('\n')
@@ -391,7 +407,20 @@ func render(proposal Proposal) []byte {
 		result.WriteString(strconv.Quote(proposal.Target))
 		result.WriteByte('\n')
 	}
-	if len(proposal.SourcePaths) == 0 {
+	if proposal.SchemaVersion == 2 {
+		result.WriteString("source_references:\n")
+		for _, sourceReference := range proposal.SourceReferences {
+			result.WriteString("  - repository: ")
+			result.WriteString(strconv.Quote(sourceReference.Repository))
+			result.WriteString("\n    revision: ")
+			result.WriteString(strconv.Quote(sourceReference.Revision))
+			result.WriteString("\n    path: ")
+			result.WriteString(strconv.Quote(sourceReference.Path))
+			result.WriteString("\n    content_hash: ")
+			result.WriteString(strconv.Quote(sourceReference.ContentHash))
+			result.WriteByte('\n')
+		}
+	} else if len(proposal.SourcePaths) == 0 {
 		result.WriteString("source_paths: []\n")
 	} else {
 		result.WriteString("source_paths:\n")

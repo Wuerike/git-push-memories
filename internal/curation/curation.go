@@ -18,6 +18,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
+	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/unifieddiff"
@@ -54,13 +55,14 @@ const (
 )
 
 type Summary struct {
-	ID              string       `json:"id"`
-	Path            string       `json:"path"`
-	Title           string       `json:"title"`
-	SuggestedAction inbox.Action `json:"suggested_action"`
-	Target          string       `json:"target,omitempty"`
-	Knowledge       string       `json:"knowledge"`
-	SourcePaths     []string     `json:"source_paths"`
+	ID               string                `json:"id"`
+	Path             string                `json:"path"`
+	Title            string                `json:"title"`
+	SuggestedAction  inbox.Action          `json:"suggested_action"`
+	Target           string                `json:"target,omitempty"`
+	Knowledge        string                `json:"knowledge"`
+	SourcePaths      []string              `json:"source_paths"`
+	SourceReferences []reference.Reference `json:"source_references,omitempty"`
 }
 
 type List struct {
@@ -102,20 +104,21 @@ type PreviewRequest struct {
 }
 
 type Preview struct {
-	Operation    Operation     `json:"operation"`
-	ProposalID   string        `json:"proposal_id"`
-	ProposalPath string        `json:"proposal_path"`
-	Title        string        `json:"title"`
-	Action       inbox.Action  `json:"suggested_action"`
-	Knowledge    string        `json:"knowledge"`
-	SourcePaths  []string      `json:"source_paths"`
-	TargetPath   string        `json:"target_path,omitempty"`
-	SectionID    string        `json:"section_id,omitempty"`
-	ContentHash  string        `json:"content_hash,omitempty"`
-	Heading      string        `json:"heading,omitempty"`
-	Replacement  string        `json:"replacement,omitempty"`
-	Reason       DiscardReason `json:"reason,omitempty"`
-	Diff         string        `json:"diff"`
+	Operation        Operation             `json:"operation"`
+	ProposalID       string                `json:"proposal_id"`
+	ProposalPath     string                `json:"proposal_path"`
+	Title            string                `json:"title"`
+	Action           inbox.Action          `json:"suggested_action"`
+	Knowledge        string                `json:"knowledge"`
+	SourcePaths      []string              `json:"source_paths"`
+	SourceReferences []reference.Reference `json:"source_references,omitempty"`
+	TargetPath       string                `json:"target_path,omitempty"`
+	SectionID        string                `json:"section_id,omitempty"`
+	ContentHash      string                `json:"content_hash,omitempty"`
+	Heading          string                `json:"heading,omitempty"`
+	Replacement      string                `json:"replacement,omitempty"`
+	Reason           DiscardReason         `json:"reason,omitempty"`
+	Diff             string                `json:"diff"`
 
 	head          string
 	gitMode       string
@@ -203,7 +206,7 @@ func (curator *Curator) List(ctx context.Context) (List, error) {
 		}
 		result.Proposals[index] = Summary{
 			ID: proposal.ID, Path: proposal.Path, Title: proposal.Title, SuggestedAction: proposal.SuggestedAction, Target: proposal.Target,
-			Knowledge: proposal.Knowledge, SourcePaths: append([]string(nil), proposal.SourcePaths...),
+			Knowledge: proposal.Knowledge, SourcePaths: append([]string{}, proposal.SourcePaths...), SourceReferences: append([]reference.Reference(nil), proposal.SourceReferences...),
 		}
 	}
 	return result, nil
@@ -320,7 +323,7 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 	}
 	preview := Preview{
 		Operation: operation, ProposalID: snapshot.Proposal.ID, ProposalPath: snapshot.Proposal.Path, Title: snapshot.Proposal.Title,
-		Action: snapshot.Proposal.SuggestedAction, Knowledge: snapshot.Proposal.Knowledge, SourcePaths: append([]string(nil), snapshot.Proposal.SourcePaths...),
+		Action: snapshot.Proposal.SuggestedAction, Knowledge: snapshot.Proposal.Knowledge, SourcePaths: append([]string{}, snapshot.Proposal.SourcePaths...), SourceReferences: append([]reference.Reference(nil), snapshot.Proposal.SourceReferences...),
 		TargetPath: targetPath, ContentHash: request.ContentHash, Heading: heading, Replacement: request.Replacement, Reason: request.Reason, proposal: snapshot, request: request,
 	}
 	var targetDiff string
@@ -505,12 +508,17 @@ func (curator *Curator) confirmConfig(ctx context.Context, expectedHead string) 
 	return nil
 }
 
-func (curator *Curator) Apply(ctx context.Context, expected Preview) (Result, error) {
+func (curator *Curator) Apply(ctx context.Context, expected Preview, validateEvidence func() error) (Result, error) {
 	var result Result
 	err := repolock.With(ctx, curator.cfg.StateRoot, func() error {
 		fresh, err := curator.revalidatePreview(ctx, expected)
 		if err != nil {
 			return err
+		}
+		if validateEvidence != nil {
+			if err := validateEvidence(); err != nil {
+				return err
+			}
 		}
 		commit, err := curator.commit(ctx, fresh)
 		if err != nil {
@@ -528,7 +536,7 @@ func (curator *Curator) Apply(ctx context.Context, expected Preview) (Result, er
 
 func samePreview(left, right Preview) bool {
 	return left.Operation == right.Operation && left.ProposalID == right.ProposalID && left.ProposalPath == right.ProposalPath && left.Title == right.Title && left.Action == right.Action && left.Knowledge == right.Knowledge &&
-		slices.Equal(left.SourcePaths, right.SourcePaths) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Reason == right.Reason && left.Diff == right.Diff &&
+		slices.Equal(left.SourcePaths, right.SourcePaths) && slices.Equal(left.SourceReferences, right.SourceReferences) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Reason == right.Reason && left.Diff == right.Diff &&
 		left.Heading == right.Heading && left.head == right.head && left.gitMode == right.gitMode && left.fileMode == right.fileMode && left.baselineHash == right.baselineHash && left.baselineBlob == right.baselineBlob && bytes.Equal(left.baseline, right.baseline) &&
 		left.postStateHash == right.postStateHash && bytes.Equal(left.postState, right.postState) &&
 		left.proposal.Head == right.proposal.Head && left.proposal.Blob == right.proposal.Blob && bytes.Equal(left.proposal.Contents, right.proposal.Contents) && left.request == right.request
@@ -540,12 +548,13 @@ func (curator *Curator) inspect(proposal inbox.Proposal) error {
 
 func (curator *Curator) inspectKnowledge(proposal inbox.Proposal, knowledge string) error {
 	candidate := struct {
-		Title           string   `json:"title"`
-		SuggestedAction string   `json:"suggested_action"`
-		Target          string   `json:"target,omitempty"`
-		Knowledge       string   `json:"knowledge"`
-		SourcePaths     []string `json:"source_paths"`
-	}{proposal.Title, string(proposal.SuggestedAction), proposal.Target, knowledge, proposal.SourcePaths}
+		Title            string                `json:"title"`
+		SuggestedAction  string                `json:"suggested_action"`
+		Target           string                `json:"target,omitempty"`
+		Knowledge        string                `json:"knowledge"`
+		SourcePaths      []string              `json:"source_paths"`
+		SourceReferences []reference.Reference `json:"source_references,omitempty"`
+	}{proposal.Title, string(proposal.SuggestedAction), proposal.Target, knowledge, append([]string{}, proposal.SourcePaths...), proposal.SourceReferences}
 	raw, err := json.Marshal(candidate)
 	if err != nil {
 		return err

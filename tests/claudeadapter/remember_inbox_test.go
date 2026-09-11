@@ -103,7 +103,7 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 		t.Fatal("invalid skill frontmatter")
 	}
 	frontmatter := string(contents)[:frontmatterEnd+4]
-	for _, tool := range []string{"memory_search", "memory_expand", "memory_propose"} {
+	for _, tool := range []string{"memory_search", "memory_expand", "memory_reference_snapshot", "memory_reference_expand", "memory_propose"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)
 		}
@@ -115,6 +115,11 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 	}
 	if !strings.Contains(string(contents), "If `duplicate` is true") || !strings.Contains(string(contents), "no new file or commit was created") {
 		t.Fatal("remember skill does not explain exact proposal deduplication")
+	}
+	for _, contract := range []string{"never invent or edit repository IDs", "source_paths: []", "`supports`, `contradicts`, or `unclear`", "local root is transient", "Never copy source excerpts"} {
+		if !strings.Contains(string(contents), contract) {
+			t.Fatalf("remember skill is missing reference contract %q", contract)
+		}
 	}
 }
 

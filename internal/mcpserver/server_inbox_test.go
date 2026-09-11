@@ -15,6 +15,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
+	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -129,6 +130,167 @@ func TestMemoryProposeReturnsExistingExactDuplicateWithoutNewCommit(t *testing.T
 	}
 	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
 		t.Fatalf("duplicate proposal advanced HEAD from %s to %s", head, current)
+	}
+}
+
+func TestReferenceSnapshotFlowsIntoProposalAndVerifiedPreviewEvidence(t *testing.T) {
+	sourceRoot := filepath.Join(t.TempDir(), "source")
+	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, sourceRoot, "init", "--quiet", "--initial-branch=main")
+	runGit(t, sourceRoot, "config", "user.name", "Test")
+	runGit(t, sourceRoot, "config", "user.email", "test@example.invalid")
+	if err := os.MkdirAll(filepath.Join(sourceRoot, "services", "checkout"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sourceRoot, "services", "checkout", "config.yaml"), []byte("timeout: 5s\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, sourceRoot, "add", ".")
+	runGit(t, sourceRoot, "commit", "--quiet", "-m", "source")
+
+	memoryRoot := newGitRoot(t, nil)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	session, stop := startServer(t, memoryRoot, stateRoot)
+	snapshotResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_reference_snapshot", Arguments: map[string]any{
+			"repository_root": sourceRoot, "source_paths": []string{"services/checkout/config.yaml"},
+		},
+	})
+	if err != nil || snapshotResult.IsError {
+		stop()
+		t.Fatalf("memory_reference_snapshot = %+v, %v", snapshotResult, err)
+	}
+	var snapshot struct {
+		Data reference.Snapshot `json:"data"`
+	}
+	decodeStructured(t, snapshotResult, &snapshot)
+	if len(snapshot.Data.References) != 1 || snapshot.Data.References[0].Revision != gitOutput(t, sourceRoot, "rev-parse", "HEAD") {
+		stop()
+		t.Fatalf("reference snapshot = %+v", snapshot.Data)
+	}
+	expandResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_reference_expand", Arguments: map[string]any{
+			"reference": snapshot.Data.References[0], "start_line": 1, "budget_bytes": 2048,
+		},
+	})
+	if err != nil || expandResult.IsError {
+		stop()
+		t.Fatalf("memory_reference_expand = %+v, %v", expandResult, err)
+	}
+	var expanded struct {
+		Data reference.Excerpt `json:"data"`
+	}
+	decodeStructured(t, expandResult, &expanded)
+	if expanded.Data.Content != "timeout: 5s\n" || expanded.Data.StartLine != 1 || expanded.Data.Truncated {
+		stop()
+		t.Fatalf("reference excerpt = %+v", expanded.Data)
+	}
+	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Checkout source", "suggested_action": "create", "knowledge": "Checkout timeout comes from committed configuration.",
+			"source_paths": []string{}, "source_references": snapshot.Data.References,
+		},
+	})
+	if err != nil || proposalResult.IsError {
+		stop()
+		t.Fatalf("memory_propose = %+v, %v", proposalResult, err)
+	}
+	proposal := decodeInboxResponse(t, proposalResult).Data
+	if proposal.SchemaVersion != 2 || len(proposal.SourceReferences) != 1 {
+		stop()
+		t.Fatalf("structured proposal = %+v", proposal)
+	}
+	preview := func(current *mcp.ClientSession) (reference.Evidence, string) {
+		result, err := current.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "memory_curate_preview", Arguments: map[string]any{
+				"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-source.md",
+			},
+		})
+		if err != nil || result.IsError {
+			t.Fatalf("memory_curate_preview = %+v, %v", result, err)
+		}
+		var response struct {
+			Data struct {
+				PreviewToken string `json:"preview_token"`
+				Evidence     struct {
+					References []reference.Evidence `json:"references"`
+				} `json:"evidence"`
+			} `json:"data"`
+		}
+		decodeStructured(t, result, &response)
+		if len(response.Data.Evidence.References) != 1 {
+			t.Fatalf("reference evidence = %+v", response.Data.Evidence.References)
+		}
+		return response.Data.Evidence.References[0], response.Data.PreviewToken
+	}
+	verified, _ := preview(session)
+	if verified.Integrity.Status != reference.IntegrityVerified || verified.SemanticSupport != reference.SemanticNotAssessed {
+		stop()
+		t.Fatalf("verified evidence = %+v", verified)
+	}
+	mismatchedReference := snapshot.Data.References[0]
+	mismatchedReference.ContentHash = "sha256:" + strings.Repeat("0", 64)
+	mismatchProposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_propose", Arguments: map[string]any{
+			"title": "Divergent checkout source", "suggested_action": "create", "knowledge": "This proposal carries a divergent source hash.",
+			"source_paths": []string{}, "source_references": []reference.Reference{mismatchedReference},
+		},
+	})
+	if err != nil || mismatchProposalResult.IsError {
+		stop()
+		t.Fatalf("mismatched memory_propose = %+v, %v", mismatchProposalResult, err)
+	}
+	mismatchProposal := decodeInboxResponse(t, mismatchProposalResult).Data
+	mismatchPreviewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_preview", Arguments: map[string]any{
+			"operation": "create_page", "proposal_id": mismatchProposal.ID, "target_path": "memories/domains/divergent-checkout-source.md",
+		},
+	})
+	if err != nil || mismatchPreviewResult.IsError {
+		stop()
+		t.Fatalf("mismatch preview = %+v, %v", mismatchPreviewResult, err)
+	}
+	var mismatchPreview struct {
+		Data struct {
+			Evidence struct {
+				References []reference.Evidence `json:"references"`
+			} `json:"evidence"`
+		} `json:"data"`
+	}
+	decodeStructured(t, mismatchPreviewResult, &mismatchPreview)
+	if evidence := mismatchPreview.Data.Evidence.References; len(evidence) != 1 || evidence[0].Integrity.Status != reference.IntegrityMismatch || evidence[0].Integrity.Reason != "content_hash_mismatch" || evidence[0].SemanticSupport != reference.SemanticNotAssessed {
+		stop()
+		t.Fatalf("mismatch evidence = %+v", evidence)
+	}
+	stop()
+
+	freshSession, freshStop := startServer(t, memoryRoot, stateRoot)
+	defer freshStop()
+	unavailable, unavailableToken := preview(freshSession)
+	if unavailable.Integrity.Status != reference.IntegrityUnavailable || unavailable.Integrity.Reason != "repository_unavailable" {
+		t.Fatalf("fresh-process evidence = %+v", unavailable)
+	}
+	reboundResult, err := freshSession.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_reference_snapshot", Arguments: map[string]any{
+			"repository_root": sourceRoot, "revision": snapshot.Data.Revision, "source_paths": []string{"services/checkout/config.yaml"},
+		},
+	})
+	if err != nil || reboundResult.IsError {
+		t.Fatalf("rebind memory_reference_snapshot = %+v, %v", reboundResult, err)
+	}
+	applyResult, err := freshSession.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": unavailableToken},
+	})
+	if err != nil || !applyResult.IsError || decodeResponse(t, applyResult).Error.Code != "curation_drift" {
+		t.Fatalf("apply after reference status drift = %+v, %v", applyResult, err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "domains", "checkout-source.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reference status drift created memory: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); err != nil {
+		t.Fatalf("reference status drift consumed proposal: %v", err)
 	}
 }
 
@@ -296,6 +458,9 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 			SourcePaths  []string `json:"source_paths"`
 			TargetPath   string   `json:"target_path"`
 			Diff         string   `json:"diff"`
+			Evidence     struct {
+				References []reference.Evidence `json:"references"`
+			} `json:"evidence"`
 		} `json:"data"`
 	}
 	decodeStructured(t, previewResult, &preview)
@@ -304,6 +469,9 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	}
 	if len(preview.Data.SourcePaths) != 1 || preview.Data.SourcePaths[0] != "services/parcel/dispatch.go" {
 		t.Fatalf("preview sources = %v", preview.Data.SourcePaths)
+	}
+	if references := preview.Data.Evidence.References; len(references) != 1 || references[0].LegacyPath != "services/parcel/dispatch.go" || references[0].Integrity.Status != reference.IntegrityLegacyUnverified {
+		t.Fatalf("legacy reference evidence = %+v", references)
 	}
 	if !strings.Contains(preview.Data.Diff, "+++ b/"+target) || !strings.Contains(preview.Data.Diff, "--- a/"+proposal.Path) || !strings.Contains(preview.Data.Diff, "+++ /dev/null") {
 		t.Fatalf("preview diff = %s", preview.Data.Diff)

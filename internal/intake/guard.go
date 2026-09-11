@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Wuerike/git-push-memories/internal/reference"
 )
 
 const (
@@ -64,15 +66,18 @@ func (guard *Guard) InspectProposal(candidate ProposalCandidate) (AllowedProposa
 	if err != nil {
 		return AllowedProposal{}, err
 	}
-	if !hasExactly(fields, "title", "suggested_action", "target", "knowledge", "source_paths") && !hasExactly(fields, "title", "suggested_action", "knowledge", "source_paths") {
+	legacyShape := hasExactly(fields, "title", "suggested_action", "target", "knowledge", "source_paths") || hasExactly(fields, "title", "suggested_action", "knowledge", "source_paths")
+	referenceShape := hasExactly(fields, "title", "suggested_action", "target", "knowledge", "source_paths", "source_references") || hasExactly(fields, "title", "suggested_action", "knowledge", "source_paths", "source_references")
+	if !legacyShape && !referenceShape {
 		return AllowedProposal{}, rejection("schema", "invalid_candidate")
 	}
 	var decoded struct {
-		Title           string
-		SuggestedAction string
-		Target          string
-		Knowledge       string
-		SourcePaths     []string
+		Title            string
+		SuggestedAction  string
+		Target           string
+		Knowledge        string
+		SourcePaths      []string
+		SourceReferences []reference.Reference
 	}
 	for name, target := range map[string]any{
 		"title": &decoded.Title, "suggested_action": &decoded.SuggestedAction, "knowledge": &decoded.Knowledge, "source_paths": &decoded.SourcePaths,
@@ -86,10 +91,15 @@ func (guard *Guard) InspectProposal(candidate ProposalCandidate) (AllowedProposa
 			return AllowedProposal{}, err
 		}
 	}
+	if raw, exists := fields["source_references"]; exists {
+		if err := decodeRawField(raw, &decoded.SourceReferences); err != nil {
+			return AllowedProposal{}, err
+		}
+	}
 	if decoded.SuggestedAction != "create" && decoded.SuggestedAction != "update" && decoded.SuggestedAction != "remove" {
 		return AllowedProposal{}, rejection("schema", "invalid_action")
 	}
-	if decoded.Title == "" || decoded.Knowledge == "" || len(decoded.Title) > maxHeadingBytes || len(decoded.Knowledge) > maxReplacementBytes || len(decoded.Target) > maxPathBytes || len(decoded.SourcePaths) > maxSourcePaths {
+	if decoded.Title == "" || decoded.Knowledge == "" || len(decoded.Title) > maxHeadingBytes || len(decoded.Knowledge) > maxReplacementBytes || len(decoded.Target) > maxPathBytes || len(decoded.SourcePaths) > maxSourcePaths || len(decoded.SourceReferences) > maxSourcePaths {
 		return AllowedProposal{}, rejection("limits", "limit_exceeded")
 	}
 	values := []string{decoded.Title, decoded.SuggestedAction, decoded.Target, decoded.Knowledge}
@@ -98,6 +108,15 @@ func (guard *Guard) InspectProposal(candidate ProposalCandidate) (AllowedProposa
 			return AllowedProposal{}, rejection("limits", "limit_exceeded")
 		}
 		values = append(values, sourcePath)
+	}
+	if len(decoded.SourcePaths) > 0 && len(decoded.SourceReferences) > 0 {
+		return AllowedProposal{}, rejection("schema", "invalid_candidate")
+	}
+	if referenceShape && reference.ValidateCollection(decoded.SourceReferences) != nil {
+		return AllowedProposal{}, rejection("schema", "invalid_reference")
+	}
+	for _, sourceReference := range decoded.SourceReferences {
+		values = append(values, sourceReference.Repository, sourceReference.Revision, sourceReference.Path, sourceReference.ContentHash)
 	}
 	for index, value := range values {
 		allowLayout := index == 3
@@ -123,7 +142,7 @@ func (guard *Guard) InspectProposal(candidate ProposalCandidate) (AllowedProposa
 	}
 	return AllowedProposal{
 		title: decoded.Title, suggestedAction: decoded.SuggestedAction, target: decoded.Target,
-		knowledge: decoded.Knowledge, sourcePaths: canonicalSources,
+		knowledge: decoded.Knowledge, sourcePaths: canonicalSources, sourceReferences: append([]reference.Reference(nil), decoded.SourceReferences...),
 	}, nil
 }
 
@@ -134,7 +153,7 @@ func decodeClosedObject(raw []byte) (map[string]json.RawMessage, error) {
 		return nil, rejection("schema", "invalid_candidate")
 	}
 	fields := make(map[string]json.RawMessage, 7)
-	allowed := map[string]bool{"title": true, "suggested_action": true, "target": true, "knowledge": true, "source_paths": true}
+	allowed := map[string]bool{"title": true, "suggested_action": true, "target": true, "knowledge": true, "source_paths": true, "source_references": true}
 	for decoder.More() {
 		token, err := decoder.Token()
 		if err != nil {

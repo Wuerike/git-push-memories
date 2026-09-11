@@ -1,6 +1,6 @@
 # Estado das funcionalidades
 
-Atualizado em 2026-09-10.
+Atualizado em 2026-09-11.
 
 Este documento descreve o comportamento exposto pela implementacao atual. Os documentos em `docs/phase-1/` e `docs/phase-2/` preservam decisoes, protocolos e evidencias dos fluxos avaliados naquelas fases; eles nao substituem este inventario operacional.
 
@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | T1-T4 entregam os destinos individuais e [T5](phase-3/t5-duplicate-and-contradiction-evidence.md) acrescenta dedupe exato e evidencia relacionada; as demais garantias continuam pendentes. |
+| Fase 3: curadoria e confianca | **Em andamento.** | T1-T5 entregam destinos e classificacao; [T6](phase-3/t6-verifiable-source-references.md) acrescenta referencias verificaveis; transacao multi-path e recovery continuam pendentes. |
 
 ## Superficie operacional
 
@@ -38,6 +38,8 @@ Os estados usados sao:
 |---|---|---|
 | `memory_search` | **Implementado.** | Busca secoes folha da memoria canonica dentro de um budget exato. |
 | `memory_expand` | **Implementado.** | Expande um handle de busca e rejeita handles obsoletos. |
+| `memory_reference_snapshot` | **Implementado.** | Produz referencias imutaveis a blobs commitados e vincula transitoriamente um checkout local, sem retornar ou persistir seu root. |
+| `memory_reference_expand` | **Implementado.** | Retorna linhas limitadas do blob UTF-8 identificado para revisao sem persistir o conteudo. |
 | `memory_propose` | **Implementado.** | Valida, grava e commita uma proposta Markdown; payload canonico byte-identico retorna a proposta existente com `duplicate: true` sem novo commit. |
 | `memory_proposal_list` | **Implementado.** | Revalida schema e privacidade antes de listar propostas commitadas e categorias configuradas, sem criar estado privado ou alterar o repositorio. |
 | `memory_curate_preview` | **Implementado.** | Gera sem escrita o diff e evidencia separada em candidatos canonicos e propostas relacionadas, no mesmo `HEAD`. |
@@ -76,10 +78,11 @@ Os estados usados sao:
 
 | Funcionalidade | Estado atual |
 |---|---|
-| Schema fechado de proposta | **Implementado.** A entrada aceita somente `title`, `suggested_action`, `target` opcional, `knowledge` e `source_paths`. |
+| Schema fechado de proposta | **Implementado.** A entrada aceita somente `title`, `suggested_action`, `target` opcional, `knowledge`, `source_paths` e `source_references` opcional. |
 | Acoes sugeridas | **Implementado.** Os valores aceitos sao `create`, `update` e `remove`; eles orientam a curadoria futura e nao alteram memoria por conta propria. |
 | Target opcional | **Implementado.** Quando informado, deve ser um path Markdown dentro de uma categoria configurada. |
-| Source paths | **Parcial.** Paths sao canonicalizados e examinados pela politica de privacidade, mas existencia e aderencia ao conhecimento nao sao verificadas. |
+| Source paths v1 | **Legado.** Paths sao canonicalizados e examinados pela politica de privacidade, mas sempre aparecem como `legacy_unverified`. |
+| Source references v2 | **Implementado.** Identificam lineage do repositorio, commit completo, path relativo e SHA-256 do blob; referencias e source paths nao vazios sao mutuamente exclusivos. |
 | Intake Guard antes da persistencia | **Implementado.** Todo o payload e validado antes da criacao de lock, arquivo de proposta ou objeto Git. |
 | Deteccao normativa | **Implementado para a politica v1.** Bloqueia padroes conhecidos de chaves, tokens, autorizacao, email, telefone, CPF e referencias de sessao. |
 | Privacidade semantica | **Parcial.** Texto livre nao e classificado semanticamente como prompt, resposta ou transcript quando nao corresponde aos padroes normativos. |
@@ -91,7 +94,7 @@ Os estados usados sao:
 
 | Funcionalidade | Estado atual |
 |---|---|
-| Formato da proposta | **Implementado.** Markdown legivel com frontmatter `schema_version: 1`, acao sugerida, target opcional e source paths, seguido por titulo e conhecimento. |
+| Formato da proposta | **Implementado.** Schema v1 preserva source paths legados; schema v2 serializa referencias estruturadas. Ambos mantem Markdown legivel, acao, target, titulo e conhecimento. |
 | Identidade | **Implementado.** Cada proposta recebe ID aleatorio hexadecimal e slug derivado do titulo. |
 | Branch obrigatoria | **Implementado.** A captura exige que o checkout esteja exatamente em `main`. |
 | Commit path-scoped | **Implementado.** O commit contem exatamente o novo arquivo de proposta e parte do `HEAD` mais recente. |
@@ -109,6 +112,7 @@ Os estados usados sao:
 | Setup global | **Implementado.** O MCP e `/remember` sao instalados no escopo do usuario. |
 | MCP por stdio | **Implementado.** Nao ha daemon, porta local ou container obrigatorio. |
 | `/remember` explicito | **Implementado.** O skill nao e invocado automaticamente pelo modelo. |
+| Snapshot de fontes no `/remember` | **Implementado.** A skill usa somente referencias retornadas pela ferramenta e nunca persiste o root local ou inventa hashes. |
 | Dedupe no `/remember` | **Implementado.** Resposta `duplicate: true` informa que ID, path e commit existentes foram reutilizados sem nova publicacao. |
 | `/curate` explicito | **Implementado para `create`, `update`, `remove` e descarte.** Pesquisa memoria, escolhe uma operacao, gera preview e exige confirmacao antes do apply. |
 | Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
@@ -128,6 +132,8 @@ Os estados usados sao:
 | Consumo atomico de propostas | **Parcial.** `create`, `update` e `remove` alteram o target canonico e removem a proposta no mesmo commit exato; lotes ainda nao sao suportados. |
 | Descarte auditavel | **Implementado.** Remove somente a proposta e registra decisao e reason code fechado no commit Git. |
 | Duplicidade e contradicao | **Parcial e observavel.** Dedupe exato bloqueia publicacao repetida; preview separa candidatos canonicos e propostas relacionadas; `/curate` classifica equivalencia ou contradicao como avaliacao assistida e exige escolha humana. Nao ha detector semantico completo. |
+| Integridade de referencias | **Implementado localmente.** Preview distingue `verified`, `unavailable`, `mismatch` e `legacy_unverified`; mudanca de status invalida apply. |
+| Sustentacao semantica | **Decisao humana assistida.** `supports`, `contradicts` e `unclear` nao sao inferidos pelo verificador nem confundidos com integridade. |
 | Validacao por agentes | **Adiado.** Nenhum agente possui autoridade de curadoria. |
 | Pull request e politica de merge | **Adiado.** Revisao e push atuais usam Git comum, sem automacao remota. |
 | Nova avaliacao de valor | **Pendente.** Os experimentos da Fase 2 avaliaram o lifecycle supersedido e nao foram repetidos com o inbox atual. |
@@ -143,4 +149,4 @@ go vet ./...
 go build ./...
 ```
 
-A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, listagem privada, evidencia relacionada, preview e apply de todos os destinos individuais, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao por novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.
+A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply de todos os destinos individuais, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao por novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.

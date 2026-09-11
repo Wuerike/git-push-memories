@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Wuerike/git-push-memories/internal/inbox"
+	"github.com/Wuerike/git-push-memories/internal/reference"
 )
 
 func TestAddCommitsOneMarkdownProposalOnMain(t *testing.T) {
@@ -70,6 +71,78 @@ Card transactions can originate from the authorizer adapter.
 	}
 	if status := gitOutput(t, root, "status", "--short", "--", proposal.Path); status != "" {
 		t.Fatalf("proposal path is not clean after commit: %q", status)
+	}
+}
+
+func TestAddCommitsAndReadsStructuredReferenceProposalV2(t *testing.T) {
+	root := newInboxRoot(t)
+	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer box.Close()
+	source := reference.Reference{
+		Repository: "git-lineage-sha256:" + strings.Repeat("a", 64), Revision: strings.Repeat("b", 40),
+		Path: "services/checkout/config.yaml", ContentHash: "sha256:" + strings.Repeat("c", 64),
+	}
+	request := inbox.Request{
+		Title: "Checkout source", SuggestedAction: inbox.ActionCreate, Knowledge: "Checkout uses committed configuration.",
+		SourceReferences: []reference.Reference{source},
+	}
+	proposal, err := box.Add(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proposal.SchemaVersion != 2 || len(proposal.SourcePaths) != 0 || len(proposal.SourceReferences) != 1 || proposal.SourceReferences[0] != source {
+		t.Fatalf("Add() = %+v", proposal)
+	}
+	want := `---
+schema_version: 2
+suggested_action: "create"
+source_references:
+  - repository: "git-lineage-sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    revision: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    path: "services/checkout/config.yaml"
+    content_hash: "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+---
+
+# Checkout source
+
+Checkout uses committed configuration.
+`
+	contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(proposal.Path)))
+	if err != nil || string(contents) != want {
+		t.Fatalf("proposal Markdown = %q, want %q, err = %v", contents, want, err)
+	}
+	listed, err := box.List(context.Background())
+	if err != nil || len(listed) != 1 || listed[0].Proposal.SchemaVersion != 2 || len(listed[0].Proposal.SourceReferences) != 1 || listed[0].Proposal.SourceReferences[0] != source {
+		t.Fatalf("List() = %+v, %v", listed, err)
+	}
+	duplicate, err := box.Add(context.Background(), request)
+	if err != nil || !duplicate.Duplicate || duplicate.ID != proposal.ID {
+		t.Fatalf("duplicate Add() = %+v, %v", duplicate, err)
+	}
+}
+
+func TestListRejectsMalformedPersistedProposalV2(t *testing.T) {
+	root := newInboxRoot(t)
+	if err := os.Mkdir(filepath.Join(root, "proposals"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	proposalPath := "proposals/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-malformed.md"
+	contents := "---\nschema_version: 2\nsuggested_action: \"create\"\nsource_references:\n---\n\n# Malformed\n\nKnowledge.\n"
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(proposalPath)), []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, root, "add", proposalPath)
+	runGit(t, root, "commit", "--quiet", "-m", "malformed proposal")
+	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer box.Close()
+	if _, err := box.List(context.Background()); !errors.Is(err, inbox.ErrInvalidProposal) {
+		t.Fatalf("List() error = %v, want ErrInvalidProposal", err)
 	}
 }
 
