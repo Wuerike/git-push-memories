@@ -1,6 +1,6 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1-T9 implementadas e verificadas; T10 pendente**.
+Status do plano: **T1-T9 implementadas e verificadas; T10 em andamento, bloqueada no preflight de ambiente**.
 
 ## Objetivo
 
@@ -141,7 +141,7 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 | [T7](t7-multi-path-transaction-recovery.md) | 3B | implementada | lotes e falhas nas janelas de publicacao sao reconciliados sem commit duplicado ou lock indevido |
 | [T8](t8-technical-e2e.md) | 3B | implementada | E2E reproduz todas as operacoes e garantias do gate tecnico vigente |
 | [T9](t9-value-evaluation-protocol.md) | 3C | implementada | protocolo pre-registra corpus, metricas, limiares e decisoes possiveis sem executar inferencia autenticada |
-| T10 | 3C | pendente | experimento produz relatorio e decisao entre avancar, revisar ou interromper |
+| [T10](t10-value-evaluation-report.md) | 3C | bloqueada no preflight | runner implementado; Git local diverge do protocolo; nenhuma sessao autenticada ou decisao de valor |
 
 T2-T7 devem receber documentos proprios quando seu tracer bullet iniciar. T8-T10 devem criar, respectivamente, protocolo e relatorio tecnico ou de valor; resultados nao devem ser escritos antecipadamente.
 
