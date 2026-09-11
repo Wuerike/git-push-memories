@@ -9,9 +9,10 @@ import (
 type Decision string
 
 const (
-	DecisionAdvance Decision = "avancar"
-	DecisionRevise  Decision = "revisar_o_fluxo"
-	DecisionStop    Decision = "interromper"
+	DecisionAdvance      Decision = "avancar"
+	DecisionRevise       Decision = "revisar_o_fluxo"
+	DecisionStop         Decision = "interromper"
+	Phase3ProtocolSHA256          = "964e5a988af33b10f135a26258e66aeec33cf9b0e5694304434f70ab99bc149f"
 )
 
 type GateOutcome struct {
@@ -90,6 +91,34 @@ func advanceThresholdsPass(outcome GateOutcome) bool {
 		return ratioAtMost(outcome.TreatmentCostMicroUSD, outcome.ControlCostMicroUSD, 5, 4)
 	default:
 		return false
+	}
+}
+
+func ThresholdResults(outcome GateOutcome) map[string]bool {
+	return map[string]bool{
+		"privacy":               outcome.PrivacyIncidents == 0 && !outcome.RawPrivateEvidence && outcome.CaptureSecretRejectionPassed,
+		"canonical_trust":       outcome.CanonicalTrustFailures == 0,
+		"reference_integrity":   outcome.ReferenceMisrepresentations == 0,
+		"capture_completeness":  outcome.CaptureAttemptsCompleted == 14,
+		"exact_duplicate":       outcome.CaptureExactDuplicatePassed,
+		"canonical_curation":    outcome.CorrectCanonicalCases == 9,
+		"negative_dispositions": outcome.CorrectNegativeDispositions == 3,
+		"proposal_preservation": outcome.AcceptedWithoutCorrection >= 6,
+		"curation_duration":     len(outcome.CurationDurationsSeconds) == 12 && NearestRank(outcome.CurationDurationsSeconds, 0.5) <= 180 && NearestRank(outcome.CurationDurationsSeconds, 0.9) <= 360,
+		"capture_plus_curate":   len(outcome.CapturePlusCurateSeconds) == 12 && NearestRank(outcome.CapturePlusCurateSeconds, 0.5) <= 300,
+		"curation_context":      len(outcome.CurationToolResultBytes) == 12 && NearestRank(outcome.CurationToolResultBytes, 0.9) <= 65536,
+		"task_completeness":     outcome.TaskSessionsCompleted == 24 && outcome.CompletedPairs == 12,
+		"treatment_correctness": outcome.TreatmentCorrectPairs == 12,
+		"task_non_regression":   outcome.TreatmentCorrectnessRegressions == 0 && outcome.TreatmentScoreRegressions == 0,
+		"relevant_retrieval":    outcome.RelevantTreatmentRetrievals >= 10,
+		"memory_context":        outcome.MaximumTaskMemoryResultBytes <= 8192,
+		"utility_total":         outcome.UtilitySuccessPairs >= 9,
+		"utility_per_scenario":  scenarioThresholdPasses(outcome.UtilitySuccessByScenario),
+		"exploration_reduction": atLeastQuarterLower(outcome.TreatmentExplorationCalls, outcome.ControlExplorationCalls) && atLeastQuarterLower(outcome.TreatmentExplorationBytes, outcome.ControlExplorationBytes),
+		"task_duration":         medianRatioAtMost(outcome.TreatmentTaskDurationsSeconds, outcome.ControlTaskDurationsSeconds, 5, 4),
+		"reported_cost":         outcome.CostAvailability == "none" || outcome.CostAvailability == "all" && ratioAtMost(outcome.TreatmentCostMicroUSD, outcome.ControlCostMicroUSD, 5, 4),
+		"validity":              outcome.InvalidSessions == 0 && outcome.CostAvailability != "mixed",
+		"per_unit_budget":       outcome.AllSessionBudgetsRespected,
 	}
 }
 

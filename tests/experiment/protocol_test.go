@@ -15,8 +15,6 @@ import (
 	"testing"
 )
 
-const phase3ProtocolSHA256 = "964e5a988af33b10f135a26258e66aeec33cf9b0e5694304434f70ab99bc149f"
-
 type protocolFixture struct {
 	SchemaVersion     int    `json:"schema_version"`
 	ExperimentID      string `json:"experiment_id"`
@@ -100,8 +98,8 @@ type corpusFixture struct {
 func TestPhase3ValueProtocolIsFrozenAndSelfConsistent(t *testing.T) {
 	root := repositoryRoot(t)
 	protocolPath := filepath.Join(root, "testdata/phase-3/value-experiment/protocol.json")
-	if got := fileHash(t, protocolPath); got != phase3ProtocolSHA256 {
-		t.Fatalf("protocol hash = %s, want %s; observed criteria cannot be edited in place", got, phase3ProtocolSHA256)
+	if got := fileHash(t, protocolPath); got != Phase3ProtocolSHA256 {
+		t.Fatalf("protocol hash = %s, want %s; observed criteria cannot be edited in place", got, Phase3ProtocolSHA256)
 	}
 	protocol := decodeJSON[protocolFixture](t, protocolPath)
 	corpus := decodeJSON[corpusFixture](t, filepath.Join(root, protocol.CorpusPath))
@@ -330,6 +328,11 @@ func assertEveryFixtureIsHashed(t *testing.T, root string, frozen map[string]str
 }
 
 func TestDecisionPrecedenceIsExhaustive(t *testing.T) {
+	for name, passed := range ThresholdResults(passingGateOutcome()) {
+		if !passed {
+			t.Fatalf("passing outcome missed threshold %s", name)
+		}
+	}
 	for _, test := range []struct {
 		name   string
 		mutate func(*GateOutcome)
