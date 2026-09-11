@@ -194,6 +194,8 @@ A curadoria e iniciada em uma sessao do Claude Code:
 
 Sem ID, a skill lista o inbox para a pessoa selecionar ate dezesseis propostas. O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas no inbox; lotes usam targets distintos, um commit e recovery antes/depois do avanco de `main`.
 
+O lifecycle tecnico completo pode ser reproduzido em repositorios descartaveis com `tests/e2e/run-phase-3.sh`. A run preserva somente evidencia sanitizada sob `.artifacts/`, executa `make verify` e `make verify-offline` e nao acessa remotos.
+
 ## Licença
 
 O software deste repositório é disponibilizado sob a [Apache License 2.0](LICENSE).

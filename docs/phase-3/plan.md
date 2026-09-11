@@ -1,6 +1,6 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1-T7 implementadas e verificadas; T8-T10 pendentes**.
+Status do plano: **T1-T8 implementadas e verificadas; T9-T10 pendentes**.
 
 ## Objetivo
 
@@ -139,7 +139,7 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 | [T5](t5-duplicate-and-contradiction-evidence.md) | 3B | implementada | duplicidades e possiveis contradicoes aparecem no preview e exigem decisao |
 | [T6](t6-verifiable-source-references.md) | 3B | implementada | referencias identificam sua origem e sua integridade e verificada quando disponivel localmente |
 | [T7](t7-multi-path-transaction-recovery.md) | 3B | implementada | lotes e falhas nas janelas de publicacao sao reconciliados sem commit duplicado ou lock indevido |
-| T8 | 3B | pendente | E2E reproduz todas as operacoes e garantias do gate tecnico vigente |
+| [T8](t8-technical-e2e.md) | 3B | implementada | E2E reproduz todas as operacoes e garantias do gate tecnico vigente |
 | T9 | 3C | pendente | protocolo pre-registra corpus, metricas, limiares e decisoes possiveis |
 | T10 | 3C | pendente | experimento produz relatorio e decisao entre avancar, revisar ou interromper |
 

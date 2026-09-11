@@ -975,7 +975,9 @@ func transactionItemFromPreview(preview Preview) transactionItem {
 		}
 		item.PostStateExists = preview.Operation != OperationRemovePage
 		item.PostStateHash = preview.postStateHash
-		item.PostStateGitMode = preview.gitMode
+		if item.PostStateExists {
+			item.PostStateGitMode = preview.gitMode
+		}
 	}
 	return item
 }

@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | T1-T6 entregam destinos, classificacao e referencias; [T7](phase-3/t7-multi-path-transaction-recovery.md) acrescenta lotes e recovery; o E2E tecnico continua pendente. |
+| Fase 3: curadoria e confianca | **Em andamento.** | T1-T7 entregam o lifecycle tecnico e o [E2E de T8](phase-3/t8-technical-e2e.md) fecha a Fase 3B; protocolo e experimento de valor continuam pendentes. |
 
 ## Superficie operacional
 
@@ -143,6 +143,8 @@ Os estados usados sao:
 
 ## Verificacao atual
 
+O E2E tecnico da Fase 3B usa o binario real e processos MCP separados para compor privacidade, referencias, dedupe, create, update, remove, discard, crash depois de `update-ref`, startup recovery e recuperacao final. `tests/e2e/run-phase-3.sh` produz evidencia sanitizada e executa as matrizes online-cache e offline.
+
 `make verify` executa, em serie:
 
 ```text
@@ -152,4 +154,4 @@ go vet ./...
 go build ./...
 ```
 
-A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply individuais e em lote, fault injection e recovery, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao por novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.
+A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply individuais e em lote, fault injection e recovery, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate`, E2E tecnico por processos e recuperacao por usuario novo. Ainda nao existe experimento de valor para o fluxo introduzido pela ADR 0004.
