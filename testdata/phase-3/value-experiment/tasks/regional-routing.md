@@ -1,0 +1,1 @@
+Implement the current EU regional queue in `policy.RegionQueue`. Preserve the exported API and default routing behavior. Use repository evidence and configured memory when useful. Do not ask for queue names.

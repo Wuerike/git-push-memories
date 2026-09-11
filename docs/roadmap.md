@@ -169,7 +169,7 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. A Fase 3B esta fechada pelo [E2E tecnico](phase-3/t8-technical-e2e.md), que compoe destinos, dedupe, conflitos, referencias e recovery; a pre-definicao do experimento de valor forma o proximo incremento.
+**Estado atual:** em andamento. A Fase 3B esta fechada pelo [E2E tecnico](phase-3/t8-technical-e2e.md), que compoe destinos, dedupe, conflitos, referencias e recovery. O [protocolo T9](phase-3/t9-value-evaluation-protocol.md) pre-registra corpus, isolamento, metricas, limiares e decisoes; a execucao classificatoria e a decisao do gate permanecem pendentes em T10.
 
 ### Resultado esperado
 

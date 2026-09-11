@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | T1-T7 entregam o lifecycle tecnico e o [E2E de T8](phase-3/t8-technical-e2e.md) fecha a Fase 3B; protocolo e experimento de valor continuam pendentes. |
+| Fase 3: curadoria e confianca | **Em andamento.** | T1-T7 entregam o lifecycle tecnico, o [E2E de T8](phase-3/t8-technical-e2e.md) fecha a Fase 3B e o [protocolo T9](phase-3/t9-value-evaluation-protocol.md) congela a avaliacao; execucao e decisao de valor continuam pendentes em T10. |
 
 ## Superficie operacional
 

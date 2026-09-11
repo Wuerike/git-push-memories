@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "blind": true,
+  "maximum_score": 10,
+  "checks": [
+    {"id":"hidden-test","weight":4,"pass":"The scenario's pre-registered hidden evaluator test passes."},
+    {"id":"public-tests","weight":2,"pass":"All public repository tests pass."},
+    {"id":"api-preserved","weight":2,"pass":"All six exported function signatures remain unchanged."},
+    {"id":"scope","weight":2,"pass":"Changes are limited to policy implementation and focused policy tests; evidence, tasks, memory, and evaluator files are unchanged."}
+  ],
+  "correctness_gate": ["hidden-test", "public-tests", "api-preserved"]
+}

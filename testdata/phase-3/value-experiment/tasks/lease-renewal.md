@@ -1,0 +1,1 @@
+Implement the current lease-renewal delay policy in `policy.LeaseRenewalDelay`. Preserve the exported API and existing behavior outside the current policy. Use repository evidence and configured memory when useful. Do not ask for policy values.

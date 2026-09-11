@@ -1,0 +1,1 @@
+Implement the current BR settlement window in `policy.SettlementDueDays`. Preserve the exported API and default-country behavior. Use repository evidence and configured memory when useful. Do not ask for policy values.
