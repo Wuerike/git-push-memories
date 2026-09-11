@@ -31,7 +31,7 @@ run_check() {
   local started ended status
   started="$(date +%s%N)"
   set +e
-  "$@" >/dev/null 2>&1
+  "$@"
   status=$?
   set -e
   ended="$(date +%s%N)"
