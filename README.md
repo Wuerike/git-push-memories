@@ -156,7 +156,7 @@ O setup registra o MCP e instala `/remember` e `/curate` no escopo global do usu
 
 Memorias canonicas ficam em `memories/<categoria-configurada>/**/*.md`. Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. Propostas ficam em `proposals/<id>-<slug>.md` e recebem um commit path-scoped diretamente na `main`, sem consumir staging alheio.
 
-O servidor publica oito tools:
+O servidor publica dez tools:
 
 - `memory_search`, para buscar secoes nas categorias configuradas dentro de um orçamento em bytes;
 - `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
@@ -166,10 +166,12 @@ O servidor publica oito tools:
 - `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
 - `memory_curate_preview`, para gerar sem escrita o diff e evidencia separada de candidatos canonicos e propostas relacionadas;
 - `memory_curate_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP.
+- `memory_curate_batch_preview`, para revisar de uma a dezesseis decisoes independentes como uma unica transacao;
+- `memory_curate_batch_apply`, para aplicar o lote confirmado em um unico commit recuperavel.
 
-O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário.
+O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário. Se uma curadoria anterior foi interrompida, o servidor reconcilia seu marcador privado antes de aceitar chamadas.
 
-O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria processa uma proposta por vez e exige confirmacao do diff antes de alterar memoria ou descartar a proposta.
+O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria processa uma proposta ou um lote limitado de targets distintos e exige confirmacao do diff antes de alterar memoria ou descartar propostas.
 
 A mesma recuperação também pode ser chamada diretamente pela CLI:
 
@@ -190,7 +192,7 @@ A curadoria e iniciada em uma sessao do Claude Code:
 /curate [proposal-id]
 ```
 
-Sem ID, a skill lista o inbox para a pessoa selecionar uma proposta. O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas no inbox; lotes e recovery permanecem para as proximas tarefas da Fase 3.
+Sem ID, a skill lista o inbox para a pessoa selecionar ate dezesseis propostas. O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas no inbox; lotes usam targets distintos, um commit e recovery antes/depois do avanco de `main`.
 
 ## Licença
 

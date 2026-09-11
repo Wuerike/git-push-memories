@@ -30,6 +30,8 @@ var (
 	ErrLocked        = errors.New("Git index is locked")
 	ErrUnsupported   = errors.New("proposal action is not supported by this curation phase")
 	ErrInvalidReason = errors.New("invalid discard reason")
+	ErrInvalidBatch  = errors.New("invalid curation batch")
+	ErrRecovery      = errors.New("curation transaction recovery failed")
 )
 
 type Operation string
@@ -41,6 +43,7 @@ const (
 	OperationRemoveSection  Operation = "remove_section"
 	OperationRemovePage     Operation = "remove_page"
 	OperationDiscard        Operation = "discard_proposal"
+	OperationKeepPending    Operation = "keep_pending"
 )
 
 type DiscardReason string
@@ -141,6 +144,20 @@ type Result struct {
 	Commit     string        `json:"commit"`
 }
 
+const MaxBatchItems = 16
+
+type BatchPreview struct {
+	Items []Preview `json:"items"`
+	Diff  string    `json:"diff"`
+}
+
+type BatchResult struct {
+	Items  []Result `json:"items"`
+	Commit string   `json:"commit"`
+}
+
+type EvidenceValidator func() (string, error)
+
 type Curator struct {
 	cfg        config.Config
 	root       *os.File
@@ -148,6 +165,7 @@ type Curator struct {
 	inbox      *inbox.Inbox
 	repository *memory.Repository
 	guard      *intake.Guard
+	fault      func(string) error
 }
 
 func New(cfg config.Config) (*Curator, error) {
@@ -301,6 +319,46 @@ func (curator *Curator) Preview(ctx context.Context, request PreviewRequest) (Pr
 	return curator.preview(ctx, snapshot, request)
 }
 
+func (curator *Curator) PreviewBatch(ctx context.Context, requests []PreviewRequest) (BatchPreview, error) {
+	if len(requests) == 0 || len(requests) > MaxBatchItems {
+		return BatchPreview{}, ErrInvalidBatch
+	}
+	batch := BatchPreview{Items: make([]Preview, 0, len(requests))}
+	hasCommittedDecision := false
+	proposalIDs := make(map[string]struct{}, len(requests))
+	targets := make(map[string]struct{}, len(requests))
+	for _, request := range requests {
+		if _, exists := proposalIDs[request.ProposalID]; exists {
+			return BatchPreview{}, ErrInvalidBatch
+		}
+		proposalIDs[request.ProposalID] = struct{}{}
+		if request.TargetPath != "" {
+			if _, exists := targets[request.TargetPath]; exists {
+				return BatchPreview{}, ErrInvalidBatch
+			}
+			targets[request.TargetPath] = struct{}{}
+		}
+		preview, err := curator.Preview(ctx, request)
+		if err != nil {
+			return BatchPreview{}, err
+		}
+		if len(batch.Items) > 0 && preview.head != batch.Items[0].head {
+			return BatchPreview{}, ErrDrift
+		}
+		batch.Items = append(batch.Items, preview)
+		hasCommittedDecision = hasCommittedDecision || preview.Operation != OperationKeepPending
+	}
+	if !hasCommittedDecision {
+		return BatchPreview{}, ErrInvalidBatch
+	}
+	diffs := make([]string, len(batch.Items))
+	for index, preview := range batch.Items {
+		diffs[index] = preview.Diff
+	}
+	batch.Diff = strings.Join(diffs, "\n")
+	return batch, nil
+}
+
 func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, request PreviewRequest) (Preview, error) {
 	operation, targetPath, sectionID, heading := request.Operation, request.TargetPath, request.SectionID, request.Heading
 	if !supports(operation, snapshot.Proposal.SuggestedAction) {
@@ -312,7 +370,7 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 	if operation != OperationDiscard && request.Reason != "" {
 		return Preview{}, memory.ErrInvalidPath
 	}
-	if operation != OperationDiscard && !curator.cfg.IsMemoryPath(targetPath) {
+	if operation != OperationDiscard && operation != OperationKeepPending && !curator.cfg.IsMemoryPath(targetPath) {
 		return Preview{}, memory.ErrInvalidPath
 	}
 	if err := curator.inbox.Confirm(ctx, snapshot); err != nil {
@@ -450,13 +508,20 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 			return Preview{}, memory.ErrInvalidPath
 		}
 		preview.head = snapshot.Head
+	case OperationKeepPending:
+		if targetPath != "" || sectionID != "" || request.ContentHash != "" || heading != "" || request.Replacement != "" || request.Reason != "" {
+			return Preview{}, memory.ErrInvalidPath
+		}
+		preview.head = snapshot.Head
 	default:
 		return Preview{}, ErrUnsupported
 	}
 	if preview.head != snapshot.Head {
 		return Preview{}, ErrDrift
 	}
-	if targetDiff == "" {
+	if operation == OperationKeepPending {
+		preview.Diff = ""
+	} else if targetDiff == "" {
 		preview.Diff = unifieddiff.Delete(snapshot.Proposal.Path, snapshot.Contents)
 	} else {
 		preview.Diff = targetDiff + "\n" + unifieddiff.Delete(snapshot.Proposal.Path, snapshot.Contents)
@@ -472,7 +537,7 @@ func supports(operation Operation, action inbox.Action) bool {
 		return action == inbox.ActionUpdate
 	case OperationRemoveSection, OperationRemovePage:
 		return action == inbox.ActionRemove
-	case OperationDiscard:
+	case OperationDiscard, OperationKeepPending:
 		return true
 	default:
 		return false
@@ -508,30 +573,67 @@ func (curator *Curator) confirmConfig(ctx context.Context, expectedHead string) 
 	return nil
 }
 
-func (curator *Curator) Apply(ctx context.Context, expected Preview, validateEvidence func() error) (Result, error) {
-	var result Result
+func (curator *Curator) Apply(ctx context.Context, expected Preview, validateEvidence EvidenceValidator) (Result, error) {
+	result, err := curator.ApplyBatch(ctx, BatchPreview{Items: []Preview{expected}, Diff: expected.Diff}, validateEvidence)
+	if err != nil {
+		return Result{}, err
+	}
+	return result.Items[0], nil
+}
+
+func (curator *Curator) ApplyBatch(ctx context.Context, expected BatchPreview, validateEvidence EvidenceValidator) (BatchResult, error) {
+	var result BatchResult
 	err := repolock.With(ctx, curator.cfg.StateRoot, func() error {
-		fresh, err := curator.revalidatePreview(ctx, expected)
+		recovered, marker, err := curator.recoverLocked(ctx)
 		if err != nil {
 			return err
 		}
-		if validateEvidence != nil {
-			if err := validateEvidence(); err != nil {
-				return err
+		if recovered.Commit != "" {
+			if marker.PreviewHash != batchPreviewHash(expected.Items) {
+				return ErrDrift
 			}
+			result = recovered
+			return nil
 		}
-		commit, err := curator.commit(ctx, fresh)
+		existing, found, err := curator.recognizeCommittedBatch(ctx, expected)
 		if err != nil {
 			return err
 		}
-		decision := "consumed"
-		if fresh.Operation == OperationDiscard {
-			decision = "discarded"
+		if found {
+			result = existing
+			return nil
 		}
-		result = Result{ProposalID: fresh.ProposalID, TargetPath: fresh.TargetPath, SectionID: fresh.SectionID, Decision: decision, Reason: fresh.Reason, Commit: commit}
-		return nil
+		fresh, err := curator.revalidateBatch(ctx, expected)
+		if err != nil {
+			return err
+		}
+		result, err = curator.commitBatch(ctx, fresh, validateEvidence)
+		return err
 	})
 	return result, err
+}
+
+func (curator *Curator) revalidateBatch(ctx context.Context, expected BatchPreview) (BatchPreview, error) {
+	if len(expected.Items) == 0 || len(expected.Items) > MaxBatchItems {
+		return BatchPreview{}, ErrInvalidBatch
+	}
+	requests := make([]PreviewRequest, len(expected.Items))
+	for index, preview := range expected.Items {
+		requests[index] = preview.request
+	}
+	fresh, err := curator.PreviewBatch(ctx, requests)
+	if err != nil {
+		return BatchPreview{}, err
+	}
+	for index := range fresh.Items {
+		if !samePreview(fresh.Items[index], expected.Items[index]) {
+			return BatchPreview{}, ErrDrift
+		}
+	}
+	if fresh.Diff != expected.Diff {
+		return BatchPreview{}, ErrDrift
+	}
+	return fresh, nil
 }
 
 func samePreview(left, right Preview) bool {
@@ -563,280 +665,6 @@ func (curator *Curator) inspectKnowledge(proposal inbox.Proposal, knowledge stri
 	return err
 }
 
-func (curator *Curator) commit(ctx context.Context, preview Preview) (string, error) {
-	gitDirectory, err := curator.gitPath(ctx, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return "", fmt.Errorf("resolve Git directory")
-	}
-	indexPath, err := curator.gitPath(ctx, "rev-parse", "--path-format=absolute", "--git-path", "index")
-	if err != nil || !within(indexPath, gitDirectory) {
-		return "", fmt.Errorf("resolve Git index")
-	}
-	indexLockPath := indexPath + ".lock"
-	indexLock, err := os.OpenFile(indexLockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, os.ErrExist) {
-		return "", ErrLocked
-	}
-	if err != nil {
-		return "", fmt.Errorf("acquire Git index lock")
-	}
-	lockInstalled := false
-	defer func() {
-		_ = indexLock.Close()
-		if !lockInstalled {
-			_ = os.Remove(indexLockPath)
-		}
-	}()
-
-	originalIndex, indexMode, err := readRegularFile(indexPath)
-	if err != nil {
-		return "", fmt.Errorf("read Git index")
-	}
-	branch, err := curator.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != "main" {
-		return "", inbox.ErrNotMain
-	}
-	head, err := curator.gitText(ctx, nil, "rev-parse", "--verify", "HEAD")
-	if err != nil || head != preview.head {
-		return "", ErrDrift
-	}
-	if err := curator.inbox.Confirm(ctx, preview.proposal); err != nil {
-		return "", err
-	}
-
-	blob := ""
-	if preview.Operation != OperationRemovePage && preview.Operation != OperationDiscard {
-		blob, err = curator.gitText(ctx, preview.postState, "hash-object", "-w", "--stdin")
-		if err != nil || blob == "" {
-			return "", fmt.Errorf("write memory blob")
-		}
-	}
-	commitIndex, err := temporaryIndex(curator.cfg.StateRoot)
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(commitIndex)
-	commitEnvironment := map[string]string{"GIT_INDEX_FILE": commitIndex}
-	if _, err := curator.gitInput(ctx, commitEnvironment, nil, "read-tree", head); err != nil {
-		return "", fmt.Errorf("initialize curation tree")
-	}
-	cacheInfo := preview.gitMode + "," + blob + "," + preview.TargetPath
-	if preview.Operation != OperationDiscard {
-		if preview.Operation == OperationRemovePage {
-			if _, err := curator.gitInput(ctx, commitEnvironment, nil, "update-index", "--force-remove", "--", preview.TargetPath); err != nil {
-				return "", fmt.Errorf("remove memory from curation tree")
-			}
-		} else if _, err := curator.gitInput(ctx, commitEnvironment, nil, "update-index", "--add", "--cacheinfo", cacheInfo); err != nil {
-			return "", fmt.Errorf("add memory to curation tree")
-		}
-	}
-	if _, err := curator.gitInput(ctx, commitEnvironment, nil, "update-index", "--force-remove", "--", preview.ProposalPath); err != nil {
-		return "", fmt.Errorf("remove proposal from curation tree")
-	}
-	treeOutput, err := curator.gitInput(ctx, commitEnvironment, nil, "write-tree")
-	tree := strings.TrimSpace(string(treeOutput))
-	if err != nil || tree == "" {
-		return "", fmt.Errorf("write curation tree")
-	}
-	message := []byte("Curate memory proposal\n\nGit-Push-Memories-Proposal: " + preview.ProposalID + "\nGit-Push-Memories-Decision: consumed\n")
-	if preview.Operation == OperationDiscard {
-		message = []byte("Discard memory proposal\n\nGit-Push-Memories-Proposal: " + preview.ProposalID + "\nGit-Push-Memories-Decision: discarded\nGit-Push-Memories-Reason: " + string(preview.Reason) + "\n")
-	}
-	commit, err := curator.gitText(ctx, message, "commit-tree", tree, "-p", head)
-	if err != nil || commit == "" {
-		return "", fmt.Errorf("write curation commit")
-	}
-	if err := curator.verifyCommit(ctx, commit, preview, blob); err != nil {
-		return "", err
-	}
-
-	finalIndex, err := temporaryIndex(curator.cfg.StateRoot)
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(finalIndex)
-	if err := os.WriteFile(finalIndex, originalIndex, indexMode.Perm()); err != nil {
-		return "", fmt.Errorf("copy Git index")
-	}
-	finalEnvironment := map[string]string{"GIT_INDEX_FILE": finalIndex}
-	if preview.Operation != OperationDiscard {
-		if preview.Operation == OperationRemovePage {
-			if _, err := curator.gitInput(ctx, finalEnvironment, nil, "update-index", "--force-remove", "--", preview.TargetPath); err != nil {
-				return "", fmt.Errorf("reconcile removed memory index entry")
-			}
-		} else if _, err := curator.gitInput(ctx, finalEnvironment, nil, "update-index", "--add", "--cacheinfo", cacheInfo); err != nil {
-			return "", fmt.Errorf("reconcile memory index entry")
-		}
-	}
-	if _, err := curator.gitInput(ctx, finalEnvironment, nil, "update-index", "--force-remove", "--", preview.ProposalPath); err != nil {
-		return "", fmt.Errorf("reconcile proposal index entry")
-	}
-	finalBytes, _, err := readRegularFile(finalIndex)
-	if err != nil {
-		return "", fmt.Errorf("read reconciled Git index")
-	}
-	if err := indexLock.Chmod(indexMode.Perm()); err != nil {
-		return "", fmt.Errorf("set Git index lock mode")
-	}
-	if _, err := indexLock.Write(finalBytes); err != nil {
-		return "", fmt.Errorf("write Git index lock")
-	}
-	if err := indexLock.Sync(); err != nil {
-		return "", fmt.Errorf("sync Git index lock")
-	}
-	if err := indexLock.Close(); err != nil {
-		return "", fmt.Errorf("close Git index lock")
-	}
-
-	preflight := func() error {
-		if err := curator.inbox.Confirm(ctx, preview.proposal); err != nil {
-			return err
-		}
-		return curator.inspect(preview.proposal.Proposal)
-	}
-	validate := func(postState []byte) error {
-		if !bytes.Equal(postState, preview.postState) {
-			return ErrDrift
-		}
-		return nil
-	}
-	var reconciled memory.ReconcileResult
-	switch preview.Operation {
-	case OperationCreatePage:
-		reconciled, err = curator.repository.ReconcileCreatePage(ctx, memory.ReconcileCreatePageRequest{
-			CreatePageRequest: memory.CreatePageRequest{TargetPath: preview.TargetPath, Title: preview.Title, Body: preview.proposal.Proposal.Knowledge},
-			PostStateHash:     preview.postStateHash, Head: preview.head, Preflight: preflight, Validate: validate, Mode: memory.ApplyBaseline,
-		})
-	case OperationCreateSection:
-		reconciled, err = curator.repository.ReconcileCreateSection(ctx, memory.ReconcileCreateSectionRequest{
-			CreateSectionRequest: memory.CreateSectionRequest{TargetPath: preview.TargetPath, Heading: preview.Heading, Body: preview.proposal.Proposal.Knowledge},
-			ExpectedSectionID:    preview.SectionID, BaselineHash: preview.baselineHash, PostStateHash: preview.postStateHash,
-			Head: preview.head, Blob: preview.baselineBlob, Preflight: preflight,
-			Validate: func(baseline, postState []byte) error {
-				if !bytes.Equal(baseline, preview.baseline) {
-					return ErrDrift
-				}
-				return validate(postState)
-			},
-			Mode: memory.ApplyBaseline,
-		})
-	case OperationReplaceSection:
-		reconciled, err = curator.repository.ReconcileReplaceSection(ctx, memory.ReconcileRequest{
-			Target: memory.Target{Path: preview.TargetPath, SectionID: preview.SectionID}, Replacement: preview.Replacement,
-			BaselineHash: preview.baselineHash, PostStateHash: preview.postStateHash, Head: preview.head, Blob: preview.baselineBlob,
-			Preflight: preflight,
-			Validate: func(baseline, postState []byte) error {
-				if !bytes.Equal(baseline, preview.baseline) {
-					return ErrDrift
-				}
-				return validate(postState)
-			},
-			Mode: memory.ApplyBaseline,
-		})
-	case OperationRemoveSection:
-		reconciled, err = curator.repository.ReconcileRemoveSection(ctx, memory.ReconcileRemoveSectionRequest{
-			RemoveSectionRequest: memory.RemoveSectionRequest{Target: memory.Target{Path: preview.TargetPath, SectionID: preview.SectionID}, ContentHash: preview.ContentHash},
-			BaselineHash:         preview.baselineHash, PostStateHash: preview.postStateHash, Head: preview.head, Blob: preview.baselineBlob,
-			Preflight: preflight,
-			Validate: func(baseline, postState []byte) error {
-				if !bytes.Equal(baseline, preview.baseline) {
-					return ErrDrift
-				}
-				return validate(postState)
-			},
-			Mode: memory.ApplyBaseline,
-		})
-	case OperationRemovePage:
-		reconciled, err = curator.repository.ReconcileRemovePage(ctx, memory.ReconcileRemovePageRequest{
-			RemovePageRequest: memory.RemovePageRequest{Target: memory.Target{Path: preview.TargetPath, SectionID: preview.SectionID}, ContentHash: preview.ContentHash},
-			BaselineHash:      preview.baselineHash, PostStateHash: preview.postStateHash, Head: preview.head, Blob: preview.baselineBlob, FileMode: preview.fileMode,
-			Preflight: preflight,
-			Validate: func(baseline, postState []byte) error {
-				if !bytes.Equal(baseline, preview.baseline) || postState != nil {
-					return ErrDrift
-				}
-				return nil
-			},
-			Mode: memory.ApplyBaseline,
-		})
-	case OperationDiscard:
-		if err = preflight(); err == nil {
-			reconciled.State = memory.ReconcilePostState
-		}
-	default:
-		return "", ErrUnsupported
-	}
-	if err != nil {
-		if rollbackErr := curator.rollback(ctx, preview); rollbackErr != nil {
-			return "", errors.Join(err, fmt.Errorf("rollback curation: %w", rollbackErr))
-		}
-		return "", err
-	}
-	if reconciled.State != memory.ReconcilePostState {
-		return "", ErrDrift
-	}
-	if _, err := curator.gitInput(ctx, nil, nil, "update-ref", "refs/heads/main", commit, head); err != nil {
-		if rollbackErr := curator.rollback(ctx, preview); rollbackErr != nil {
-			return "", errors.Join(ErrDrift, fmt.Errorf("rollback curation: %w", rollbackErr))
-		}
-		return "", ErrDrift
-	}
-	if err := os.Rename(indexLockPath, indexPath); err != nil {
-		return "", fmt.Errorf("install Git index")
-	}
-	lockInstalled = true
-	if err := syncDirectory(gitDirectory); err != nil {
-		return "", fmt.Errorf("sync Git directory")
-	}
-	if err := curator.removeExact(preview.ProposalPath, preview.proposal.Contents); err != nil {
-		return "", fmt.Errorf("remove consumed proposal")
-	}
-	return commit, nil
-}
-
-func (curator *Curator) verifyCommit(ctx context.Context, commit string, preview Preview, blob string) error {
-	changed, err := curator.gitInput(ctx, nil, nil, "diff-tree", "--no-commit-id", "--name-status", "-r", commit)
-	if err != nil {
-		return fmt.Errorf("verify curation commit")
-	}
-	status := "A"
-	if preview.Operation == OperationCreateSection || preview.Operation == OperationReplaceSection || preview.Operation == OperationRemoveSection {
-		status = "M"
-	} else if preview.Operation == OperationRemovePage {
-		status = "D"
-	}
-	want := []string{"D\t" + preview.ProposalPath}
-	if preview.Operation != OperationDiscard {
-		want = append(want, status+"\t"+preview.TargetPath)
-	}
-	got := strings.Split(strings.TrimSpace(string(changed)), "\n")
-	slices.Sort(want)
-	slices.Sort(got)
-	if !slices.Equal(got, want) {
-		return fmt.Errorf("verify curation paths")
-	}
-	if preview.Operation != OperationDiscard {
-		if preview.Operation == OperationRemovePage {
-			if _, err := curator.gitInput(ctx, nil, nil, "cat-file", "-e", commit+":"+preview.TargetPath); err == nil {
-				return fmt.Errorf("verify curation memory removal")
-			}
-		} else {
-			stored, err := curator.gitText(ctx, nil, "rev-parse", commit+":"+preview.TargetPath)
-			if err != nil || stored != blob {
-				return fmt.Errorf("verify curation memory")
-			}
-			mode, storedBlob, err := curator.treeEntry(ctx, commit, preview.TargetPath)
-			if err != nil || mode != preview.gitMode || storedBlob != blob {
-				return fmt.Errorf("verify curation memory mode")
-			}
-		}
-	}
-	if _, err := curator.gitInput(ctx, nil, nil, "cat-file", "-e", commit+":"+preview.ProposalPath); err == nil {
-		return fmt.Errorf("verify proposal consumption")
-	}
-	return nil
-}
-
 func (curator *Curator) treeEntry(ctx context.Context, revision, relativePath string) (string, string, error) {
 	entry, err := curator.gitInput(ctx, nil, nil, "ls-tree", "-z", revision, "--", relativePath)
 	if err != nil || bytes.Count(entry, []byte{0}) != 1 {
@@ -851,29 +679,21 @@ func (curator *Curator) treeEntry(ctx context.Context, revision, relativePath st
 	return fields[0], fields[2], nil
 }
 
-func (curator *Curator) rollback(ctx context.Context, preview Preview) error {
-	switch preview.Operation {
-	case OperationCreatePage:
-		return curator.repository.Rollback(ctx, memory.RollbackRequest{TargetPath: preview.TargetPath, PostState: preview.postState})
-	case OperationCreateSection, OperationReplaceSection, OperationRemoveSection:
-		return curator.repository.Rollback(ctx, memory.RollbackRequest{TargetPath: preview.TargetPath, Baseline: preview.baseline, PostState: preview.postState})
-	case OperationRemovePage:
-		return curator.repository.Rollback(ctx, memory.RollbackRequest{TargetPath: preview.TargetPath, Baseline: preview.baseline, FileMode: preview.fileMode})
-	case OperationDiscard:
-		return nil
-	default:
-		return ErrUnsupported
-	}
-}
-
 func (curator *Curator) removeExact(relativePath string, expected []byte) error {
-	root, err := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", curator.root.Fd()))
+	fd, err := unix.Openat2(int(curator.root.Fd()), relativePath, &unix.OpenHow{
+		Flags: uint64(unix.O_RDONLY | unix.O_NONBLOCK | unix.O_CLOEXEC | unix.O_NOFOLLOW), Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_MAGICLINKS,
+	})
 	if err != nil {
 		return ErrDrift
 	}
-	defer root.Close()
-	file, err := root.Open(relativePath)
-	if err != nil {
+	file := os.NewFile(uintptr(fd), relativePath)
+	if file == nil {
+		_ = unix.Close(fd)
+		return ErrDrift
+	}
+	var opened unix.Stat_t
+	if err := unix.Fstat(fd, &opened); err != nil || opened.Mode&unix.S_IFMT != unix.S_IFREG {
+		_ = file.Close()
 		return ErrDrift
 	}
 	contents, readErr := io.ReadAll(file)
@@ -881,7 +701,11 @@ func (curator *Curator) removeExact(relativePath string, expected []byte) error 
 	if readErr != nil || closeErr != nil || !bytes.Equal(contents, expected) {
 		return ErrDrift
 	}
-	if err := root.Remove(relativePath); err != nil {
+	var current unix.Stat_t
+	if err := unix.Fstatat(int(curator.root.Fd()), relativePath, &current, unix.AT_SYMLINK_NOFOLLOW); err != nil || current.Dev != opened.Dev || current.Ino != opened.Ino || current.Mode&unix.S_IFMT != unix.S_IFREG {
+		return ErrDrift
+	}
+	if err := unix.Unlinkat(int(curator.root.Fd()), relativePath, 0); err != nil {
 		return ErrDrift
 	}
 	return syncDirectory(filepath.Join(curator.rootPath, filepath.Dir(relativePath)))

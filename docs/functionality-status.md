@@ -18,7 +18,7 @@ Os estados usados sao:
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Em andamento.** | T1-T5 entregam destinos e classificacao; [T6](phase-3/t6-verifiable-source-references.md) acrescenta referencias verificaveis; transacao multi-path e recovery continuam pendentes. |
+| Fase 3: curadoria e confianca | **Em andamento.** | T1-T6 entregam destinos, classificacao e referencias; [T7](phase-3/t7-multi-path-transaction-recovery.md) acrescenta lotes e recovery; o E2E tecnico continua pendente. |
 
 ## Superficie operacional
 
@@ -44,6 +44,8 @@ Os estados usados sao:
 | `memory_proposal_list` | **Implementado.** | Revalida schema e privacidade antes de listar propostas commitadas e categorias configuradas, sem criar estado privado ou alterar o repositorio. |
 | `memory_curate_preview` | **Implementado.** | Gera sem escrita o diff e evidencia separada em candidatos canonicos e propostas relacionadas, no mesmo `HEAD`. |
 | `memory_curate_apply` | **Implementado para destinos individuais.** | Consome uma vez um preview do mesmo processo, revalida drift e cria o commit exato de consumo ou descarte. |
+| `memory_curate_batch_preview` | **Implementado.** | Revisa de uma a dezesseis decisoes independentes com proposal IDs e targets distintos; `keep_pending` preserva uma selecao ainda nao resolvida quando o lote possui outra decisao. |
+| `memory_curate_batch_apply` | **Implementado.** | Revalida o lote e publica todas as decisoes em um unico commit recuperavel. |
 | Tools legadas `memory_propose_create_*` e `proposal_apply/publish` | **Removido.** | O lifecycle anterior continua ausente; a curadoria atual usa preview single-use e um commit do inbox para o canônico. |
 
 ## Configuracao e layout
@@ -129,7 +131,8 @@ Os estados usados sao:
 | Criacao de secao canonica | **Implementado.** Uma proposta `create` pode acrescentar uma secao H2 com ID derivado a uma pagina existente. |
 | Atualizacao de secao canonica | **Implementado.** Uma proposta `update` pode substituir somente o corpo completo de uma secao folha identificada e vinculada ao content hash observado. |
 | Remocao de memoria canonica | **Implementado para destinos individuais.** `remove_section` exclui uma secao folha identificada; `remove_page` aceita somente a forma exata de uma pagina gerada com uma unica secao `Overview`. Nao ha cascade delete ou reparo de links. |
-| Consumo atomico de propostas | **Parcial.** `create`, `update` e `remove` alteram o target canonico e removem a proposta no mesmo commit exato; lotes ainda nao sao suportados. |
+| Consumo atomico de propostas | **Implementado para lotes limitados.** `create`, `update`, `remove` e descarte podem consumir de uma a dezesseis propostas em um unico commit; targets repetidos sao rejeitados. |
+| Recovery de curadoria | **Implementado.** Marcador privado sem conteudo e indice reconciliado convergem para baseline antes de `update-ref` ou para o mesmo commit completo depois dele; lock estrangeiro nunca e removido. |
 | Descarte auditavel | **Implementado.** Remove somente a proposta e registra decisao e reason code fechado no commit Git. |
 | Duplicidade e contradicao | **Parcial e observavel.** Dedupe exato bloqueia publicacao repetida; preview separa candidatos canonicos e propostas relacionadas; `/curate` classifica equivalencia ou contradicao como avaliacao assistida e exige escolha humana. Nao ha detector semantico completo. |
 | Integridade de referencias | **Implementado localmente.** Preview distingue `verified`, `unavailable`, `mismatch` e `legacy_unverified`; mudanca de status invalida apply. |
@@ -149,4 +152,4 @@ go vet ./...
 go build ./...
 ```
 
-A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply de todos os destinos individuais, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao por novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.
+A suite atual cobre configuracao, categorias, parsing Markdown, busca e expand, politica de privacidade, commit e dedupe exato do inbox, referencias v1/v2, snapshot e verificacao local de blobs, evidencia relacionada, preview e apply individuais e em lote, fault injection e recovery, preservacao do indice, drift, concorrencia local, contratos de `/remember` e `/curate` e recuperacao por novo processo. Nao existe atualmente um E2E classificatorio nem experimento de valor para o fluxo introduzido pela ADR 0004.

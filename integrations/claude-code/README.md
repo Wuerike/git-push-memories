@@ -41,10 +41,10 @@ O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `updat
 Para consumir ou descartar uma proposta:
 
 ```text
-/curate [proposal-id]
+/curate [proposal-id ...]
 ```
 
-A skill lista o inbox depois de revalidar sua privacidade, mostra a proposta selecionada e pesquisa memoria relacionada. O preview apresenta candidatos canonicos, propostas relacionadas e referencia por referencia os estados `verified`, `unavailable`, `mismatch` ou `legacy_unverified`. Integridade nao implica que a fonte sustenta a afirmacao; a skill e a pessoa avaliam separadamente `supports`, `contradicts` ou `unclear`. O diff exato ainda exige confirmacao, staging alheio e preservado e qualquer mudanca de evidencia invalida o preview single-use.
+A skill lista o inbox depois de revalidar sua privacidade, mostra de uma a dezesseis propostas selecionadas e pesquisa memoria relacionada. Cada target deve ser distinto. O preview apresenta candidatos canonicos, propostas relacionadas e referencia por referencia os estados `verified`, `unavailable`, `mismatch` ou `legacy_unverified`. Integridade nao implica que a fonte sustenta a afirmacao; a skill e a pessoa avaliam separadamente `supports`, `contradicts` ou `unclear`. O diff exato ainda exige confirmacao, staging alheio e preservado e qualquer mudanca de evidencia invalida o preview single-use.
 
 O servidor expoe:
 
@@ -56,6 +56,8 @@ O servidor expoe:
 - `memory_proposal_list`;
 - `memory_curate_preview`;
 - `memory_curate_apply`.
+- `memory_curate_batch_preview`;
+- `memory_curate_batch_apply`.
 
 O commit local pode ser revisado e enviado com Git comum:
 

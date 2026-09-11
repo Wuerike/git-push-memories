@@ -1,6 +1,6 @@
 # Plano da Fase 3: curadoria e confianca
 
-Status do plano: **T1-T6 implementadas e verificadas; T7-T10 pendentes**.
+Status do plano: **T1-T7 implementadas e verificadas; T8-T10 pendentes**.
 
 ## Objetivo
 
@@ -65,6 +65,8 @@ Tools MCP de curadoria:
 memory_proposal_list
 memory_curate_preview
 memory_curate_apply
+memory_curate_batch_preview
+memory_curate_batch_apply
 ```
 
 `memory_curate_preview` exige uma operacao explicita. Para uma proposta `create`, `create_page` recebe um path novo em categoria configurada e `create_section` recebe uma pagina existente e um heading novo. Para uma proposta `update`, `replace_section` recebe pagina e section ID de uma secao folha. O retorno inclui proposta, fontes, memoria relacionada, operacao, target, section ID, diff e token single-use. `memory_curate_apply` aceita somente esse token e o invalida na primeira tentativa, inclusive quando ocorre drift.
@@ -136,7 +138,7 @@ Cada tarefa entrega testes e atualiza o inventario operacional. O E2E e o experi
 | [T4](t4-remove-and-discard-curation.md) | 3B | implementada | `remove` e descarte possuem preview, confirmacao e decisao Git observavel |
 | [T5](t5-duplicate-and-contradiction-evidence.md) | 3B | implementada | duplicidades e possiveis contradicoes aparecem no preview e exigem decisao |
 | [T6](t6-verifiable-source-references.md) | 3B | implementada | referencias identificam sua origem e sua integridade e verificada quando disponivel localmente |
-| T7 | 3B | pendente | lotes e falhas nas janelas de publicacao sao reconciliados sem commit duplicado ou lock indevido |
+| [T7](t7-multi-path-transaction-recovery.md) | 3B | implementada | lotes e falhas nas janelas de publicacao sao reconciliados sem commit duplicado ou lock indevido |
 | T8 | 3B | pendente | E2E reproduz todas as operacoes e garantias do gate tecnico vigente |
 | T9 | 3C | pendente | protocolo pre-registra corpus, metricas, limiares e decisoes possiveis |
 | T10 | 3C | pendente | experimento produz relatorio e decisao entre avancar, revisar ou interromper |

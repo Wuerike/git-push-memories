@@ -1679,6 +1679,70 @@ func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 	}
 }
 
+func TestCurateBatchPreviewAndApplyUsesOneCommit(t *testing.T) {
+	memoryRoot := newGitRoot(t, nil)
+	stateRoot := filepath.Join(t.TempDir(), "state")
+	session, stop := startServer(t, memoryRoot, stateRoot)
+	defer stop()
+	proposalIDs := make([]string, 2)
+	for index, title := range []string{"First batch memory", "Second batch memory"} {
+		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+			Name: "memory_propose", Arguments: map[string]any{
+				"title": title, "suggested_action": "create", "knowledge": title + " is current.", "source_paths": []string{"source.go"},
+			},
+		})
+		if err != nil || result.IsError {
+			t.Fatalf("memory_propose = %+v, %v", result, err)
+		}
+		proposalIDs[index] = decodeInboxResponse(t, result).Data.ID
+	}
+	parent := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
+	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_batch_preview", Arguments: map[string]any{"items": []map[string]any{
+			{"operation": "create_page", "proposal_id": proposalIDs[0], "target_path": "memories/domains/first-batch.md"},
+			{"operation": "create_page", "proposal_id": proposalIDs[1], "target_path": "memories/domains/second-batch.md"},
+		}},
+	})
+	if err != nil || previewResult.IsError {
+		t.Fatalf("memory_curate_batch_preview = %+v, %v", previewResult, err)
+	}
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+			Items        []struct {
+				ProposalID string `json:"proposal_id"`
+			} `json:"items"`
+			Diff string `json:"diff"`
+		} `json:"data"`
+	}
+	decodeStructured(t, previewResult, &preview)
+	if preview.Data.PreviewToken == "" || len(preview.Data.Items) != 2 || !strings.Contains(preview.Data.Diff, "first-batch.md") || !strings.Contains(preview.Data.Diff, "second-batch.md") {
+		t.Fatalf("batch preview = %+v", preview.Data)
+	}
+	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_curate_batch_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+	})
+	if err != nil || applyResult.IsError {
+		t.Fatalf("memory_curate_batch_apply = %+v, %v", applyResult, err)
+	}
+	var applied struct {
+		Data struct {
+			Commit string `json:"commit"`
+			Items  []struct {
+				ProposalID string `json:"proposal_id"`
+				Commit     string `json:"commit"`
+			} `json:"items"`
+		} `json:"data"`
+	}
+	decodeStructured(t, applyResult, &applied)
+	if applied.Data.Commit == "" || len(applied.Data.Items) != 2 || applied.Data.Items[0].Commit != applied.Data.Commit || applied.Data.Items[1].Commit != applied.Data.Commit {
+		t.Fatalf("batch apply = %+v", applied.Data)
+	}
+	if got := gitOutput(t, memoryRoot, "rev-parse", "HEAD^"); got != parent {
+		t.Fatalf("batch commit parent = %s, want %s", got, parent)
+	}
+}
+
 type response struct {
 	SchemaVersion int                      `json:"schema_version"`
 	Data          *retrieval.ContextBundle `json:"data,omitempty"`

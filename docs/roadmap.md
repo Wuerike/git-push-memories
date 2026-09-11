@@ -169,7 +169,7 @@ Essa mudança redefine o ponto de partida da Fase 3. O gate de valor da Fase 2 n
 
 **Plano executável:** [Plano da Fase 3](phase-3/plan.md).
 
-**Estado atual:** em andamento. Os destinos individuais, dedupe, evidencia de conflitos e referencias verificaveis estao implementados; transacao multi-path e recovery formam o proximo incremento.
+**Estado atual:** em andamento. Os destinos individuais, dedupe, evidencia de conflitos, referencias verificaveis e transacoes multi-path recuperaveis estao implementados; o E2E tecnico da Fase 3B forma o proximo incremento.
 
 ### Resultado esperado
 

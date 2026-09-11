@@ -19,3 +19,15 @@ _Avoid_: Integrity, verification
 **Local source binding**:
 A transient association between a source repository identity and an available local checkout used to evaluate reference integrity.
 _Avoid_: Source ownership, persisted repository path
+
+**Curation transaction**:
+A bounded, explicitly confirmed set of independent proposal decisions published as one Git commit.
+_Avoid_: Bulk edit, partial batch
+
+**Transaction marker**:
+Private content-free metadata that identifies a prepared curation commit, its exact inputs and outputs, and the Git index state needed for recovery.
+_Avoid_: Receipt, transaction log
+
+**Curation recovery**:
+Deterministic reconciliation of an interrupted curation transaction to either its complete commit or its unchanged baseline.
+_Avoid_: Retry commit, automatic merge
