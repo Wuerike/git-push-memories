@@ -31,7 +31,9 @@ run_check() {
   local started ended status
   started="$(date +%s%N)"
   set +e
-  "$@"
+  # Fixture permissions in the repository checks assume the normal build umask.
+  # Keep the enclosing process private for verification.tsv and runtime artifacts.
+  (umask 022; "$@")
   status=$?
   set -e
   ended="$(date +%s%N)"
