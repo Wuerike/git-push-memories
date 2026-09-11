@@ -11,6 +11,46 @@ Os estados usados sao:
 - **adiado**: capacidade deliberadamente reservada para uma etapa posterior;
 - **removido**: comportamento que existiu no produto, mas nao faz parte da interface atual.
 
+## O que voce pode fazer agora
+
+- **Configurar um repositorio de memoria para varias sessoes de trabalho**, com categorias definidas em `gpm.json` e integracao global com Claude Code.
+- **Consultar memoria canonica** pela CLI ou pelo MCP, com busca textual, escopo por categoria, subdiretorio ou arquivo e expansao de resultados por handle.
+- **Propor conhecimento com `/remember <fato>`**, sugerindo criacao, atualizacao ou remocao. A confirmacao gera uma proposta commitada no inbox para curadoria posterior; uma proposta byte-identica existente e reutilizada.
+- **Revisar referencias de fonte imutaveis**, consultando trechos dos arquivos commitados e avaliando separadamente sua integridade e se o conteudo sustenta o conhecimento proposto.
+- **Curar de uma a dezesseis propostas com `/curate [proposal-id ...]`**, criando paginas ou secoes, substituindo o corpo de secoes folha e removendo secoes ou paginas elegiveis. O diff confirmado e publicado em um unico commit, com targets distintos no lote.
+- **Descartar propostas com motivo registrado ou manter alguma pendente no lote**, enquanto outras decisoes sao aplicadas. `keep_pending` exige pelo menos uma outra decisao que produza commit.
+- **Recuperar a memoria resultante em sessoes futuras e revisar seu historico pelo Git**. O envio e a atualizacao entre clones usam o fluxo Git conduzido pela pessoa.
+
+### Comandos de uso
+
+Depois da [instalacao](../README.md#instalacao), configure um repositorio Git existente, com pelo menos um commit e `gpm.json` valido. O setup exige Claude Code disponivel no `PATH` e instala `/remember` e `/curate`:
+
+```bash
+gpm setup /caminho/para/repositorio-de-memoria
+gpm retrieve "timeout checkout" --budget-bytes 4096
+gpm retrieve "timeout checkout" --budget-bytes 4096 --path-prefix memories/domains
+```
+
+O ultimo exemplo pressupoe `domains` como categoria configurada. O prefixo tambem pode apontar para um subdiretorio ou arquivo Markdown dentro de uma categoria.
+
+Em uma sessao do Claude Code:
+
+```text
+/remember <fato>
+/curate
+/curate <proposal-id>
+/curate <proposal-id-1> <proposal-id-2>
+```
+
+Sem IDs, `/curate` lista o inbox para selecao. Captura, listagem e curadoria exigem que o repositorio de memoria esteja em `main`. Cada tentativa de curadoria requer confirmacao do diff exato; ajustes na decisao ou mudancas nos dados revisados apos o preview exigem nova tentativa. O conhecimento incorporado pela curadoria passa a compor a memoria canonica pesquisavel; o inbox fica fora da busca.
+
+Para revisar e enviar um commit local, use Git no repositorio de memoria:
+
+```bash
+git -C /caminho/para/repositorio-de-memoria show --stat HEAD
+git -C /caminho/para/repositorio-de-memoria push
+```
+
 ## Estado das fases
 
 | Fase | Estado atual | Observacao |
@@ -26,9 +66,9 @@ Os estados usados sao:
 
 | Comando | Estado | Comportamento atual |
 |---|---|---|
-| `gpm setup <memory-root>` | **Implementado.** | Valida e salva o repositorio de memoria, registra `gpm mcp` no Claude Code e instala o skill global `/remember`. |
+| `gpm setup <memory-root>` | **Implementado.** | Valida e salva o repositorio de memoria, registra `gpm mcp` no Claude Code e instala os skills globais `/remember` e `/curate`. |
 | `gpm mcp` | **Implementado.** | Executa o servidor MCP transitorio sobre stdio. |
-| `gpm retrieve <query> --budget-bytes <n>` | **Implementado.** | Executa a mesma recuperacao textual usada por `memory_search`. |
+| `gpm retrieve <query> --budget-bytes <n> [--path-prefix <prefixo>]` | **Implementado.** | Executa a mesma recuperacao textual usada por `memory_search`; o prefixo opcional restringe a busca a uma categoria, subdiretorio ou arquivo canonico. |
 | `gpm version` e `gpm help` | **Implementado.** | Funcionam sem configuracao previa do repositorio de memoria. |
 | `gpm proposal show/reject/apply/publish` | **Removido.** | Nao existe lifecycle de proposta paralelo ao Git. Propostas sao arquivos Markdown comuns no inbox. |
 
@@ -70,8 +110,8 @@ Os estados usados sao:
 | Busca textual | **Implementado.** O ranking conta termos distintos da query presentes no path, heading ou corpo e usa ordenacao deterministica para empates. |
 | Selecao de secoes | **Implementado.** A busca retorna apenas secoes folha; secoes estruturais com filhos nao competem como resultados independentes. |
 | Busca recursiva por categoria | **Implementado.** Subdiretorios abaixo de cada categoria configurada sao percorridos. |
-| Escopo por path | **Implementado.** Um prefixo relativo canonico pode restringir a busca; paths absolutos e escapes por `..` sao rejeitados. |
-| Budget | **Implementado.** O JSON retornado nunca excede `budget_bytes`; budget insuficiente retorna erro tipado. |
+| Escopo por path | **Implementado.** `path_prefix` no MCP e `--path-prefix` na CLI restringem a busca por prefixo relativo canonico; paths absolutos e escapes por `..` sao rejeitados. |
+| Budget | **Implementado.** O JSON do `ContextBundle` respeita `budget_bytes`; o envelope externo da resposta CLI/MCP acrescenta bytes fora desse limite. A busca reduz a quantidade de secoes completas e sinaliza `truncated` quando necessario; budget insuficiente para o bundle minimo ou o primeiro resultado retorna erro tipado. |
 | Expansao e obsolescencia | **Implementado.** `memory_expand` confirma section ID e content hash no estado atual antes de retornar o corpo. |
 | Leitura sem mutacao | **Implementado.** Search e expand nao criam state root, indice, proposal ou alteracao Git. |
 | Busca semantica, FTS ou vetorial | **Adiado.** Nao existe indice persistente, banco vetorial ou grafo. |
@@ -85,6 +125,9 @@ Os estados usados sao:
 | Target opcional | **Implementado.** Quando informado, deve ser um path Markdown dentro de uma categoria configurada. |
 | Source paths v1 | **Legado.** Paths sao canonicalizados e examinados pela politica de privacidade, mas sempre aparecem como `legacy_unverified`. |
 | Source references v2 | **Implementado.** Identificam lineage do repositorio, commit completo, path relativo e SHA-256 do blob; referencias e source paths nao vazios sao mutuamente exclusivos. |
+| Snapshot de fontes | **Implementado com limites.** Exige um checkout local de fonte nao shallow e de um a dezesseis paths distintos por chamada. Usa `HEAD` por padrao ou um ID completo de commit informado; cada blob e limitado a 8 MiB. |
+| Vinculo local de fontes | **Implementado e transitorio.** O snapshot vincula o checkout somente no processo MCP atual. Apos reiniciar o processo, um novo snapshot deve restabelecer o vinculo para verificar ou expandir referencias; sem vinculo, a integridade e `unavailable`. |
+| Leitura de fontes | **Implementado com limites.** `memory_reference_expand` exige referencia com integridade `verified`, blob UTF-8, `start_line` a partir de 1 e `budget_bytes` positivo de ate 64 KiB para o JSON do trecho. Retorna linhas completas e indica truncamento; o envelope externo fica fora do budget. |
 | Intake Guard antes da persistencia | **Implementado.** Todo o payload e validado antes da criacao de lock, arquivo de proposta ou objeto Git. |
 | Deteccao normativa | **Implementado para a politica v1.** Bloqueia padroes conhecidos de chaves, tokens, autorizacao, email, telefone, CPF e referencias de sessao. |
 | Privacidade semantica | **Parcial.** Texto livre nao e classificado semanticamente como prompt, resposta ou transcript quando nao corresponde aos padroes normativos. |
@@ -98,7 +141,7 @@ Os estados usados sao:
 |---|---|
 | Formato da proposta | **Implementado.** Schema v1 preserva source paths legados; schema v2 serializa referencias estruturadas. Ambos mantem Markdown legivel, acao, target, titulo e conhecimento. |
 | Identidade | **Implementado.** Cada proposta recebe ID aleatorio hexadecimal e slug derivado do titulo. |
-| Branch obrigatoria | **Implementado.** A captura exige que o checkout esteja exatamente em `main`. |
+| Branch obrigatoria | **Implementado.** Captura, listagem de propostas e curadoria exigem que o checkout do repositorio de memoria esteja exatamente em `main`. |
 | Commit path-scoped | **Implementado.** O commit contem exatamente o novo arquivo de proposta e parte do `HEAD` mais recente. |
 | Preservacao de staging | **Implementado.** Alteracoes staged ou unstaged fora do path da proposta nao sao consumidas nem descartadas. |
 | Hooks Git | **Implementado como restricao.** O commit usa plumbing (`commit-tree` e `update-ref`) e nao executa hooks de commit. |
@@ -111,12 +154,12 @@ Os estados usados sao:
 
 | Funcionalidade | Estado atual |
 |---|---|
-| Setup global | **Implementado.** O MCP e `/remember` sao instalados no escopo do usuario. |
+| Setup global | **Implementado.** O MCP e os skills `/remember` e `/curate` sao instalados no escopo do usuario. O setup pode ser repetido para atualizar a integracao, registrar um binario movido ou selecionar outro repositorio de memoria. |
 | MCP por stdio | **Implementado.** Nao ha daemon, porta local ou container obrigatorio. |
 | `/remember` explicito | **Implementado.** O skill nao e invocado automaticamente pelo modelo. |
 | Snapshot de fontes no `/remember` | **Implementado.** A skill usa somente referencias retornadas pela ferramenta e nunca persiste o root local ou inventa hashes. |
 | Dedupe no `/remember` | **Implementado.** Resposta `duplicate: true` informa que ID, path e commit existentes foram reutilizados sem nova publicacao. |
-| `/curate` explicito | **Implementado para `create`, `update`, `remove` e descarte.** Pesquisa memoria, escolhe uma operacao, gera preview e exige confirmacao antes do apply. |
+| `/curate` explicito | **Implementado para uma a dezesseis propostas.** Pesquisa memoria, escolhe operacoes de `create`, `update`, `remove` ou descarte e pode manter propostas pendentes em um lote com outra decisao. Gera preview individual ou em lote e exige confirmacao do diff antes do apply. |
 | Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
 | Confirmacao humana | **Implementado no contrato.** Os campos exatos sao apresentados antes de uma unica chamada a `memory_propose`. |
 | Fallback seguro | **Implementado no contrato e nos harnesses.** Cancelamento, budget insuficiente, MCP ausente ou erro encerram o fluxo sem escrita alternativa. |
@@ -126,12 +169,13 @@ Os estados usados sao:
 
 | Funcionalidade | Estado atual |
 |---|---|
-| Listagem e selecao de propostas | **Implementado.** `/curate` lista o inbox e conduz a selecao de uma proposta. |
+| Listagem e selecao de propostas | **Implementado.** `/curate [proposal-id ...]` lista o inbox e seleciona de uma a dezesseis propostas pelos IDs informados, preservando sua ordem; sem IDs, pede a selecao. IDs desconhecidos, repetidos ou mais de dezesseis selecoes encerram a tentativa. |
 | Criacao de pagina canonica | **Implementado.** Uma proposta `create` pode gerar uma pagina nova dentro de uma categoria configurada. |
 | Criacao de secao canonica | **Implementado.** Uma proposta `create` pode acrescentar uma secao H2 com ID derivado a uma pagina existente. |
 | Atualizacao de secao canonica | **Implementado.** Uma proposta `update` pode substituir somente o corpo completo de uma secao folha identificada e vinculada ao content hash observado. |
 | Remocao de memoria canonica | **Implementado para destinos individuais.** `remove_section` exclui uma secao folha identificada; `remove_page` aceita somente a forma exata de uma pagina gerada com uma unica secao `Overview`. Nao ha cascade delete ou reparo de links. |
 | Consumo atomico de propostas | **Implementado para lotes limitados.** `create`, `update`, `remove` e descarte podem consumir de uma a dezesseis propostas em um unico commit; targets repetidos sao rejeitados. |
+| Proposta mantida pendente | **Implementado em lote.** `keep_pending` preserva a proposta byte-identica no inbox enquanto outras decisoes sao aplicadas. Um lote composto somente por decisoes `keep_pending` e rejeitado. |
 | Recovery de curadoria | **Implementado.** Marcador privado sem conteudo e indice reconciliado convergem para baseline antes de `update-ref` ou para o mesmo commit completo depois dele; lock estrangeiro nunca e removido. |
 | Descarte auditavel | **Implementado.** Remove somente a proposta e registra decisao e reason code fechado no commit Git. |
 | Duplicidade e contradicao | **Parcial e observavel.** Dedupe exato bloqueia publicacao repetida; preview separa candidatos canonicos e propostas relacionadas; `/curate` classifica equivalencia ou contradicao como avaliacao assistida e exige escolha humana. Nao ha detector semantico completo. |
