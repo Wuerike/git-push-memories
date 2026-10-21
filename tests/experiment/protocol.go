@@ -12,7 +12,7 @@ const (
 	DecisionAdvance      Decision = "avancar"
 	DecisionRevise       Decision = "revisar_o_fluxo"
 	DecisionStop         Decision = "interromper"
-	Phase3ProtocolSHA256          = "8a11e309ebf53eebb8e2fe5d85f102d34995c73fdf503a51dfd6a3b239c57579"
+	Phase3ProtocolSHA256          = "41936567f2489a5e5336ebc348c3357e90e247df12bf0070d6dc86cfee7b9992"
 )
 
 type GateOutcome struct {

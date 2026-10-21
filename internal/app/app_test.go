@@ -181,7 +181,7 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTools := []string{"memory_curate_apply", "memory_curate_batch_apply", "memory_curate_batch_preview", "memory_curate_preview", "memory_expand", "memory_proposal_list", "memory_propose", "memory_reference_expand", "memory_reference_snapshot", "memory_search"}
+	wantTools := []string{"memory_curate_apply", "memory_curate_batch_apply", "memory_curate_batch_preview", "memory_curate_preview", "memory_expand", "memory_page_read", "memory_proposal_list", "memory_propose", "memory_reference_expand", "memory_reference_snapshot", "memory_search"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
 	}
@@ -273,7 +273,9 @@ func configure(t *testing.T, memoryRoot string) config.Config {
 
 func runGit(t *testing.T, root string, arguments ...string) {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	// Auto maintenance would run detached after a commit and touch .git while a
+	// test fingerprints the root.
+	command := exec.Command("git", append([]string{"-C", root, "-c", "maintenance.auto=false"}, arguments...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", arguments, err, output)
 	}

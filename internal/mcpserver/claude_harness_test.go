@@ -211,6 +211,157 @@ func TestClaudeAdapterCuratesUpdateForFreshProcessRetrieval(t *testing.T) {
 	}
 }
 
+func TestE2EReadingTeamPageIsRestructuredByRewrite(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{rewriteBaselinePath: rewriteBaselinePage})
+	e2eConfigure(t, memoryRoot)
+	binary := buildBinary(t)
+
+	session := e2eConnect(t, binary, "e2e-rewrite")
+	first := e2ePropose(t, session, map[string]any{
+		"title": "Wuerike é do time da camada de leitura", "suggested_action": "update", "target": rewriteBaselinePath,
+		"knowledge": "Wuerike faz parte do time da camada de leitura.", "source_paths": []string{},
+	})
+	second := e2ePropose(t, session, map[string]any{
+		"title": "Guilherme é membro do time da camada de leitura", "suggested_action": "update", "target": rewriteBaselinePath,
+		"knowledge": "Guilherme é membro do time da camada de leitura.", "source_paths": []string{},
+	})
+	parent := gitOutput(t, memoryRoot, "rev-parse", "HEAD") // after both proposal commits
+	read := e2eCall(t, session, "memory_page_read", map[string]any{"path": rewriteBaselinePath, "budget_bytes": 65536})
+	var page pageReadResponse
+	decodeStructured(t, read, &page)
+	if page.Data == nil || page.Data.ContentHash == "" || page.Data.Markdown != rewriteBaselinePage {
+		t.Fatalf("memory_page_read = %+v", page.Data)
+	}
+	token := e2eBatchPreview(t, session,
+		map[string]any{"operation": "rewrite_page", "proposal_id": first.ID, "target_path": rewriteBaselinePath, "content_hash": page.Data.ContentHash, "replacement": rewriteReplacement},
+		map[string]any{"operation": "fold_proposal", "proposal_id": second.ID, "fold_into": first.ID},
+	)
+	e2eCall(t, session, "memory_curate_batch_apply", map[string]any{"preview_token": token})
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	e2eAssertTeamPage(t, binary, memoryRoot, parent, first.Path, second.Path)
+}
+
+func TestE2ENewTeamPageIsCreatedFromTwoProposalsInOneRun(t *testing.T) {
+	memoryRoot := newGitRoot(t, nil)
+	e2eConfigure(t, memoryRoot)
+	binary := buildBinary(t)
+
+	session := e2eConnect(t, binary, "e2e-create-fold")
+	first := e2ePropose(t, session, map[string]any{
+		"title": "Wuerike é do time da camada de leitura", "suggested_action": "create",
+		"knowledge": "Wuerike faz parte do time da camada de leitura.", "source_paths": []string{},
+	})
+	second := e2ePropose(t, session, map[string]any{
+		"title": "Guilherme é membro do time da camada de leitura", "suggested_action": "create",
+		"knowledge": "Guilherme é membro do time da camada de leitura.", "source_paths": []string{},
+	})
+	parent := gitOutput(t, memoryRoot, "rev-parse", "HEAD") // after both proposal commits
+	token := e2eBatchPreview(t, session,
+		map[string]any{"operation": "create_page", "proposal_id": first.ID, "target_path": rewriteBaselinePath, "replacement": rewriteReplacement},
+		map[string]any{"operation": "fold_proposal", "proposal_id": second.ID, "fold_into": first.ID},
+	)
+	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(rewriteBaselinePath))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("preview created the page: %v", err)
+	}
+	e2eCall(t, session, "memory_curate_batch_apply", map[string]any{"preview_token": token})
+	if err := session.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	e2eAssertTeamPage(t, binary, memoryRoot, parent, first.Path, second.Path)
+}
+
+func e2eConfigure(t *testing.T, memoryRoot string) {
+	t.Helper()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	if _, err := config.Save(memoryRoot); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func e2eConnect(t *testing.T, binary, name string) *mcp.ClientSession {
+	t.Helper()
+	client := mcp.NewClient(&mcp.Implementation{Name: name, Version: "test"}, nil)
+	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(binary, "mcp")}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return session
+}
+
+func e2eCall(t *testing.T, session *mcp.ClientSession, name string, arguments map[string]any) *mcp.CallToolResult {
+	t.Helper()
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err != nil || result.IsError {
+		t.Fatalf("%s = %+v, %v", name, result, err)
+	}
+	return result
+}
+
+type e2eProposal struct{ ID, Path string }
+
+func e2ePropose(t *testing.T, session *mcp.ClientSession, arguments map[string]any) e2eProposal {
+	t.Helper()
+	proposal := decodeInboxResponse(t, e2eCall(t, session, "memory_propose", arguments)).Data
+	return e2eProposal{proposal.ID, proposal.Path}
+}
+
+func e2eBatchPreview(t *testing.T, session *mcp.ClientSession, items ...map[string]any) string {
+	t.Helper()
+	var preview struct {
+		Data struct {
+			PreviewToken string `json:"preview_token"`
+		} `json:"data"`
+	}
+	decodeStructured(t, e2eCall(t, session, "memory_curate_batch_preview", map[string]any{"items": items}), &preview)
+	if preview.Data.PreviewToken == "" {
+		t.Fatal("memory_curate_batch_preview returned no preview_token")
+	}
+	return preview.Data.PreviewToken
+}
+
+// e2eAssertTeamPage checks the committed state and then retrieves the team
+// page from a brand-new MCP process.
+func e2eAssertTeamPage(t *testing.T, binary, memoryRoot, parent string, proposalPaths ...string) {
+	t.Helper()
+	golden, err := os.ReadFile("../memory/testdata/page-rewrite/team.golden.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(rewriteBaselinePath)))
+	if err != nil || string(page) != string(golden) {
+		t.Fatalf("page = %q, want %q, err = %v", page, golden, err)
+	}
+	for _, path := range proposalPaths {
+		if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(path))); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("proposal %s remains: %v", path, err)
+		}
+	}
+	if got := gitOutput(t, memoryRoot, "rev-parse", "HEAD^"); got != parent {
+		t.Fatalf("curation commit parent = %s, want %s (one commit)", got, parent)
+	}
+	if status := gitOutput(t, memoryRoot, "status", "--porcelain"); status != "" {
+		t.Fatalf("dirty status after apply: %q", status)
+	}
+
+	fresh := e2eConnect(t, binary, "e2e-fresh-retrieval")
+	search := decodeResponse(t, e2eCall(t, fresh, "memory_search", map[string]any{"query": "membros camada de leitura", "budget_bytes": 2048}))
+	if search.Data == nil || len(search.Data.Items) != 1 || search.Data.Items[0].Handle.Path != rewriteBaselinePath {
+		t.Fatalf("fresh search = %+v", search.Data)
+	}
+	content := search.Data.Items[0].Content
+	if !strings.Contains(content, "- Wuerike\n- Guilherme") || strings.Contains(content, "Overview") {
+		t.Fatalf("fresh search content = %q", content)
+	}
+	if err := fresh.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestMissingClaudeMCPIsVisibleWithoutPersistingPayload(t *testing.T) {
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	client := mcp.NewClient(&mcp.Implementation{Name: "claude-harness", Version: "test"}, nil)

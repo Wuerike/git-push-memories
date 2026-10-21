@@ -8,9 +8,11 @@ Pre-registro preparado em 2026-09-11, antes de qualquer inferencia autenticada d
 
 - Experiment ID: `phase3-curated-memory-value-v2`.
 - Configuracao do experimento: `testdata/phase-3/value-experiment/protocol.json`.
-- SHA-256: `8a11e309ebf53eebb8e2fe5d85f102d34995c73fdf503a51dfd6a3b239c57579`.
+- SHA-256: `41936567f2489a5e5336ebc348c3357e90e247df12bf0070d6dc86cfee7b9992`.
 - Produto avaliado: `e92a96b6bc4c6f2f169b8b8e96a419c9d9a1b9b2`.
 - Git exigido: `2.55.0`.
+
+O experimento esta retirado; o hash dos assets de producao fixado no protocolo foi atualizado em 2026-10-20, depois que a skill `/curate` mudou, e por isso o SHA-256 acima difere do original.
 
 V2 sucede o [protocolo v1](t9-value-evaluation-protocol.md) preservado no commit `938f38fa4a208cf5d277c3d5fb4f41265a69e1f8`, cujo SHA-256 e `964e5a988af33b10f135a26258e66aeec33cf9b0e5694304434f70ab99bc149f`.
 

@@ -34,6 +34,8 @@ type Server struct {
 	previews   map[string]pendingCuration
 	batches    map[string]pendingBatchCuration
 	references *reference.Verifier
+	pages      *memory.Repository
+	pagesMu    sync.Mutex
 }
 
 type pendingCuration struct {
@@ -83,6 +85,10 @@ func New(cfg config.Config, version string) (*Server, error) {
 		Description: "Expand one current memory section from a search handle within an exact byte budget.",
 	}, server.expand)
 	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_page_read",
+		Description: "Read one whole canonical memory page with its content hash, or fail with budget_too_small; never returns a truncated page.",
+	}, server.readPage)
+	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_reference_snapshot",
 		Description: "Snapshot immutable references to committed blobs in one explicit local Git repository without persisting its local root.",
 	}, server.snapshotReferences)
@@ -96,7 +102,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}, server.listProposals)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_preview",
-		Description: "Preview one curation decision and its bounded canonical and inbox evidence without writing.",
+		Description: "Preview one curation decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal, keep_pending) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
 	}, server.previewCuration)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_apply",
@@ -104,7 +110,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}, server.applyCuration)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_batch_preview",
-		Description: "Preview a bounded batch of independent curation decisions for one atomic commit.",
+		Description: "Preview a bounded batch of curation decisions for one atomic commit, including fold_proposal items that fold other proposals into a rewrite_page or into a create_page that carries a replacement. A new preview invalidates older pending tokens for the same proposals.",
 	}, server.previewCurationBatch)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_curate_batch_apply",
@@ -117,6 +123,7 @@ func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) err
 	defer s.retriever.Close()
 	defer s.closeInbox()
 	defer s.closeCurator()
+	defer s.closePages()
 	if _, err := curation.Recover(ctx, s.cfg); err != nil {
 		return err
 	}
@@ -136,6 +143,23 @@ type searchInput struct {
 type expandInput struct {
 	Handle      retrieval.Handle `json:"handle" jsonschema:"handle returned by memory_search"`
 	BudgetBytes int              `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the ContextBundle JSON"`
+}
+
+type pageReadInput struct {
+	Path        string `json:"path" jsonschema:"canonical relative memory page path inside a configured category"`
+	BudgetBytes int    `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the page JSON data object"`
+}
+
+type pageReadData struct {
+	Path        string `json:"path"`
+	ContentHash string `json:"content_hash"`
+	Markdown    string `json:"markdown"`
+}
+
+type pageReadResponse struct {
+	SchemaVersion int           `json:"schema_version"`
+	Data          *pageReadData `json:"data,omitempty"`
+	Error         *toolError    `json:"error,omitempty"`
 }
 
 type addProposalInput struct {
@@ -162,13 +186,14 @@ type expandReferenceInput struct {
 type listProposalsInput struct{}
 
 type previewCurationInput struct {
-	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, discard_proposal, or keep_pending"`
+	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, discard_proposal, or keep_pending; fold_proposal is accepted only by memory_curate_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
 	ProposalID  string `json:"proposal_id" jsonschema:"identifier of one committed proposal"`
-	TargetPath  string `json:"target_path,omitempty" jsonschema:"canonical page path inside a configured memory category; omitted for discard_proposal"`
+	TargetPath  string `json:"target_path,omitempty" jsonschema:"canonical page path inside a configured memory category; omitted for fold_proposal and discard_proposal"`
 	SectionID   string `json:"section_id,omitempty" jsonschema:"leaf section identifier required by replace_section, remove_section, or remove_page"`
-	ContentHash string `json:"content_hash,omitempty" jsonschema:"observed section content hash required by replace_section, remove_section, or remove_page"`
+	ContentHash string `json:"content_hash,omitempty" jsonschema:"observed content hash required by replace_section, remove_section, or remove_page; for rewrite_page, the content_hash returned by memory_page_read"`
 	Heading     string `json:"heading,omitempty" jsonschema:"new section heading required only by create_section"`
-	Replacement string `json:"replacement,omitempty" jsonschema:"complete replacement body required only by replace_section"`
+	Replacement string `json:"replacement,omitempty" jsonschema:"complete replacement body required only by replace_section; for rewrite_page, the complete page Markdown; optional for create_page, the complete new page Markdown without frontmatter and without @id markers on H2 or deeper headings (the server generates them), which also lets the create_page receive fold_proposal items"`
+	FoldInto    string `json:"fold_into,omitempty" jsonschema:"proposal_id of the rewrite_page item, or of the create_page item that carries a replacement, in the same batch that absorbs this proposal; required only by fold_proposal"`
 	Reason      string `json:"reason,omitempty" jsonschema:"discard reason required only by discard_proposal: not_relevant, incorrect, sensitive, wrong_target, superseded, or duplicate"`
 }
 
@@ -177,7 +202,7 @@ type applyCurationInput struct {
 }
 
 type previewCurationBatchInput struct {
-	Items []previewCurationInput `json:"items" jsonschema:"one to sixteen independent curation decisions with distinct proposals and target paths"`
+	Items []previewCurationInput `json:"items" jsonschema:"one to sixteen curation decisions with distinct proposals; canonical items have distinct target paths, while fold_proposal items have no target path and depend on a rewrite_page or replacement-carrying create_page item in the same batch"`
 }
 
 type curationPreview struct {
@@ -266,6 +291,66 @@ func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searc
 	return retrievalResponse(bundle, err)
 }
 
+// readPage returns the whole page or a typed error. Codes: invalid_budget, invalid_path
+// (outside categories, missing, or not a canonical page path), invalid_page (schema), budget_too_small, page_read_failed.
+func (s *Server) readPage(ctx context.Context, _ *mcp.CallToolRequest, input pageReadInput) (*mcp.CallToolResult, pageReadResponse, error) {
+	if input.BudgetBytes <= 0 {
+		return pageReadFailure("invalid_budget")
+	}
+	if !s.cfg.IsMemoryPath(input.Path) {
+		return pageReadFailure("invalid_path")
+	}
+	repository, err := s.pageRepository()
+	if err != nil {
+		return pageReadFailure("page_read_failed")
+	}
+	page, err := repository.ReadPage(ctx, input.Path)
+	if err != nil {
+		switch {
+		case errors.Is(err, memory.ErrInvalidPath):
+			return pageReadFailure("invalid_path")
+		case errors.Is(err, memory.ErrInvalidSchema):
+			return pageReadFailure("invalid_page")
+		}
+		return pageReadFailure("page_read_failed")
+	}
+	data := pageReadData{Path: page.Path, ContentHash: page.ContentHash, Markdown: page.Markdown}
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		return pageReadFailure("page_read_failed")
+	}
+	if len(encoded) > input.BudgetBytes {
+		return pageReadFailure("budget_too_small")
+	}
+	return nil, pageReadResponse{SchemaVersion: 1, Data: &data}, nil
+}
+
+func pageReadFailure(code string) (*mcp.CallToolResult, pageReadResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, pageReadResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+}
+
+func (s *Server) pageRepository() (*memory.Repository, error) {
+	s.pagesMu.Lock()
+	defer s.pagesMu.Unlock()
+	if s.pages != nil {
+		return s.pages, nil
+	}
+	repository, err := memory.Open(s.cfg.MemoryRoot)
+	if err != nil {
+		return nil, err
+	}
+	s.pages = repository
+	return repository, nil
+}
+
+func (s *Server) closePages() {
+	s.pagesMu.Lock()
+	defer s.pagesMu.Unlock()
+	if s.pages != nil {
+		_ = s.pages.Close()
+	}
+}
+
 func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input addProposalInput) (*mcp.CallToolResult, inboxToolResponse, error) {
 	raw, err := json.Marshal(input)
 	if err != nil {
@@ -352,10 +437,7 @@ func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return curationPreviewFailure("curation_unavailable")
 	}
-	preview, err := curator.Preview(ctx, curation.PreviewRequest{
-		Operation: curation.Operation(input.Operation), ProposalID: input.ProposalID, TargetPath: input.TargetPath,
-		SectionID: input.SectionID, ContentHash: input.ContentHash, Heading: input.Heading, Replacement: input.Replacement, Reason: curation.DiscardReason(input.Reason),
-	})
+	preview, err := curator.Preview(ctx, curationRequest(input))
 	if err != nil {
 		return curationPreviewFailure(curationErrorCode(err))
 	}
@@ -377,6 +459,7 @@ func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, in
 	if s.previews == nil {
 		s.previews = make(map[string]pendingCuration)
 	}
+	s.invalidatePendingLocked(proposalIDs(preview))
 	s.previews[token] = pendingCuration{Preview: preview, EvidenceHash: evidenceHash}
 	s.curatorMu.Unlock()
 	response := curationPreview{
@@ -453,6 +536,11 @@ func (s *Server) previewCurationBatch(ctx context.Context, _ *mcp.CallToolReques
 	if s.batches == nil {
 		s.batches = make(map[string]pendingBatchCuration)
 	}
+	ids := make([]string, len(preview.Items))
+	for index, item := range preview.Items {
+		ids[index] = item.ProposalID
+	}
+	s.invalidatePendingLocked(ids)
 	s.batches[response.PreviewToken] = pendingBatchCuration{Preview: preview, EvidenceHashes: hashes}
 	s.curatorMu.Unlock()
 	return nil, curationBatchPreviewResponse{SchemaVersion: 1, Data: &response}, nil
@@ -491,10 +579,43 @@ func (s *Server) applyCurationBatch(ctx context.Context, _ *mcp.CallToolRequest,
 	return nil, curationBatchApplyResponse{SchemaVersion: 1, Data: &result}, nil
 }
 
+func proposalIDs(preview curation.Preview) []string {
+	return []string{preview.ProposalID}
+}
+
+// invalidatePendingLocked drops every pending single or batch token that
+// contains any of the given proposals. A newer preview supersedes older ones
+// for the same proposal. The caller must hold s.curatorMu.
+func (s *Server) invalidatePendingLocked(ids []string) {
+	shared := func(other ...string) bool {
+		for _, id := range other {
+			for _, candidate := range ids {
+				if id == candidate {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	for token, pending := range s.previews {
+		if shared(pending.Preview.ProposalID) {
+			delete(s.previews, token)
+		}
+	}
+	for token, pending := range s.batches {
+		for _, item := range pending.Preview.Items {
+			if shared(item.ProposalID) {
+				delete(s.batches, token)
+				break
+			}
+		}
+	}
+}
+
 func curationRequest(input previewCurationInput) curation.PreviewRequest {
 	return curation.PreviewRequest{
 		Operation: curation.Operation(input.Operation), ProposalID: input.ProposalID, TargetPath: input.TargetPath,
-		SectionID: input.SectionID, ContentHash: input.ContentHash, Heading: input.Heading, Replacement: input.Replacement, Reason: curation.DiscardReason(input.Reason),
+		SectionID: input.SectionID, ContentHash: input.ContentHash, Heading: input.Heading, Replacement: input.Replacement, FoldInto: input.FoldInto, Reason: curation.DiscardReason(input.Reason),
 	}
 }
 

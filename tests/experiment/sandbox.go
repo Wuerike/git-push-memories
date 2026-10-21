@@ -86,7 +86,7 @@ func buildSessionPlan(spec sessionSpec) (sessionPlan, error) {
 	case "curation":
 		plan.AllowedTools = []string{
 			"Read", "Grep", "Glob", "mcp__git-push-memories__memory_search", "mcp__git-push-memories__memory_expand",
-			"mcp__git-push-memories__memory_reference_snapshot", "mcp__git-push-memories__memory_reference_expand", "mcp__git-push-memories__memory_proposal_list",
+			"mcp__git-push-memories__memory_page_read", "mcp__git-push-memories__memory_reference_snapshot", "mcp__git-push-memories__memory_reference_expand", "mcp__git-push-memories__memory_proposal_list",
 			"mcp__git-push-memories__memory_curate_preview", "mcp__git-push-memories__memory_curate_apply",
 			"mcp__git-push-memories__memory_curate_batch_preview", "mcp__git-push-memories__memory_curate_batch_apply",
 		}

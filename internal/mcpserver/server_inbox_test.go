@@ -1879,3 +1879,82 @@ func gitOutput(t *testing.T, root string, arguments ...string) string {
 	}
 	return strings.TrimSpace(string(output))
 }
+
+type pageReadResponse struct {
+	Data *struct {
+		Path        string `json:"path"`
+		ContentHash string `json:"content_hash"`
+		Markdown    string `json:"markdown"`
+	} `json:"data"`
+	Error *struct {
+		Code string `json:"code"`
+	} `json:"error"`
+}
+
+func callPageRead(t *testing.T, session *mcp.ClientSession, path string, budget int) (*mcp.CallToolResult, pageReadResponse) {
+	t.Helper()
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name: "memory_page_read", Arguments: map[string]any{"path": path, "budget_bytes": budget},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded pageReadResponse
+	decodeStructured(t, result, &decoded)
+	return result, decoded
+}
+
+func TestToolListIncludesPageRead(t *testing.T) {
+	session, stop := startServer(t, newGitRoot(t, nil), filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	tools, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tool := range tools.Tools {
+		if tool.Name == "memory_page_read" {
+			return
+		}
+	}
+	t.Fatal("memory_page_read missing from tool list")
+}
+
+func TestPageReadToolReturnsWholePage(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	result, response := callPageRead(t, session, "memories/domains/checkout-api.md", 4096)
+	if result.IsError || response.Data == nil || response.Data.Markdown != memoryPage || response.Data.Path != "memories/domains/checkout-api.md" || !strings.HasPrefix(response.Data.ContentHash, "sha256:") {
+		t.Fatalf("memory_page_read result = %+v, response = %+v", result, response)
+	}
+}
+
+func TestPageReadToolFailsWhenPageExceedsBudget(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	result, response := callPageRead(t, session, "memories/domains/checkout-api.md", len(memoryPage))
+	if !result.IsError || response.Error == nil || response.Error.Code != "budget_too_small" || response.Data != nil {
+		t.Fatalf("oversized result = %+v, response = %+v", result, response)
+	}
+}
+
+func TestPageReadToolRejectsInvalidRequests(t *testing.T) {
+	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage, "memories/notes/fact.md": memoryPage})
+	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
+	defer stop()
+	for _, test := range []struct {
+		path   string
+		budget int
+		code   string
+	}{
+		{"memories/notes/fact.md", 4096, "invalid_path"},
+		{"memories/domains/missing.md", 4096, "invalid_path"},
+		{"memories/domains/checkout-api.md", 0, "invalid_budget"},
+	} {
+		result, response := callPageRead(t, session, test.path, test.budget)
+		if !result.IsError || response.Error == nil || response.Error.Code != test.code || response.Data != nil {
+			t.Fatalf("%+v result = %+v, response = %+v", test, result, response)
+		}
+	}
+}

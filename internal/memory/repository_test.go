@@ -676,7 +676,9 @@ func openRepository(t *testing.T, root string) *memory.Repository {
 
 func runGit(t *testing.T, root string, args ...string) {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, args...)...)
+	// Auto maintenance would run detached after a commit and touch .git while a
+	// test fingerprints the root.
+	command := exec.Command("git", append([]string{"-C", root, "-c", "maintenance.auto=false"}, args...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
 	}

@@ -31,3 +31,11 @@ _Avoid_: Receipt, transaction log
 **Curation recovery**:
 Deterministic reconciliation of an interrupted curation transaction to either its complete commit or its unchanged baseline.
 _Avoid_: Retry commit, automatic merge
+
+**Page rewrite**:
+Full replacement of an existing canonical page, bound to the hash of the file the reviewer observed.
+_Avoid_: Page edit, overwrite, section replace
+
+**Folded proposal**:
+A proposal consumed by a page rewrite in the same curation transaction, with no canonical change of its own.
+_Avoid_: Merged proposal, duplicate, silent discard

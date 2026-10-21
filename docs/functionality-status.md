@@ -1,6 +1,6 @@
 # Estado das funcionalidades
 
-Atualizado em 2026-09-11.
+Atualizado em 2026-10-20.
 
 Este documento descreve o comportamento exposto pela implementacao atual. Os documentos em `docs/phase-1/` e `docs/phase-2/` preservam decisoes, protocolos e evidencias dos fluxos avaliados naquelas fases; eles nao substituem este inventario operacional.
 
@@ -17,7 +17,7 @@ Os estados usados sao:
 - **Consultar memoria canonica** pela CLI ou pelo MCP, com busca textual, escopo por categoria, subdiretorio ou arquivo e expansao de resultados por handle.
 - **Propor conhecimento com `/remember <fato>`**, sugerindo criacao, atualizacao ou remocao. A confirmacao gera uma proposta commitada no inbox para curadoria posterior; uma proposta byte-identica existente e reutilizada.
 - **Revisar referencias de fonte imutaveis**, consultando trechos dos arquivos commitados e avaliando separadamente sua integridade e se o conteudo sustenta o conhecimento proposto.
-- **Curar de uma a dezesseis propostas com `/curate [proposal-id ...]`**, criando paginas ou secoes, substituindo o corpo de secoes folha e removendo secoes ou paginas elegiveis. O diff confirmado e publicado em um unico commit, com targets distintos no lote.
+- **Curar de uma a dezesseis propostas com `/curate [proposal-id ...]`**, criando paginas ou secoes, substituindo o corpo de secoes folha e removendo secoes ou paginas elegiveis. O diff confirmado e publicado em um unico commit, com targets distintos no lote, exceto propostas absorvidas por fold.
 - **Descartar propostas com motivo registrado ou manter alguma pendente no lote**, enquanto outras decisoes sao aplicadas. `keep_pending` exige pelo menos uma outra decisao que produza commit.
 - **Recuperar a memoria resultante em sessoes futuras e revisar seu historico pelo Git**. O envio e a atualizacao entre clones usam o fluxo Git conduzido pela pessoa.
 
@@ -81,10 +81,11 @@ git -C /caminho/para/repositorio-de-memoria push
 | `memory_reference_snapshot` | **Implementado.** | Produz referencias imutaveis a blobs commitados e vincula transitoriamente um checkout local, sem retornar ou persistir seu root. |
 | `memory_reference_expand` | **Implementado.** | Retorna linhas limitadas do blob UTF-8 identificado para revisao sem persistir o conteudo. |
 | `memory_propose` | **Implementado.** | Valida, grava e commita uma proposta Markdown; payload canonico byte-identico retorna a proposta existente com `duplicate: true` sem novo commit. |
+| `memory_page_read` | **Implementado.** | Le uma pagina canonica inteira com `content_hash`, ou retorna `budget_too_small`; nunca devolve a pagina truncada. Base do `rewrite_page`. |
 | `memory_proposal_list` | **Implementado.** | Revalida schema e privacidade antes de listar propostas commitadas e categorias configuradas, sem criar estado privado ou alterar o repositorio. |
 | `memory_curate_preview` | **Implementado.** | Gera sem escrita o diff e evidencia separada em candidatos canonicos e propostas relacionadas, no mesmo `HEAD`. |
 | `memory_curate_apply` | **Implementado para destinos individuais.** | Consome uma vez um preview do mesmo processo, revalida drift e cria o commit exato de consumo ou descarte. |
-| `memory_curate_batch_preview` | **Implementado.** | Revisa de uma a dezesseis decisoes independentes com proposal IDs e targets distintos; `keep_pending` preserva uma selecao ainda nao resolvida quando o lote possui outra decisao. |
+| `memory_curate_batch_preview` | **Implementado.** | Revisa de uma a dezesseis decisoes com proposal IDs distintos e targets distintos (exceto `fold_proposal`, que aponta para a decisao dona da pagina no mesmo lote); `keep_pending` preserva uma selecao ainda nao resolvida quando o lote possui outra decisao. |
 | `memory_curate_batch_apply` | **Implementado.** | Revalida o lote e publica todas as decisoes em um unico commit recuperavel. |
 | Tools legadas `memory_propose_create_*` e `proposal_apply/publish` | **Removido.** | O lifecycle anterior continua ausente; a curadoria atual usa preview single-use e um commit do inbox para o canônico. |
 
@@ -174,8 +175,13 @@ git -C /caminho/para/repositorio-de-memoria push
 | Criacao de secao canonica | **Implementado.** Uma proposta `create` pode acrescentar uma secao H2 com ID derivado a uma pagina existente. |
 | Atualizacao de secao canonica | **Implementado.** Uma proposta `update` pode substituir somente o corpo completo de uma secao folha identificada e vinculada ao content hash observado. |
 | Remocao de memoria canonica | **Implementado para destinos individuais.** `remove_section` exclui uma secao folha identificada; `remove_page` aceita somente a forma exata de uma pagina gerada com uma unica secao `Overview`. Nao ha cascade delete ou reparo de links. |
-| Consumo atomico de propostas | **Implementado para lotes limitados.** `create`, `update`, `remove` e descarte podem consumir de uma a dezesseis propostas em um unico commit; targets repetidos sao rejeitados. |
+| Consumo atomico de propostas | **Implementado para lotes limitados.** `create`, `update`, `remove` e descarte podem consumir de uma a dezesseis propostas em um unico commit; targets repetidos sao rejeitados, exceto via fold (`fold_proposal`). |
 | Proposta mantida pendente | **Implementado em lote.** `keep_pending` preserva a proposta byte-identica no inbox enquanto outras decisoes sao aplicadas. Um lote composto somente por decisoes `keep_pending` e rejeitado. |
+| Reescrita de pagina (`rewrite_page`) | **Implementado.** Substitui a pagina canonica inteira, vinculada ao `content_hash` de `memory_page_read`. O servidor gera IDs dos headings novos, preserva o frontmatter do baseline e nunca apaga a pagina (isso continua sendo `remove_page`). Aceita propostas de qualquer acao sugerida. |
+| Proposta absorvida (`fold_proposal`) | **Implementado so em lote.** Consome uma proposta extra na mesma transacao, sem mudanca canonica propria; `fold_into` aponta para um `rewrite_page` ou um `create_page` com `replacement` do mesmo lote. O preview individual a rejeita. |
+| Criacao de pagina completa (`create_page` com `replacement`) | **Implementado.** `create_page` aceita opcionalmente a pagina completa (H1 e secoes, sem frontmatter nem `@id`), o que permite criar uma pagina nova a partir de duas ou mais propostas em uma unica execucao. |
+| Agrupamento e revisao iterativa no `/curate` | **Implementado no contrato da skill.** O inbox e agrupado por assunto ou pagina com aprovacao do usuario; cada pagina tem plano com ledger de fatos; o diff aparece no corpo da mensagem e ajustes geram novos previews na mesma execucao. Validacao manual pelo protocolo [t11](phase-3/t11-page-restructuring.md) pendente (nao executada). |
+| Invalidacao de tokens (A8) | **Implementado.** Um novo preview para uma proposta invalida tokens anteriores que a contenham, individuais ou em lote; um preview que falha preserva os tokens existentes. |
 | Recovery de curadoria | **Implementado.** Marcador privado sem conteudo e indice reconciliado convergem para baseline antes de `update-ref` ou para o mesmo commit completo depois dele; lock estrangeiro nunca e removido. |
 | Descarte auditavel | **Implementado.** Remove somente a proposta e registra decisao e reason code fechado no commit Git. |
 | Duplicidade e contradicao | **Parcial e observavel.** Dedupe exato bloqueia publicacao repetida; preview separa candidatos canonicos e propostas relacionadas; `/curate` classifica equivalencia ou contradicao como avaliacao assistida e exige escolha humana. Nao ha detector semantico completo. |

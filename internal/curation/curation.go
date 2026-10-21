@@ -44,6 +44,8 @@ const (
 	OperationRemovePage     Operation = "remove_page"
 	OperationDiscard        Operation = "discard_proposal"
 	OperationKeepPending    Operation = "keep_pending"
+	OperationRewritePage    Operation = "rewrite_page"
+	OperationFoldProposal   Operation = "fold_proposal"
 )
 
 type DiscardReason string
@@ -104,6 +106,7 @@ type PreviewRequest struct {
 	Heading     string
 	Replacement string
 	Reason      DiscardReason
+	FoldInto    string
 }
 
 type Preview struct {
@@ -121,6 +124,7 @@ type Preview struct {
 	Heading          string                `json:"heading,omitempty"`
 	Replacement      string                `json:"replacement,omitempty"`
 	Reason           DiscardReason         `json:"reason,omitempty"`
+	FoldInto         string                `json:"fold_into,omitempty"`
 	Diff             string                `json:"diff"`
 
 	head          string
@@ -311,12 +315,41 @@ func utf8Excerpt(value string, limit int) (string, bool) {
 	return value[:end], true
 }
 
+// Preview previews a single decision. A fold_proposal only exists inside a batch,
+// next to the rewrite_page or create_page with replacement it folds into, so it
+// is rejected here.
 func (curator *Curator) Preview(ctx context.Context, request PreviewRequest) (Preview, error) {
+	if request.Operation == OperationFoldProposal {
+		return Preview{}, ErrInvalidBatch
+	}
+	return curator.previewOne(ctx, request)
+}
+
+func (curator *Curator) previewOne(ctx context.Context, request PreviewRequest) (Preview, error) {
 	snapshot, err := curator.inbox.Read(ctx, request.ProposalID)
 	if err != nil {
 		return Preview{}, err
 	}
 	return curator.preview(ctx, snapshot, request)
+}
+
+// validFolds reports whether every fold_proposal in the batch folds into another
+// item of the same batch that writes a complete page: a rewrite_page, or a
+// create_page carrying a replacement.
+func validFolds(requests []PreviewRequest) bool {
+	targets := make(map[string]bool, len(requests))
+	for _, request := range requests {
+		targets[request.ProposalID] = request.Operation == OperationRewritePage || request.Operation == OperationCreatePage && request.Replacement != ""
+	}
+	for _, request := range requests {
+		if request.Operation != OperationFoldProposal {
+			continue
+		}
+		if request.FoldInto == request.ProposalID || !targets[request.FoldInto] {
+			return false
+		}
+	}
+	return true
 }
 
 func (curator *Curator) PreviewBatch(ctx context.Context, requests []PreviewRequest) (BatchPreview, error) {
@@ -338,7 +371,12 @@ func (curator *Curator) PreviewBatch(ctx context.Context, requests []PreviewRequ
 			}
 			targets[request.TargetPath] = struct{}{}
 		}
-		preview, err := curator.Preview(ctx, request)
+	}
+	if !validFolds(requests) {
+		return BatchPreview{}, ErrInvalidBatch
+	}
+	for _, request := range requests {
+		preview, err := curator.previewOne(ctx, request)
 		if err != nil {
 			return BatchPreview{}, err
 		}
@@ -370,7 +408,10 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 	if operation != OperationDiscard && request.Reason != "" {
 		return Preview{}, memory.ErrInvalidPath
 	}
-	if operation != OperationDiscard && operation != OperationKeepPending && !curator.cfg.IsMemoryPath(targetPath) {
+	if operation != OperationFoldProposal && request.FoldInto != "" {
+		return Preview{}, memory.ErrInvalidPath
+	}
+	if operation != OperationDiscard && operation != OperationKeepPending && operation != OperationFoldProposal && !curator.cfg.IsMemoryPath(targetPath) {
 		return Preview{}, memory.ErrInvalidPath
 	}
 	if err := curator.inbox.Confirm(ctx, snapshot); err != nil {
@@ -382,16 +423,21 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 	preview := Preview{
 		Operation: operation, ProposalID: snapshot.Proposal.ID, ProposalPath: snapshot.Proposal.Path, Title: snapshot.Proposal.Title,
 		Action: snapshot.Proposal.SuggestedAction, Knowledge: snapshot.Proposal.Knowledge, SourcePaths: append([]string{}, snapshot.Proposal.SourcePaths...), SourceReferences: append([]reference.Reference(nil), snapshot.Proposal.SourceReferences...),
-		TargetPath: targetPath, ContentHash: request.ContentHash, Heading: heading, Replacement: request.Replacement, Reason: request.Reason, proposal: snapshot, request: request,
+		TargetPath: targetPath, ContentHash: request.ContentHash, Heading: heading, Replacement: request.Replacement, Reason: request.Reason, FoldInto: request.FoldInto, proposal: snapshot, request: request,
 	}
 	var targetDiff string
 	switch operation {
 	case OperationCreatePage:
-		if sectionID != "" || request.ContentHash != "" || heading != "" || request.Replacement != "" || !memory.IsCreatePagePath(targetPath) {
+		if sectionID != "" || request.ContentHash != "" || heading != "" || !memory.IsCreatePagePath(targetPath) {
 			return Preview{}, memory.ErrInvalidPath
 		}
+		if request.Replacement != "" {
+			if err := curator.inspectKnowledge(snapshot.Proposal, request.Replacement); err != nil {
+				return Preview{}, err
+			}
+		}
 		page, err := curator.repository.PreviewCreatePage(ctx, memory.CreatePageRequest{
-			TargetPath: targetPath, Title: snapshot.Proposal.Title, Body: snapshot.Proposal.Knowledge,
+			TargetPath: targetPath, Title: snapshot.Proposal.Title, Body: snapshot.Proposal.Knowledge, Replacement: request.Replacement,
 		})
 		if err != nil {
 			return Preview{}, err
@@ -454,6 +500,35 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 		preview.postStateHash = replacement.PostStateHash
 		preview.postState = append([]byte(nil), replacement.PostState...)
 		targetDiff = replacement.Diff
+	case OperationRewritePage:
+		if sectionID != "" || request.ContentHash == "" || heading != "" || request.Replacement == "" {
+			return Preview{}, memory.ErrInvalidPath
+		}
+		if err := curator.inspectKnowledge(snapshot.Proposal, request.Replacement); err != nil {
+			return Preview{}, err
+		}
+		rewrite, err := curator.repository.PreviewRewritePage(ctx, memory.RewritePageRequest{
+			TargetPath: targetPath, ContentHash: request.ContentHash, Replacement: request.Replacement,
+		})
+		if err != nil {
+			return Preview{}, err
+		}
+		if rewrite.SectionHash != request.ContentHash {
+			return Preview{}, ErrDrift
+		}
+		preview.SectionID = rewrite.Target.SectionID
+		mode, blob, err := curator.treeEntry(ctx, rewrite.Head, targetPath)
+		if err != nil || blob != rewrite.Blob {
+			return Preview{}, ErrDrift
+		}
+		preview.gitMode = mode
+		preview.head = rewrite.Head
+		preview.baselineHash = rewrite.BaselineHash
+		preview.baselineBlob = rewrite.Blob
+		preview.baseline = append([]byte(nil), rewrite.Baseline...)
+		preview.postStateHash = rewrite.PostStateHash
+		preview.postState = append([]byte(nil), rewrite.PostState...)
+		targetDiff = rewrite.Diff
 	case OperationRemoveSection:
 		if sectionID == "" || request.ContentHash == "" || heading != "" || request.Replacement != "" {
 			return Preview{}, memory.ErrInvalidPath
@@ -508,6 +583,11 @@ func (curator *Curator) preview(ctx context.Context, snapshot inbox.Snapshot, re
 			return Preview{}, memory.ErrInvalidPath
 		}
 		preview.head = snapshot.Head
+	case OperationFoldProposal:
+		if request.FoldInto == "" || targetPath != "" || sectionID != "" || request.ContentHash != "" || heading != "" || request.Replacement != "" || request.Reason != "" {
+			return Preview{}, memory.ErrInvalidPath
+		}
+		preview.head = snapshot.Head
 	case OperationKeepPending:
 		if targetPath != "" || sectionID != "" || request.ContentHash != "" || heading != "" || request.Replacement != "" || request.Reason != "" {
 			return Preview{}, memory.ErrInvalidPath
@@ -537,6 +617,8 @@ func supports(operation Operation, action inbox.Action) bool {
 		return action == inbox.ActionUpdate
 	case OperationRemoveSection, OperationRemovePage:
 		return action == inbox.ActionRemove
+	case OperationRewritePage, OperationFoldProposal:
+		return action == inbox.ActionCreate || action == inbox.ActionUpdate || action == inbox.ActionRemove
 	case OperationDiscard, OperationKeepPending:
 		return true
 	default:
@@ -638,7 +720,7 @@ func (curator *Curator) revalidateBatch(ctx context.Context, expected BatchPrevi
 
 func samePreview(left, right Preview) bool {
 	return left.Operation == right.Operation && left.ProposalID == right.ProposalID && left.ProposalPath == right.ProposalPath && left.Title == right.Title && left.Action == right.Action && left.Knowledge == right.Knowledge &&
-		slices.Equal(left.SourcePaths, right.SourcePaths) && slices.Equal(left.SourceReferences, right.SourceReferences) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Reason == right.Reason && left.Diff == right.Diff &&
+		slices.Equal(left.SourcePaths, right.SourcePaths) && slices.Equal(left.SourceReferences, right.SourceReferences) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Reason == right.Reason && left.FoldInto == right.FoldInto && left.Diff == right.Diff &&
 		left.Heading == right.Heading && left.head == right.head && left.gitMode == right.gitMode && left.fileMode == right.fileMode && left.baselineHash == right.baselineHash && left.baselineBlob == right.baselineBlob && bytes.Equal(left.baseline, right.baseline) &&
 		left.postStateHash == right.postStateHash && bytes.Equal(left.postState, right.postState) &&
 		left.proposal.Head == right.proposal.Head && left.proposal.Blob == right.proposal.Blob && bytes.Equal(left.proposal.Contents, right.proposal.Contents) && left.request == right.request

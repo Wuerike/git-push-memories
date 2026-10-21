@@ -285,7 +285,7 @@ func (repository *Repository) PreviewCreatePage(ctx context.Context, request Cre
 		if err != nil {
 			return err
 		}
-		postState, err := renderPage(pageID, request.Title, request.Body)
+		postState, sectionID, err := renderCreatePage(pageID, request)
 		if err != nil {
 			return err
 		}
@@ -297,7 +297,7 @@ func (repository *Repository) PreviewCreatePage(ctx context.Context, request Cre
 			return ErrTargetDirty
 		}
 		preview = CreatePagePreview{
-			Target: Target{Path: targetPath, SectionID: pageID + "-overview"}, PageID: pageID,
+			Target: Target{Path: targetPath, SectionID: sectionID}, PageID: pageID,
 			PostStateHash: hash(postState), Head: head, PostState: postState, Diff: unifieddiff.Create(targetPath, postState),
 		}
 		return nil
@@ -317,7 +317,7 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 		if err != nil {
 			return err
 		}
-		postState, err := renderPage(pageID, request.Title, request.Body)
+		postState, sectionID, err := renderCreatePage(pageID, request.CreatePageRequest)
 		if err != nil || hash(postState) != request.PostStateHash {
 			return ErrDrift
 		}
@@ -330,7 +330,7 @@ func (repository *Repository) ReconcileCreatePage(ctx context.Context, request R
 		if err != nil || head != request.Head {
 			return ErrDrift
 		}
-		result = ReconcileResult{Target: Target{Path: targetPath, SectionID: pageID + "-overview"}, PostState: postState}
+		result = ReconcileResult{Target: Target{Path: targetPath, SectionID: sectionID}, PostState: postState}
 		var stat unix.Stat_t
 		statErr := unix.Fstatat(int(repository.root.Fd()), targetPath, &stat, unix.AT_SYMLINK_NOFOLLOW)
 		if statErr == nil {
@@ -518,7 +518,13 @@ func validateCreatePageRequest(request CreatePageRequest) (string, string, error
 	if _, reserved := reservedPageNames[pageID]; reserved {
 		return "", "", ErrInvalidPath
 	}
-	if len(pageID) > 64 || len(pageID+"-overview") > 64 {
+	if len(pageID) > 64 {
+		return "", "", ErrGeneratedIDTooLong
+	}
+	if request.Replacement != "" {
+		return request.TargetPath, pageID, nil
+	}
+	if len(pageID+"-overview") > 64 {
 		return "", "", ErrGeneratedIDTooLong
 	}
 	if request.Title == "" || len(request.Title) > 256 || !utf8.ValidString(request.Title) || hasDisallowedControl(request.Title, false) || strings.ContainsAny(request.Title, "\r\n") ||
@@ -530,6 +536,17 @@ func validateCreatePageRequest(request CreatePageRequest) (string, string, error
 		return "", "", fmt.Errorf("%w: page title contains heading", ErrInvalidSchema)
 	}
 	return request.TargetPath, pageID, nil
+}
+
+// renderCreatePage renders the post-state of a new page and the section it targets:
+// the page itself for a complete replacement, otherwise its generated Overview.
+func renderCreatePage(pageID string, request CreatePageRequest) ([]byte, string, error) {
+	if request.Replacement != "" {
+		postState, err := composePage(request.TargetPath, request.Replacement)
+		return postState, pageID, err
+	}
+	postState, err := renderPage(pageID, request.Title, request.Body)
+	return postState, pageID + "-overview", err
 }
 
 func renderPage(pageID, title, body string) ([]byte, error) {

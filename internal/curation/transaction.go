@@ -550,7 +550,7 @@ func (curator *Curator) applyWorktree(ctx context.Context, preview Preview) erro
 	switch preview.Operation {
 	case OperationCreatePage:
 		result, err = curator.repository.ReconcileCreatePage(ctx, memory.ReconcileCreatePageRequest{
-			CreatePageRequest: memory.CreatePageRequest{TargetPath: preview.TargetPath, Title: preview.Title, Body: preview.proposal.Proposal.Knowledge},
+			CreatePageRequest: memory.CreatePageRequest{TargetPath: preview.TargetPath, Title: preview.Title, Body: preview.proposal.Proposal.Knowledge, Replacement: preview.Replacement},
 			PostStateHash:     preview.postStateHash, Head: preview.head, Preflight: preflight, Validate: validate, Mode: memory.ApplyBaseline,
 		})
 	case OperationCreateSection:
@@ -599,6 +599,21 @@ func (curator *Curator) applyWorktree(ctx context.Context, preview Preview) erro
 			}, Mode: memory.ApplyBaseline,
 		})
 	case OperationDiscard:
+		if err = preflight(); err == nil {
+			result.State = memory.ReconcilePostState
+		}
+	case OperationRewritePage:
+		result, err = curator.repository.ReconcileRewritePage(ctx, memory.ReconcileRewritePageRequest{
+			RewritePageRequest: memory.RewritePageRequest{TargetPath: preview.TargetPath, ContentHash: preview.ContentHash, Replacement: preview.Replacement},
+			BaselineHash:       preview.baselineHash, PostStateHash: preview.postStateHash, Head: preview.head, Blob: preview.baselineBlob,
+			Preflight: preflight, Validate: func(baseline, postState []byte) error {
+				if !bytes.Equal(baseline, preview.baseline) {
+					return ErrDrift
+				}
+				return validate(postState)
+			}, Mode: memory.ApplyBaseline,
+		})
+	case OperationFoldProposal:
 		if err = preflight(); err == nil {
 			result.State = memory.ReconcilePostState
 		}
@@ -845,7 +860,8 @@ func (curator *Curator) readTransactionMarker() (transactionMarker, error) {
 		proposalIDs[item.ProposalID] = struct{}{}
 		validDiscard := item.Operation == OperationDiscard && item.Decision == "discarded" && validDiscardReason(item.Reason) && item.TargetPath == "" && !item.BaselineExists && !item.PostStateExists
 		validPending := item.Operation == OperationKeepPending && item.Decision == "pending" && item.Reason == "" && item.TargetPath == "" && item.SectionID == "" && !item.BaselineExists && !item.PostStateExists
-		validOperation := item.Operation == OperationCreatePage || item.Operation == OperationCreateSection || item.Operation == OperationReplaceSection || item.Operation == OperationRemoveSection || item.Operation == OperationRemovePage
+		validFold := item.Operation == OperationFoldProposal && item.Decision == "consumed" && item.Reason == "" && item.TargetPath == "" && item.SectionID == "" && !item.BaselineExists && !item.PostStateExists
+		validOperation := item.Operation == OperationCreatePage || item.Operation == OperationCreateSection || item.Operation == OperationReplaceSection || item.Operation == OperationRemoveSection || item.Operation == OperationRemovePage || item.Operation == OperationRewritePage
 		validMutation := validOperation && item.Decision == "consumed" && item.Reason == "" && item.SectionID != "" && curator.cfg.IsMemoryPath(item.TargetPath) &&
 			item.BaselineExists == (item.Operation != OperationCreatePage) && item.PostStateExists == (item.Operation != OperationRemovePage)
 		_, duplicateTarget := targetPaths[item.TargetPath]
@@ -855,10 +871,10 @@ func (curator *Curator) readTransactionMarker() (transactionMarker, error) {
 		validBaseline := !item.BaselineExists && item.BaselineBlob == "" && item.BaselineHash == "" && item.BaselineMode == 0 ||
 			item.BaselineExists && validObjectID(item.BaselineBlob) && validContentHash(item.BaselineHash) && item.BaselineMode <= 0o777
 		validPostState := !item.PostStateExists && item.PostStateBlob == "" && item.PostStateGitMode == "" &&
-			((item.Operation == OperationDiscard || item.Operation == OperationKeepPending) && item.PostStateHash == "" || item.Operation == OperationRemovePage && item.PostStateHash == contentHash(nil)) ||
+			((item.Operation == OperationDiscard || item.Operation == OperationKeepPending || item.Operation == OperationFoldProposal) && item.PostStateHash == "" || item.Operation == OperationRemovePage && item.PostStateHash == contentHash(nil)) ||
 			item.PostStateExists && validObjectID(item.PostStateBlob) && validContentHash(item.PostStateHash) && (item.PostStateGitMode == "100644" || item.PostStateGitMode == "100755")
 		if !transactionIDPattern.MatchString(item.ProposalID) || !validProposalPath || duplicateProposal || duplicateTarget && item.TargetPath != "" ||
-			!validObjectID(item.ProposalBlob) || !validContentHash(item.ProposalHash) || !(validDiscard || validPending || validMutation) || !validBaseline || !validPostState {
+			!validObjectID(item.ProposalBlob) || !validContentHash(item.ProposalHash) || !(validDiscard || validPending || validFold || validMutation) || !validBaseline || !validPostState {
 			return marker, ErrRecovery
 		}
 	}
@@ -965,6 +981,7 @@ func transactionItemFromPreview(preview Preview) transactionItem {
 		item.Decision = "discarded"
 	case OperationKeepPending:
 		item.Decision = "pending"
+	case OperationFoldProposal:
 	default:
 		item.BaselineExists = preview.Operation != OperationCreatePage
 		item.BaselineBlob = preview.baselineBlob
@@ -984,15 +1001,15 @@ func transactionItemFromPreview(preview Preview) transactionItem {
 
 func batchPreviewHash(previews []Preview) string {
 	type digestItem struct {
-		Operation, ProposalID, ProposalPath, ProposalBlob, TargetPath, SectionID, ContentHash, Heading, Replacement, Reason string
-		Head, GitMode, BaselineHash, BaselineBlob, PostStateHash, ProposalHash, PostStateBytesHash, Diff                    string
+		Operation, ProposalID, ProposalPath, ProposalBlob, TargetPath, SectionID, ContentHash, Heading, Replacement, Reason, FoldInto string
+		Head, GitMode, BaselineHash, BaselineBlob, PostStateHash, ProposalHash, PostStateBytesHash, Diff                              string
 	}
 	items := make([]digestItem, len(previews))
 	for index, preview := range previews {
 		items[index] = digestItem{
 			Operation: string(preview.Operation), ProposalID: preview.ProposalID, ProposalPath: preview.ProposalPath, ProposalBlob: preview.proposal.Blob,
 			TargetPath: preview.TargetPath, SectionID: preview.SectionID, ContentHash: preview.ContentHash, Heading: preview.Heading,
-			Replacement: preview.Replacement, Reason: string(preview.Reason), Head: preview.head, GitMode: preview.gitMode,
+			Replacement: preview.Replacement, Reason: string(preview.Reason), FoldInto: preview.FoldInto, Head: preview.head, GitMode: preview.gitMode,
 			BaselineHash: preview.baselineHash, BaselineBlob: preview.baselineBlob, PostStateHash: preview.postStateHash,
 			ProposalHash: contentHash(preview.proposal.Contents), PostStateBytesHash: contentHash(preview.postState), Diff: preview.Diff,
 		}

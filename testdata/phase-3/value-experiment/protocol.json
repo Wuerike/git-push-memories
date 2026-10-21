@@ -215,7 +215,7 @@
   },
   "production_asset_hashes": {
     "integrations/claude-code/skills/remember/SKILL.md":"88ff5fb32476a2b2223737cda818ef6741bad611f4b01a0f1c38a2d62bf0dfff",
-    "integrations/claude-code/skills/curate/SKILL.md":"68ae9f965b378edc9263652254d4d3ba7958e69cb6ab26c41922cbc3dee09da5"
+    "integrations/claude-code/skills/curate/SKILL.md":"adfa232a96a6217c416d45347c5fa799b331e1c24c0f497310ed8eba04c0e9ef"
   },
   "evidence": {
     "allowlist": ["protocol.json","preregistration.json","verification.tsv","curation-results.json","blind-evaluations.json","report.json","git-manifest.json","privacy-summary.json","checksums.sha256","ledger.json"],

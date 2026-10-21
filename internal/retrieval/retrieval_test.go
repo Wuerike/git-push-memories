@@ -431,7 +431,9 @@ func newMemoryRoot(t *testing.T, files map[string]string) string {
 
 func runGit(t *testing.T, root string, arguments ...string) {
 	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
+	// Auto maintenance would run detached after a commit and touch .git while a
+	// test fingerprints the root.
+	command := exec.Command("git", append([]string{"-C", root, "-c", "maintenance.auto=false"}, arguments...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v: %s", arguments, err, output)
 	}

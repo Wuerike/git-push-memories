@@ -254,3 +254,7 @@ A Fase 3 foi concluida no escopo revisado com os seguintes criterios tecnicos at
 - o fluxo compartilhado e o push humano estao documentados.
 
 O acompanhamento passa a ocorrer pelo uso real. A retomada do desenvolvimento e o escopo das proximas fases dependerao de novas demandas do usuario.
+
+## Extensao pos-uso (2026-10-20)
+
+O uso real mostrou paginas acumulando secoes, uma por proposta. O `/curate` ganhou reescrita de pagina inteira, propostas absorvidas (`fold_proposal`), criacao de pagina completa e agrupamento do inbox com revisao iterativa; ver a [ADR 0007](../adr/0007-page-rewrite-and-folded-proposals.md) e o protocolo de aceitacao [t11](t11-page-restructuring.md). T1-T8 e o gate de conclusao acima permanecem validos.

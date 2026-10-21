@@ -46,6 +46,13 @@ type Snapshot struct {
 	Sections []Section
 }
 
+// Page is one whole canonical page; ContentHash is the file hash used by Snapshot.FileHash.
+type Page struct {
+	Path        string
+	Markdown    string
+	ContentHash string
+}
+
 type ChangeSet struct {
 	Target       Target
 	BaselineHash string
@@ -80,6 +87,9 @@ type CreatePageRequest struct {
 	TargetPath string
 	Title      string
 	Body       string
+	// Replacement, when not empty, is the complete page Markdown; Title and Body
+	// are then ignored and the page follows the rewrite rules with an empty baseline.
+	Replacement string
 }
 
 type CreatePagePreview struct {
@@ -154,6 +164,23 @@ type ReconcileRemovePageRequest struct {
 type ReconcileRequest struct {
 	Target        Target
 	Replacement   string
+	BaselineHash  string
+	PostStateHash string
+	Head          string
+	Blob          string
+	Preflight     func() error
+	Validate      func(baseline, postState []byte) error
+	Mode          ReconcileMode
+}
+
+type RewritePageRequest struct {
+	TargetPath  string
+	ContentHash string
+	Replacement string
+}
+
+type ReconcileRewritePageRequest struct {
+	RewritePageRequest
 	BaselineHash  string
 	PostStateHash string
 	Head          string
