@@ -116,7 +116,7 @@ Qualquer cópia substancial deve manter o aviso MIT e ter origem e versão regis
 2. Classificar o `claude-bedrock` como referência e possível fonte de componentes pontuais, não como base para fork.
 3. Validar primeiro captura explícita, proposta temporária, consolidação do estado atual, revisão Git e recuperação em outra sessão.
 4. Usar corpus sintético ou projetos públicos no desenvolvimento e nos testes do projeto open source.
-5. Registrar em ADR qualquer componente MIT incorporado e preservar os avisos exigidos.
+5. Registrar qualquer componente MIT incorporado e preservar os avisos exigidos.
 6. Escolher uma licença para o `git-push-memories`, que ainda não possui um arquivo `LICENSE`.
 
 ## Fontes públicas

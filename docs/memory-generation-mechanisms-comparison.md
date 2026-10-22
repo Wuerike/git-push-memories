@@ -15,7 +15,7 @@
 
 ## Escopo e método
 
-Foram analisados os sete projetos formalmente classificados como referências na ADR 0001, além do projeto atual:
+Foram analisados os sete projetos classificados como referências, além do projeto atual:
 
 - `git-push-memories`;
 - `basic-memory`;

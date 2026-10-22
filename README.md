@@ -104,15 +104,9 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 - [Comparação dos mecanismos de geração de memória](docs/memory-generation-mechanisms-comparison.md) — análise do pipeline atual e das sete referências, com implicações prováveis para a qualidade da memória.
 - [Aderência do claude-bedrock](docs/bedrock-fit-analysis.md) — comparação entre o plugin público e o objetivo deste projeto.
 
-## Planejamento
-
-- [Roadmap](docs/roadmap.md) — sequência de resultados, avaliações e decisões que orientará o desenvolvimento.
-
-A Fase 3 foi concluída no escopo técnico de T1–T8. Por decisão do usuário, T9/T10 de avaliação experimental foram retiradas do plano. O foco atual é usar a ferramenta no trabalho e definir novos desenvolvimentos a partir desse uso.
-
 ## Desenvolvimento
 
-O walking skeleton da Fase 2 requer Go 1.25.0 ou superior e fixa a toolchain Go 1.25.12. Para verificar o projeto:
+O projeto requer Go 1.25.0 ou superior e fixa a toolchain Go 1.25.12. Para verificar o projeto:
 
 ```bash
 make verify

@@ -2,7 +2,7 @@
 
 Atualizado em 2026-10-20.
 
-Este documento descreve o comportamento exposto pela implementacao atual. Os documentos das Fases 1 a 3 (avaliacoes, protocolos e planos) foram removidos da arvore e permanecem apenas no historico do Git; eles nao substituem este inventario operacional.
+Este documento descreve o comportamento exposto pela implementacao atual.
 
 Os estados usados sao:
 
@@ -50,15 +50,6 @@ Para revisar e enviar um commit local, use Git no repositorio de memoria:
 git -C /caminho/para/repositorio-de-memoria show --stat HEAD
 git -C /caminho/para/repositorio-de-memoria push
 ```
-
-## Estado das fases
-
-| Fase | Estado atual | Observacao |
-|---|---|---|
-| Fase 1: avaliacao de projetos | **Concluida.** | A ADR 0001 escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
-| Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
-| Transicao pos-Fase 2 | **Concluida.** | A ADR 0004 introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Concluida no escopo revisado.** | T1-T8 implementadas e verificadas. Por decisao do usuario em 2026-09-11, T9/T10 e o gate experimental foram retirados do plano. A prioridade passa a ser o uso da ferramenta; novos desenvolvimentos dependerao do feedback desse uso. |
 
 ## Superficie operacional
 
@@ -190,11 +181,10 @@ git -C /caminho/para/repositorio-de-memoria push
 | Sustentacao semantica | **Decisao humana assistida.** `supports`, `contradicts` e `unclear` nao sao inferidos pelo verificador nem confundidos com integridade. |
 | Validacao por agentes | **Adiado.** Nenhum agente possui autoridade de curadoria. |
 | Pull request e politica de merge | **Adiado.** Revisao e push atuais usam Git comum, sem automacao remota. |
-| Avaliacao experimental de valor | **Retirada do escopo.** T9/T10 foram removidas do plano por decisao do usuario; os protocolos e tentativas permanecem como historico. O acompanhamento passa a ser pelo uso real da ferramenta. |
 
 ## Verificacao atual
 
-O E2E tecnico da Fase 3B usa o binario real e processos MCP separados para compor privacidade, referencias, dedupe, create, update, remove, discard, crash depois de `update-ref`, startup recovery e recuperacao final. `tests/e2e/run-phase-3.sh` produz evidencia sanitizada e executa as matrizes online-cache e offline.
+O E2E tecnico usa o binario real e processos MCP separados para compor privacidade, referencias, dedupe, create, update, remove, discard, crash depois de `update-ref`, startup recovery e recuperacao final. `tests/e2e/run-phase-3.sh` produz evidencia sanitizada e executa as matrizes online-cache e offline.
 
 `make verify` executa, em serie:
 
