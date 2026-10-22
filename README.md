@@ -119,7 +119,7 @@ Depois do primeiro download da toolchain e das dependências, `make verify-offli
 O primeiro release suporta Linux em `amd64` e `arm64`. A CLI pode ser instalada sem Go:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Wuerike/git-push-memories/master/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/Wuerike/git-push-memories/main/install.sh | sh
 ```
 
 Para instalar diretamente a partir de um clone do repositorio, com Go disponivel:

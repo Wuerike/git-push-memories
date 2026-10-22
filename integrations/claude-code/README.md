@@ -52,10 +52,11 @@ O servidor expoe:
 - `memory_expand`;
 - `memory_reference_snapshot`;
 - `memory_reference_expand`;
-- `memory_propose`.
+- `memory_page_read`;
+- `memory_propose`;
 - `memory_proposal_list`;
 - `memory_curate_preview`;
-- `memory_curate_apply`.
+- `memory_curate_apply`;
 - `memory_curate_batch_preview`;
 - `memory_curate_batch_apply`.
 
