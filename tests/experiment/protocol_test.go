@@ -114,6 +114,7 @@ func TestPhase3ValueV2ChangesOnlyRuntimeIdentity(t *testing.T) {
 	expected["experiment_id"] = "phase3-curated-memory-value-v2"
 	expected["environment"].(map[string]any)["git_version"] = "2.55.0"
 	expected["production_asset_hashes"].(map[string]any)["integrations/claude-code/skills/curate/SKILL.md"] = "adfa232a96a6217c416d45347c5fa799b331e1c24c0f497310ed8eba04c0e9ef"
+	expected["production_asset_hashes"].(map[string]any)["integrations/claude-code/skills/remember/SKILL.md"] = "f108d8be546e6a7049ff1c53e2471f91b0fbea2245956f828a1601e1dda3379f"
 	actual := decodeJSON[map[string]any](t, filepath.Join(root, "testdata/phase-3/value-experiment/protocol.json"))
 	want, _ := json.Marshal(expected)
 	got, _ := json.Marshal(actual)

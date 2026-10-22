@@ -162,6 +162,7 @@ git -C /caminho/para/repositorio-de-memoria push
 | Dedupe no `/remember` | **Implementado.** Resposta `duplicate: true` informa que ID, path e commit existentes foram reutilizados sem nova publicacao. |
 | `/curate` explicito | **Implementado para uma a dezesseis propostas.** Pesquisa memoria, escolhe operacoes de `create`, `update`, `remove` ou descarte e pode manter propostas pendentes em um lote com outra decisao. Gera preview individual ou em lote e exige confirmacao do diff antes do apply. |
 | Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
+| Interpretacao no `/remember` | **Implementado no contrato.** O skill identifica sujeito, escopo e forma, transforma fato sobre pessoa em conhecimento do time, avisa quando ha proposta pendente do mesmo sujeito (via `memory_proposal_list`) e sempre cria proposta nova; nunca altera uma existente. O aviso le o checkout. Protocolo de aceitacao em [T12](phase-3/t12-interpretive-remember.md), nao executado. |
 | Confirmacao humana | **Implementado no contrato.** Os campos exatos sao apresentados antes de uma unica chamada a `memory_propose`. |
 | Fallback seguro | **Implementado no contrato e nos harnesses.** Cancelamento, budget insuficiente, MCP ausente ou erro encerram o fluxo sem escrita alternativa. |
 | Captura automatica por hooks | **Adiado.** Nenhum hook de sessao e instalado. |
