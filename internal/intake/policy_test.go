@@ -10,7 +10,7 @@ import (
 )
 
 func TestCorpusMarkersCanBeInjectedWithoutEnteringProductionPolicy(t *testing.T) {
-	fixture, err := os.ReadFile("../../docs/phase-1/corpus/code-repo/private-markers.txt")
+	fixture, err := os.ReadFile("testdata/private-markers.txt")
 	if err != nil {
 		t.Fatal(err)
 	}

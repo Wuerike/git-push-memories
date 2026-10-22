@@ -107,7 +107,6 @@ Essas questões devem ser exploradas com cenários reais antes de serem transfor
 ## Planejamento
 
 - [Roadmap](docs/roadmap.md) — sequência de resultados, avaliações e decisões que orientará o desenvolvimento.
-- [Plano da Fase 3](docs/phase-3/plan.md) — tarefas, dependencias e gates da curadoria e confianca.
 
 A Fase 3 foi concluída no escopo técnico de T1–T8. Por decisão do usuário, T9/T10 de avaliação experimental foram retiradas do plano. O foco atual é usar a ferramenta no trabalho e definir novos desenvolvimentos a partir desse uso.
 
@@ -120,8 +119,6 @@ make verify
 ```
 
 Depois do primeiro download da toolchain e das dependências, `make verify-offline` repete a matriz sem acessar o proxy de módulos. Ambos os comandos impõem Go 1.25.12, inclusive quando outra versão está instalada localmente.
-
-Os documentos do [E2E sintetico da Fase 2](docs/phase-2/e2e-synthetic.md) e do [experimento controlado de valor](docs/phase-2/value-experiment-protocol.md) preservam evidencia historica do fluxo substituido pela ADR 0004. Os runners congelados foram removidos junto com o lifecycle antigo; o commit registrado em cada protocolo continua sendo o ponto reproduzivel.
 
 ## Instalacao
 

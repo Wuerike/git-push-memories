@@ -2,7 +2,7 @@
 
 Atualizado em 2026-10-20.
 
-Este documento descreve o comportamento exposto pela implementacao atual. Os documentos em `docs/phase-1/` e `docs/phase-2/` preservam decisoes, protocolos e evidencias dos fluxos avaliados naquelas fases; eles nao substituem este inventario operacional.
+Este documento descreve o comportamento exposto pela implementacao atual. Os documentos das Fases 1 a 3 (avaliacoes, protocolos e planos) foram removidos da arvore e permanecem apenas no historico do Git; eles nao substituem este inventario operacional.
 
 Os estados usados sao:
 
@@ -58,7 +58,7 @@ git -C /caminho/para/repositorio-de-memoria push
 | Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
 | Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
-| Fase 3: curadoria e confianca | **Concluida no escopo revisado.** | T1-T8 implementadas e verificadas. Por decisao do usuario em 2026-09-11, T9/T10 e o gate experimental foram retirados do [plano](phase-3/plan.md). A prioridade passa a ser o uso da ferramenta; novos desenvolvimentos dependerao do feedback desse uso. |
+| Fase 3: curadoria e confianca | **Concluida no escopo revisado.** | T1-T8 implementadas e verificadas. Por decisao do usuario em 2026-09-11, T9/T10 e o gate experimental foram retirados do plano. A prioridade passa a ser o uso da ferramenta; novos desenvolvimentos dependerao do feedback desse uso. |
 
 ## Superficie operacional
 
@@ -162,7 +162,7 @@ git -C /caminho/para/repositorio-de-memoria push
 | Dedupe no `/remember` | **Implementado.** Resposta `duplicate: true` informa que ID, path e commit existentes foram reutilizados sem nova publicacao. |
 | `/curate` explicito | **Implementado para uma a dezesseis propostas.** Pesquisa memoria, escolhe operacoes de `create`, `update`, `remove` ou descarte e pode manter propostas pendentes em um lote com outra decisao. Gera preview individual ou em lote e exige confirmacao do diff antes do apply. |
 | Pesquisa antes da proposta | **Implementado no contrato.** O skill pesquisa uma vez e expande ate tres resultados antes de preparar a proposta. |
-| Interpretacao no `/remember` | **Implementado no contrato.** O skill identifica sujeito, escopo e forma, transforma fato sobre pessoa em conhecimento do time, avisa quando ha proposta pendente do mesmo sujeito (via `memory_proposal_list`) e sempre cria proposta nova; nunca altera uma existente. O aviso le o checkout. Protocolo de aceitacao em [T12](phase-3/t12-interpretive-remember.md), nao executado. |
+| Interpretacao no `/remember` | **Implementado no contrato.** O skill identifica sujeito, escopo e forma, transforma fato sobre pessoa em conhecimento do time, avisa quando ha proposta pendente do mesmo sujeito (via `memory_proposal_list`) e sempre cria proposta nova; nunca altera uma existente. O aviso le o checkout. Protocolo de aceitacao em T12, nao executado. |
 | Confirmacao humana | **Implementado no contrato.** Os campos exatos sao apresentados antes de uma unica chamada a `memory_propose`. |
 | Fallback seguro | **Implementado no contrato e nos harnesses.** Cancelamento, budget insuficiente, MCP ausente ou erro encerram o fluxo sem escrita alternativa. |
 | Captura automatica por hooks | **Adiado.** Nenhum hook de sessao e instalado. |
@@ -181,7 +181,7 @@ git -C /caminho/para/repositorio-de-memoria push
 | Reescrita de pagina (`rewrite_page`) | **Implementado.** Substitui a pagina canonica inteira, vinculada ao `content_hash` de `memory_page_read`. O servidor gera IDs dos headings novos, preserva o frontmatter do baseline e nunca apaga a pagina (isso continua sendo `remove_page`). Aceita propostas de qualquer acao sugerida. |
 | Proposta absorvida (`fold_proposal`) | **Implementado so em lote.** Consome uma proposta extra na mesma transacao, sem mudanca canonica propria; `fold_into` aponta para um `rewrite_page` ou um `create_page` com `replacement` do mesmo lote. O preview individual a rejeita. |
 | Criacao de pagina completa (`create_page` com `replacement`) | **Implementado.** `create_page` aceita opcionalmente a pagina completa (H1 e secoes, sem frontmatter nem `@id`), o que permite criar uma pagina nova a partir de duas ou mais propostas em uma unica execucao. |
-| Agrupamento e revisao iterativa no `/curate` | **Implementado no contrato da skill.** O inbox e agrupado por assunto ou pagina com aprovacao do usuario; cada pagina tem plano com ledger de fatos; o diff aparece no corpo da mensagem e ajustes geram novos previews na mesma execucao. Validacao manual pelo protocolo [t11](phase-3/t11-page-restructuring.md) pendente (nao executada). |
+| Agrupamento e revisao iterativa no `/curate` | **Implementado no contrato da skill.** O inbox e agrupado por assunto ou pagina com aprovacao do usuario; cada pagina tem plano com ledger de fatos; o diff aparece no corpo da mensagem e ajustes geram novos previews na mesma execucao. Validacao manual pelo protocolo t11 pendente (nao executada). |
 | Invalidacao de tokens (A8) | **Implementado.** Um novo preview para uma proposta invalida tokens anteriores que a contenham, individuais ou em lote; um preview que falha preserva os tokens existentes. |
 | Recovery de curadoria | **Implementado.** Marcador privado sem conteudo e indice reconciliado convergem para baseline antes de `update-ref` ou para o mesmo commit completo depois dele; lock estrangeiro nunca e removido. |
 | Descarte auditavel | **Implementado.** Remove somente a proposta e registra decisao e reason code fechado no commit Git. |

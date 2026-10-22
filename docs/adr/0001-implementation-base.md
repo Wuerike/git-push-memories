@@ -10,7 +10,7 @@ O git-push-memories sera uma implementacao propria em Go, com Markdown e Git com
 
 O produto deve transformar conhecimento descoberto em uma sessao em estado atual revisavel e recuperavel por sessoes futuras. O primeiro ciclo deve funcionar localmente para um desenvolvedor, contra um repositorio de memoria ja clonado, sem backend obrigatorio e sem persistir sessoes, prompts ou respostas.
 
-As [avaliacoes da Fase 1](../phase-1/comparison-matrix.md) nao encontraram um candidato que atendesse ao fluxo completo. Todos falharam em privacidade antes da primeira persistencia e em nao persistir sessoes. O [mapa de capacidades](../phase-1/capability-map.md) tambem mostrou que combinar agent-memory e Palinode criaria duas identidades Markdown, dois parsers, dois modelos de operacao e dois ciclos de historico.
+As avaliacoes da Fase 1 nao encontraram um candidato que atendesse ao fluxo completo. Todos falharam em privacidade antes da primeira persistencia e em nao persistir sessoes. O mapa de capacidades da Fase 1 tambem mostrou que combinar agent-memory e Palinode criaria duas identidades Markdown, dois parsers, dois modelos de operacao e dois ciclos de historico.
 
 ## Decisao
 
@@ -73,10 +73,10 @@ O payload da proposta so e removido depois de um receipt terminal duravel. Rejei
 
 ## Evidencias determinantes
 
-- O [spike de roots do agent-memory](../phase-1/spikes/agent-memory-split-roots.md) demonstrou operacao offline, roots separados, edicao Markdown, concorrencia, drift e reconstrucao, mas precisou corrigir cold start, IDs de staging e perda de atualizacao.
+- O spike de roots do agent-memory demonstrou operacao offline, roots separados, edicao Markdown, concorrencia, drift e reconstrucao, mas precisou corrigir cold start, IDs de staging e perda de atualizacao.
 - O pacote Markdown do agent-memory opera por offsets e preserva bytes fora das secoes alteradas. Ele e menor e mais isolado que a orquestracao, o staging, o indice e a integracao Git do candidato.
-- O [spike Palinode](../phase-1/spikes/palinode-offline-extraction.md) demonstrou primitivas de evidencia offline, mas a fatia nao e uma API estavel, depende de Python e exige adapter para remover integracoes do produto completo.
-- A [analise de licencas](../phase-1/licenses.md) permite adaptar o componente Apache-2.0 do agent-memory e Goldmark MIT mediante as obrigacoes de redistribuicao registradas abaixo. Basic Memory e twiceshy permanecem referencias sem copia porque suas condicoes AGPL sao incompativeis com reutilizacao direta mantendo a distribuicao do produto sob Apache-2.0 sem relicenciamento explicito.
+- O spike Palinode demonstrou primitivas de evidencia offline, mas a fatia nao e uma API estavel, depende de Python e exige adapter para remover integracoes do produto completo.
+- A analise de licencas da Fase 1 permite adaptar o componente Apache-2.0 do agent-memory e Goldmark MIT mediante as obrigacoes de redistribuicao registradas abaixo. Basic Memory e twiceshy permanecem referencias sem copia porque suas condicoes AGPL sao incompativeis com reutilizacao direta mantendo a distribuicao do produto sob Apache-2.0 sem relicenciamento explicito.
 - A busca textual e suficiente para o primeiro tracer bullet; FTS5 e sua closure nao possuem beneficio medido nesta fase.
 
 ## Capacidades por referencia

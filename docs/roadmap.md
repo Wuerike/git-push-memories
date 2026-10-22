@@ -105,7 +105,7 @@ A fase termina quando existir uma base escolhida ou uma justificativa explícita
 
 ## Fase 2: Fluxo vertical mínimo
 
-**Plano executável:** [Plano da Fase 2](phase-2/plan.md).
+**Plano executável:** removido da árvore; disponível no histórico do Git.
 
 **Estado em 2026-09-06:** T1-T10 concluidas com decisao `revisar o fluxo`; fase reaberta para bootstrap sem Markdown manual e Fase 3 bloqueada ate nova validacao de valor.
 
@@ -167,9 +167,9 @@ Essa mudança redefiniu o ponto de partida da Fase 3. O gate de valor da Fase 2 
 
 ## Fase 3: Curadoria e confiança
 
-**Plano executável:** [Plano da Fase 3](phase-3/plan.md).
+**Plano executável:** removido da árvore; disponível no histórico do Git.
 
-**Estado atual:** concluída no escopo revisado de T1–T8. O [E2E técnico](phase-3/t8-technical-e2e.md) compõe destinos, dedupe, conflitos, referências e recovery. Em 2026-09-11, o usuário retirou T9/T10 e o gate experimental do plano para retomar o uso da ferramenta; novos desenvolvimentos serão definidos a partir desse uso.
+**Estado atual:** concluída no escopo revisado de T1–T8. O E2E técnico compõe destinos, dedupe, conflitos, referências e recovery. Em 2026-09-11, o usuário retirou T9/T10 e o gate experimental do plano para retomar o uso da ferramenta; novos desenvolvimentos serão definidos a partir desse uso.
 
 ### Resultado esperado
 
@@ -254,7 +254,7 @@ proposta create no inbox
 
 ### Retomada do uso
 
-O incremento 3C e as tarefas T9/T10 de avaliação experimental foram retirados do escopo por decisão do usuário em 2026-09-11. Os [protocolos](phase-3/t9-value-evaluation-protocol.md) e o [relatório das tentativas](phase-3/t10-value-evaluation-report.md) são registros históricos, sem pendência de nova execução.
+O incremento 3C e as tarefas T9/T10 de avaliação experimental foram retirados do escopo por decisão do usuário em 2026-09-11. Os protocolos e o relatório das tentativas são registros históricos, sem pendência de nova execução.
 
 A prioridade passa a ser usar a ferramenta no trabalho e trazer necessidades concretas para futuros desenvolvimentos. A conclusão técnica da fase não é apresentada como comprovação experimental de valor.
 

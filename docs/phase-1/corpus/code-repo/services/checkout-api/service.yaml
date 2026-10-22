@@ -1,3 +1,0 @@
-service: checkout-api
-owner: team-b
-timeout_seconds: 3
