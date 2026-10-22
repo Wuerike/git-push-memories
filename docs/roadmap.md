@@ -101,7 +101,7 @@ Todo código reutilizado deve ter origem, versão e licença registradas. Inspir
 
 A fase termina quando existir uma base escolhida ou uma justificativa explícita para implementação própria, sem dúvidas críticas pendentes sobre licença ou compatibilidade arquitetural.
 
-**Estado em 2026-09-05:** fase concluida pela [ADR 0001](adr/0001-implementation-base.md), que escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory.
+**Estado em 2026-09-05:** fase concluida pela ADR 0001, que escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory.
 
 ## Fase 2: Fluxo vertical mínimo
 
@@ -146,7 +146,7 @@ A fase termina quando o fluxo partir de um memory root sem Markdown preparado e 
 
 ## Transição depois da Fase 2
 
-**Estado em 2026-09-09:** a decisão `revisar o fluxo` levou à substituição do lifecycle técnico da Fase 2 pela [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md). Os planos, protocolos e relatórios da Fase 2 continuam sendo registros históricos do fluxo que avaliaram; não descrevem a interface atual.
+**Estado em 2026-09-09:** a decisão `revisar o fluxo` levou à substituição do lifecycle técnico da Fase 2 pela ADR 0004. Os planos, protocolos e relatórios da Fase 2 continuam sendo registros históricos do fluxo que avaliaram; não descrevem a interface atual.
 
 A nova base mantém captura e curadoria separadas:
 

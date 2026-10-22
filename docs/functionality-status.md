@@ -55,9 +55,9 @@ git -C /caminho/para/repositorio-de-memoria push
 
 | Fase | Estado atual | Observacao |
 |---|---|---|
-| Fase 1: avaliacao de projetos | **Concluida.** | A [ADR 0001](adr/0001-implementation-base.md) escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
+| Fase 1: avaliacao de projetos | **Concluida.** | A ADR 0001 escolheu uma implementacao propria em Go com adaptacao seletiva do motor Markdown do agent-memory. |
 | Fase 2: fluxo vertical minimo | **Concluida como evidencia historica, com decisao `revisar o fluxo`.** | O lifecycle avaliado foi posteriormente substituido; seus resultados nao validam automaticamente o fluxo atual. |
-| Transicao pos-Fase 2 | **Concluida.** | A [ADR 0004](adr/0004-markdown-proposal-inbox-and-memory-categories.md) introduziu categorias configuradas e o inbox Markdown em `main`. |
+| Transicao pos-Fase 2 | **Concluida.** | A ADR 0004 introduziu categorias configuradas e o inbox Markdown em `main`. |
 | Fase 3: curadoria e confianca | **Concluida no escopo revisado.** | T1-T8 implementadas e verificadas. Por decisao do usuario em 2026-09-11, T9/T10 e o gate experimental foram retirados do plano. A prioridade passa a ser o uso da ferramenta; novos desenvolvimentos dependerao do feedback desse uso. |
 
 ## Superficie operacional
