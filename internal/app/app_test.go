@@ -11,12 +11,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
+	wt "github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -48,9 +50,10 @@ func TestHelpAndVersionDoNotRequireRoots(t *testing.T) {
 	}
 }
 
-func TestSetupConfiguresGlobalCommands(t *testing.T) {
-	root := t.TempDir()
-	bin := filepath.Join(root, "bin")
+// fakeClaude puts a claude executable that always succeeds first on PATH and isolates its configuration.
+func fakeClaude(t *testing.T) {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "bin")
 	if err := os.Mkdir(bin, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -58,25 +61,353 @@ func TestSetupConfiguresGlobalCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
-	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude"))
-	memoryRoot := newGitRoot(t, "memory")
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(t.TempDir(), "claude"))
+}
 
+func run(args ...string) (int, string, string) {
+	return runWithInput("", args...)
+}
+
+func runWithInput(input string, args ...string) (int, string, string) {
 	var stdout, stderr bytes.Buffer
-	if exitCode := Run(context.Background(), []string{"setup", memoryRoot}, strings.NewReader(""), &stdout, &stderr, "test"); exitCode != 0 {
-		t.Fatalf("setup exit = %d, stderr = %q", exitCode, stderr.String())
+	code := Run(context.Background(), args, strings.NewReader(input), &stdout, &stderr, "test")
+	return code, stdout.String(), stderr.String()
+}
+
+func remoteRef(t *testing.T, remote, ref string) string {
+	t.Helper()
+	command := exec.Command("git", "-C", remote, "rev-parse", "--verify", "--quiet", ref)
+	output, _ := command.Output()
+	return strings.TrimSpace(string(output))
+}
+
+func TestSetupConfiguresGlobalCommands(t *testing.T) {
+	wt.Env(t)
+	fakeClaude(t)
+	remote := wt.Remote(t)
+	wt.Seed(t, remote, "main", map[string]string{"gpm.json": "{\"schema_version\":1,\"memory_categories\":[\"domains\",\"decision\"]}\n"})
+
+	code, stdout, stderr := run("setup", remote, "--yes")
+	if code != 0 {
+		t.Fatalf("setup exit = %d, stderr = %q", code, stderr)
 	}
-	if !strings.Contains(stdout.String(), "Use /remember <fact> and /promote in any Claude Code session") {
-		t.Fatalf("setup output = %q", stdout.String())
+	if !strings.Contains(stdout, "Use /remember <fact> and /promote in any Claude Code session") {
+		t.Fatalf("setup output = %q", stdout)
 	}
-	if _, err := config.Load(); err != nil {
+	cfg, err := config.Load()
+	if err != nil {
 		t.Fatalf("global configuration is not usable: %v", err)
+	}
+	if cfg.RepoURL != remote || !slices.Equal(cfg.MemoryCategories, []string{"domains", "decision"}) {
+		t.Fatalf("configuration = %+v", cfg)
+	}
+	for _, worktree := range []string{cfg.Paths.Read, cfg.Paths.Proposals} {
+		if _, err := os.Stat(filepath.Join(worktree, ".git")); err != nil {
+			t.Fatalf("setup did not create worktree %s: %v", worktree, err)
+		}
+	}
+	if remoteRef(t, remote, "refs/heads/proposals") == "" {
+		t.Fatal("setup did not publish the proposals branch")
 	}
 }
 
+func TestSetupFlagsAndErrors(t *testing.T) {
+	t.Run("repository URL is required first", func(t *testing.T) {
+		wt.Env(t)
+		fakeClaude(t)
+		for _, args := range [][]string{{"setup"}, {"setup", "--yes"}} {
+			if code, _, stderr := run(args...); code != 2 || !strings.Contains(stderr, "repository URL") {
+				t.Fatalf("%v: exit = %d, stderr = %q", args, code, stderr)
+			}
+		}
+	})
+
+	t.Run("without a terminal --yes is required", func(t *testing.T) {
+		wt.Env(t)
+		fakeClaude(t)
+		remote := wt.Remote(t)
+		wt.Seed(t, remote, "main", map[string]string{"gpm.json": "{\"schema_version\":1,\"memory_categories\":[\"domains\"]}\n"})
+		code, _, stderr := run("setup", remote)
+		if code != 2 || !strings.Contains(stderr, "--yes") {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		if url, _ := config.StoredURL(); url != "" {
+			t.Fatalf("refused setup saved configuration for %q", url)
+		}
+	})
+
+	t.Run("an empty repository needs --categories", func(t *testing.T) {
+		wt.Env(t)
+		fakeClaude(t)
+		remote := wt.Remote(t)
+		code, _, stderr := run("setup", remote, "--yes")
+		if code != 1 || !strings.Contains(stderr, "--categories") {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		if remoteRef(t, remote, "refs/heads/main") != "" {
+			t.Fatal("failed setup initialized the remote")
+		}
+		if url, _ := config.StoredURL(); url != "" {
+			t.Fatalf("failed setup saved configuration for %q", url)
+		}
+	})
+
+	t.Run("--categories initializes an empty repository", func(t *testing.T) {
+		wt.Env(t)
+		fakeClaude(t)
+		remote := wt.Remote(t)
+		if code, _, stderr := run("setup", remote, "--yes", "--categories", "domains, decision"); code != 0 {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		contents := wt.Git(t, remote, "show", "main:gpm.json")
+		categories, err := config.ParseRepositoryConfig([]byte(contents))
+		if err != nil || !slices.Equal(categories, []string{"domains", "decision"}) {
+			t.Fatalf("initialized gpm.json = %q, %v", contents, err)
+		}
+		cfg, err := config.Load()
+		if err != nil || !slices.Equal(cfg.MemoryCategories, []string{"domains", "decision"}) {
+			t.Fatalf("Load() = %+v, %v", cfg, err)
+		}
+	})
+
+	t.Run("invalid categories are rejected", func(t *testing.T) {
+		wt.Env(t)
+		fakeClaude(t)
+		remote := wt.Remote(t)
+		if code, _, _ := run("setup", remote, "--yes", "--categories", "Not Valid"); code != 1 {
+			t.Fatalf("exit = %d, want 1", code)
+		}
+		if remoteRef(t, remote, "refs/heads/main") != "" {
+			t.Fatal("invalid categories initialized the remote")
+		}
+	})
+
+	t.Run("a different URL is refused once configured", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		fakeClaude(t)
+		other := wt.Remote(t)
+		wt.Seed(t, other, "main", map[string]string{"gpm.json": "{\"schema_version\":1,\"memory_categories\":[\"domains\"]}\n"})
+		code, _, stderr := run("setup", other, "--yes")
+		if code != 1 || !strings.Contains(stderr, "already configured for "+wt.GitHubURL) {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		if url, _ := config.StoredURL(); url != managed.Config.RepoURL {
+			t.Fatalf("configuration changed to %q", url)
+		}
+	})
+
+	t.Run("repeating setup for the same URL is safe", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		fakeClaude(t)
+		if code, _, stderr := run("setup", wt.GitHubURL, "--yes"); code != 0 {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+		if url, _ := config.StoredURL(); url != managed.Config.RepoURL {
+			t.Fatalf("configuration = %q", url)
+		}
+	})
+
+	t.Run("Claude Code must be installed", func(t *testing.T) {
+		wt.Env(t)
+		empty := t.TempDir()
+		t.Setenv("PATH", empty)
+		code, _, stderr := run("setup", "git@github.com:o/r.git", "--yes")
+		if code != 1 || !strings.Contains(stderr, "Claude Code") {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+	})
+}
+
+func TestPromoteFlagValidation(t *testing.T) {
+	wt.Setup(t, nil)
+	for _, args := range [][]string{
+		{"promote"},
+		{"promote", "--yes"},
+		{"promote", "--resume", "--abort"},
+		{"promote", "--abort", "--finish"},
+		{"promote", "--bogus"},
+		{"promote", "--abort", "extra"},
+	} {
+		if code, stdout, _ := run(args...); code != 2 || strings.Contains(stdout, "aborted") {
+			t.Fatalf("%v: exit = %d, stdout = %q, want 2", args, code, stdout)
+		}
+	}
+	code, _, stderr := run("promote")
+	if code != 2 || !strings.Contains(stderr, "exactly one of --resume, --abort or --finish") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestPromoteRequiresSetup(t *testing.T) {
+	wt.Env(t)
+	code, _, stderr := run("promote", "--abort", "--yes")
+	if code != 2 || !strings.Contains(stderr, "run setup first") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+}
+
+func TestPromoteAbort(t *testing.T) {
+	t.Run("declined confirmation keeps the release", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		managed.Remember(t, "Checkout timeout")
+		managed.OpenRelease(t)
+		before := remoteRef(t, managed.Remote, "refs/heads/proposals")
+		code, stdout, stderr := runWithInput("n\n", "promote", "--abort")
+		if code != 1 || !strings.Contains(stderr, "aborted by the user") || !strings.Contains(stdout, "[y/N]") {
+			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if remoteRef(t, managed.Remote, "refs/heads/proposals") != before {
+			t.Fatal("declined abort changed the remote")
+		}
+	})
+
+	t.Run("--yes drops the lock and keeps the proposals", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		proposal := managed.Remember(t, "Checkout timeout")
+		status := managed.OpenRelease(t)
+		if wt.Git(t, managed.Remote, "cat-file", "-t", "proposals:release.lock.json") != "blob" {
+			t.Fatal("open did not publish the marker")
+		}
+		code, stdout, stderr := run("promote", "--abort", "--yes")
+		if code != 0 || !strings.Contains(stdout, "Release aborted.") {
+			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if err := exec.Command("git", "-C", managed.Remote, "cat-file", "-e", "proposals:release.lock.json").Run(); err == nil {
+			t.Fatal("abort left the release marker on the remote")
+		}
+		if wt.Git(t, managed.Remote, "ls-tree", "--name-only", "proposals", proposal.Path) == "" {
+			t.Fatal("abort removed the proposal")
+		}
+		if _, err := os.Stat(status.ReleaseRoot); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("abort left the release worktree: %v", err)
+		}
+	})
+
+	t.Run("without a release it succeeds idempotently", func(t *testing.T) {
+		wt.Setup(t, nil)
+		if code, stdout, stderr := run("promote", "--abort", "--yes"); code != 0 || !strings.Contains(stdout, "Release aborted.") {
+			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+	})
+}
+
+func TestPromoteResume(t *testing.T) {
+	t.Run("without a release it fails", func(t *testing.T) {
+		wt.Setup(t, nil)
+		code, _, stderr := run("promote", "--resume")
+		if code != 1 || !strings.Contains(stderr, "no release in progress") {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+	})
+
+	t.Run("pending proposals are reported and nothing is sent", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		managed.Remember(t, "Checkout timeout")
+		managed.OpenRelease(t)
+		code, stdout, stderr := run("promote", "--resume")
+		if code != 0 || !strings.Contains(stdout, "1 proposal(s) pending") || !strings.Contains(stdout, "/promote") {
+			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+	})
+}
+
+func TestPromoteFinish(t *testing.T) {
+	// The release PR is merged: its merge commit is on the remote main.
+	mergeInto := func(t *testing.T, managed *wt.Managed) string {
+		t.Helper()
+		managed.PublishMain(t, map[string]string{"memories/domains/checkout-api.md": "# checkout-api\n"})
+		return wt.Git(t, managed.Remote, "rev-parse", "main")
+	}
+
+	t.Run("a merged pull request finalizes the release", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		gh := wt.FakeGH(t)
+		proposal := managed.Remember(t, "Checkout timeout")
+		managed.OpenRelease(t)
+		gh.SetPR(t, "MERGED", mergeInto(t, managed))
+		code, stdout, stderr := run("promote", "--finish", "--yes")
+		if code != 0 || !strings.Contains(stdout, "Release finalized.") {
+			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if err := exec.Command("git", "-C", managed.Remote, "cat-file", "-e", "proposals:release.lock.json").Run(); err == nil {
+			t.Fatal("finish left the release marker")
+		}
+		if listed := wt.Git(t, managed.Remote, "ls-tree", "-r", "--name-only", "proposals"); strings.Contains(listed, proposal.Path) {
+			t.Fatalf("finish left the consumed proposal: %s", listed)
+		}
+	})
+
+	t.Run("an open pull request is not finalized", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		gh := wt.FakeGH(t)
+		managed.Remember(t, "Checkout timeout")
+		managed.OpenRelease(t)
+		gh.SetPR(t, "OPEN", "")
+		code, stdout, _ := run("promote", "--finish", "--yes")
+		if code != 1 || !strings.Contains(stdout, "not merged yet") {
+			t.Fatalf("exit = %d, stdout = %q", code, stdout)
+		}
+		if wt.Git(t, managed.Remote, "cat-file", "-t", "proposals:release.lock.json") != "blob" {
+			t.Fatal("unmerged finish dropped the marker")
+		}
+	})
+
+	t.Run("a closed pull request is reported", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		gh := wt.FakeGH(t)
+		managed.Remember(t, "Checkout timeout")
+		managed.OpenRelease(t)
+		gh.SetPR(t, "CLOSED", "")
+		code, _, stderr := run("promote", "--finish", "--yes")
+		if code != 1 || !strings.Contains(stderr, "closed without merging") {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+	})
+
+	t.Run("without gh the person vouches for the merge", func(t *testing.T) {
+		managed := wt.Setup(t, nil)
+		managed.Remember(t, "Checkout timeout")
+		managed.OpenRelease(t)
+		mergeInto(t, managed)
+		// Only git on PATH: gh is unavailable.
+		bin := t.TempDir()
+		gitPath, err := exec.LookPath("git")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
+			t.Fatal(err)
+		}
+		t.Setenv("PATH", bin)
+
+		code, stdout, stderr := runWithInput("n\n", "promote", "--finish")
+		if code != 1 || !strings.Contains(stderr, "not finalized") || !strings.Contains(stdout, "Was the release pull request merged") {
+			t.Fatalf("declined: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if wt.Git(t, managed.Remote, "cat-file", "-t", "proposals:release.lock.json") != "blob" {
+			t.Fatal("declined finish dropped the marker")
+		}
+		code, stdout, stderr = run("promote", "--finish", "--yes")
+		if code != 0 || !strings.Contains(stdout, "Release finalized.") {
+			t.Fatalf("vouched: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if err := exec.Command("git", "-C", managed.Remote, "cat-file", "-e", "proposals:release.lock.json").Run(); err == nil {
+			t.Fatal("vouched finish left the marker")
+		}
+	})
+
+	t.Run("without a release it fails", func(t *testing.T) {
+		wt.Setup(t, nil)
+		wt.FakeGH(t)
+		code, _, stderr := run("promote", "--finish", "--yes")
+		if code != 1 || !strings.Contains(stderr, "no release in progress") {
+			t.Fatalf("exit = %d, stderr = %q", code, stderr)
+		}
+	})
+}
+
 func TestMCPRequiresSetup(t *testing.T) {
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	wt.Env(t)
 	var stdout, stderr bytes.Buffer
 	exitCode := Run(context.Background(), []string{"mcp"}, strings.NewReader(""), &stdout, &stderr, "test-version")
 	if exitCode == 0 {
@@ -90,90 +421,107 @@ func TestMCPRequiresSetup(t *testing.T) {
 	}
 }
 
-func TestMCPDoesNotExposeInvalidRootPath(t *testing.T) {
-	invalidRoot := filepath.Join(t.TempDir(), "private-user-path")
-	configHome := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configHome)
-	if err := os.MkdirAll(filepath.Join(configHome, "git-push-memories"), 0o700); err != nil {
+func TestMCPDoesNotExposeConfiguredURL(t *testing.T) {
+	wt.Env(t)
+	secretURL := "git@example.invalid:private-user-path/private-repo.git"
+	if err := config.Save(secretURL); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(configHome, "git-push-memories", "config.json"), []byte(`{"schema_version":1,"memory_root":"`+invalidRoot+`"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var stdout, stderr bytes.Buffer
-	exitCode := Run(context.Background(), []string{"mcp"}, strings.NewReader(""), &stdout, &stderr, "test-version")
-	if exitCode == 0 {
-		t.Fatal("Run() exit code = 0, want failure")
-	}
-	if strings.Contains(stderr.String(), invalidRoot) || strings.Contains(stderr.String(), "private-user-path") {
-		t.Fatalf("stderr exposed invalid root: %q", stderr.String())
+	for _, args := range [][]string{{"mcp"}, {"retrieve", "query", "--budget-bytes", "1024"}, {"promote", "--abort", "--yes"}} {
+		code, stdout, stderr := run(args...)
+		if code == 0 {
+			t.Fatalf("%v: exit code = 0, want failure", args)
+		}
+		for _, output := range []string{stdout, stderr} {
+			if strings.Contains(output, "private-user-path") || strings.Contains(output, "private-repo") {
+				t.Fatalf("%v exposed the repository URL: %q", args, output)
+			}
+		}
 	}
 }
 
-func TestRetrieveReturnsVersionedReadOnlyContext(t *testing.T) {
-	memoryRoot := newGitRoot(t, "memory")
-	configure(t, memoryRoot)
-	pagePath := filepath.Join(memoryRoot, "memories", "domains", "checkout-api.md")
-	if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	page := "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\ntimeout team-b\n"
-	if err := os.WriteFile(pagePath, []byte(page), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, memoryRoot, "config", "user.name", "Test")
-	runGit(t, memoryRoot, "config", "user.email", "test@example.com")
-	runGit(t, memoryRoot, "add", ".")
-	runGit(t, memoryRoot, "commit", "--quiet", "-m", "initial")
-	beforeMemory := treeFingerprint(t, memoryRoot)
+const checkoutPage = "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\ntimeout team-b\n"
 
-	var stdout, stderr bytes.Buffer
-	exitCode := Run(context.Background(), []string{
-		"retrieve", "checkout timeout team",
-		"--budget-bytes", "2048",
-	}, strings.NewReader(""), &stdout, &stderr, "test-version")
-	if exitCode != 0 {
-		t.Fatalf("Run() exit code = %d, stderr = %q", exitCode, stderr.String())
+func TestRetrieveReturnsVersionedReadOnlyContextFromReadWorktree(t *testing.T) {
+	managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": checkoutPage})
+	cfg := managed.Config
+	beforeRead, beforeProposals := treeFingerprint(t, cfg.Paths.Read), treeFingerprint(t, cfg.Paths.Proposals)
+	beforeRemote := remoteRef(t, managed.Remote, "refs/heads/proposals")
+
+	code, stdout, stderr := run("retrieve", "checkout timeout team", "--budget-bytes", "2048")
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr)
 	}
 	var response struct {
 		SchemaVersion int                     `json:"schema_version"`
 		Data          retrieval.ContextBundle `json:"data"`
 	}
-	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
 		t.Fatal(err)
 	}
 	if response.SchemaVersion != 1 || len(response.Data.Items) != 1 {
 		t.Fatalf("retrieve response = %+v", response)
 	}
-	if stderr.Len() != 0 {
-		t.Fatalf("stderr = %q, want empty", stderr.String())
+	if stderr != "" {
+		t.Fatalf("stderr = %q, want empty", stderr)
 	}
-	if treeFingerprint(t, memoryRoot) != beforeMemory {
-		t.Fatal("retrieve changed the memory worktree")
+	if treeFingerprint(t, cfg.Paths.Read) != beforeRead {
+		t.Fatal("retrieve changed the read worktree")
+	}
+	if treeFingerprint(t, cfg.Paths.Proposals) != beforeProposals || remoteRef(t, managed.Remote, "refs/heads/proposals") != beforeRemote {
+		t.Fatal("retrieve touched proposals")
 	}
 }
 
-func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
-	memoryRoot := newGitRoot(t, "memory")
-	cfg := configure(t, memoryRoot)
-	stateRoot := cfg.StateRoot
-	beforeMemory := treeFingerprint(t, memoryRoot)
+func TestRetrieveSeesProposalsOnlyAfterTheyAreMerged(t *testing.T) {
+	managed := wt.Setup(t, nil)
+	managed.Remember(t, "Checkout timeout team-b")
+	retrieve := func() int {
+		code, stdout, stderr := run("retrieve", "checkout timeout team", "--budget-bytes", "2048")
+		if code != 0 {
+			t.Fatalf("exit code = %d, stderr = %q", code, stderr)
+		}
+		var response struct {
+			Data retrieval.ContextBundle `json:"data"`
+		}
+		if err := json.Unmarshal([]byte(stdout), &response); err != nil {
+			t.Fatal(err)
+		}
+		return len(response.Data.Items)
+	}
+	if got := retrieve(); got != 0 {
+		t.Fatalf("retrieve returned %d items for an unmerged proposal", got)
+	}
+	// Publishing to main and letting the refresh interval pass makes retrieve fetch the new main.
+	managed.PublishMain(t, map[string]string{"memories/domains/checkout-api.md": checkoutPage})
+	if err := os.Remove(filepath.Join(managed.Config.Paths.State, "fetch-attempt")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		t.Fatal(err)
+	}
+	if got := retrieve(); got != 1 {
+		t.Fatalf("retrieve returned %d items after main was published, want 1", got)
+	}
+}
+
+func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
+	managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": checkoutPage})
+	cfg := managed.Config
+	// A fresh fetch stamp keeps the server's detached background refresh from racing with the checks below.
+	if err := os.WriteFile(filepath.Join(cfg.Paths.State, "fetch-attempt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	beforeRead, beforeProposals := treeFingerprint(t, cfg.Paths.Read), treeFingerprint(t, cfg.Paths.Proposals)
+	beforeRemote := wt.Git(t, managed.Remote, "for-each-ref")
 
 	serverInput, clientOutput := io.Pipe()
 	clientInput, serverOutput := io.Pipe()
 	var stderr bytes.Buffer
 	done := make(chan int, 1)
 	go func() {
-		done <- Run(context.Background(), []string{
-			"mcp",
-		}, serverInput, serverOutput, &stderr, "test-version")
+		done <- Run(context.Background(), []string{"mcp"}, serverInput, serverOutput, &stderr, "test-version")
 	}()
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "test"}, nil)
-	session, err := client.Connect(context.Background(), &mcp.IOTransport{
-		Reader: clientInput,
-		Writer: clientOutput,
-	}, nil)
+	session, err := client.Connect(context.Background(), &mcp.IOTransport{Reader: clientInput, Writer: clientOutput}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +529,7 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTools := []string{"memory_expand", "memory_page_read", "memory_promote_apply", "memory_promote_batch_apply", "memory_promote_batch_preview", "memory_promote_preview", "memory_proposal_list", "memory_propose", "memory_reference_expand", "memory_reference_snapshot", "memory_search"}
+	wantTools := []string{"memory_expand", "memory_page_read", "memory_promote_apply", "memory_promote_batch_apply", "memory_promote_batch_preview", "memory_promote_open", "memory_promote_preview", "memory_promote_status", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_reference_expand", "memory_reference_snapshot", "memory_search"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
 	}
@@ -191,11 +539,8 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 		}
 	}
 	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_search",
-		Arguments: map[string]any{
-			"query":        "checkout timeout",
-			"budget_bytes": 2048,
-		},
+		Name:      "memory_search",
+		Arguments: map[string]any{"query": "checkout timeout", "budget_bytes": 2048},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -214,7 +559,7 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if err := json.Unmarshal(encoded, &response); err != nil {
 		t.Fatal(err)
 	}
-	if response.SchemaVersion != 1 || len(response.Data.Items) != 0 {
+	if response.SchemaVersion != 1 || len(response.Data.Items) != 1 {
 		t.Fatalf("memory_search response = %+v", response)
 	}
 	if err := session.Close(); err != nil {
@@ -232,52 +577,17 @@ func TestMCPRunsOnStdioWithoutCreatingState(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("stderr = %q, want empty", stderr.String())
 	}
-	if got := treeFingerprint(t, memoryRoot); got != beforeMemory {
-		t.Fatalf("memory root changed: before %s, after %s", beforeMemory, got)
+	if got := treeFingerprint(t, cfg.Paths.Read); got != beforeRead {
+		t.Fatalf("read worktree changed: before %s, after %s", beforeRead, got)
 	}
-	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("state root exists without an accepted proposal: %v", err)
+	if got := treeFingerprint(t, cfg.Paths.Proposals); got != beforeProposals {
+		t.Fatalf("proposals worktree changed: before %s, after %s", beforeProposals, got)
 	}
-}
-
-func newGitRoot(t *testing.T, name string) string {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), name)
-	if err := os.Mkdir(root, 0o755); err != nil {
-		t.Fatal(err)
+	if got := wt.Git(t, managed.Remote, "for-each-ref"); got != beforeRemote {
+		t.Fatalf("remote changed: before %q, after %q", beforeRemote, got)
 	}
-	command := exec.Command("git", "init", "--quiet", "--initial-branch=main", root)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v: %s", err, output)
-	}
-	runGit(t, root, "config", "user.name", "Test")
-	runGit(t, root, "config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte("{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\", \"decision\"]\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "add", "gpm.json")
-	runGit(t, root, "commit", "--quiet", "-m", "initial")
-	return root
-}
-
-func configure(t *testing.T, memoryRoot string) config.Config {
-	t.Helper()
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("XDG_STATE_HOME", t.TempDir())
-	cfg, err := config.Save(memoryRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return cfg
-}
-
-func runGit(t *testing.T, root string, arguments ...string) {
-	t.Helper()
-	// Auto maintenance would run detached after a commit and touch .git while a
-	// test fingerprints the root.
-	command := exec.Command("git", append([]string{"-C", root, "-c", "maintenance.auto=false"}, arguments...)...)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", arguments, err, output)
+	if _, err := os.Stat(cfg.Paths.Release); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reading created a release worktree: %v", err)
 	}
 }
 

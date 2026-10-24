@@ -12,12 +12,12 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
+	"github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 )
 
 func TestApplyBatchCommitsAllTargetsAndProposalsOnce(t *testing.T) {
 	fixture := newBatchFixture(t)
 	defer fixture.promoter.Close()
-	stagedBefore := gitOutput(t, fixture.root, "ls-files", "--stage", "staged.txt")
 
 	result, err := fixture.promoter.ApplyBatch(context.Background(), fixture.preview, nil)
 	if err != nil {
@@ -45,12 +45,6 @@ func TestApplyBatchCommitsAllTargetsAndProposalsOnce(t *testing.T) {
 			t.Fatalf("completed transaction retained %s", path)
 		}
 	}
-	if got := gitOutput(t, fixture.root, "ls-files", "--stage", "staged.txt"); got != stagedBefore {
-		t.Fatalf("unrelated staged entry changed: before %q, after %q", stagedBefore, got)
-	}
-	if got, err := os.ReadFile(filepath.Join(fixture.root, "unstaged.txt")); err != nil || string(got) != "unstaged new\n" {
-		t.Fatalf("unrelated unstaged file = %q, %v", got, err)
-	}
 	repeated, err := fixture.promoter.ApplyBatch(context.Background(), fixture.preview, nil)
 	if err != nil || repeated.Commit != result.Commit {
 		t.Fatalf("repeated ApplyBatch() = %+v, %v; want commit %s", repeated, err, result.Commit)
@@ -70,42 +64,6 @@ func TestApplyBatchRejectsRepeatedTargetsAndOversizedBatch(t *testing.T) {
 	requests := make([]PreviewRequest, MaxBatchItems+1)
 	if _, err := fixture.promoter.PreviewBatch(context.Background(), requests); !errors.Is(err, ErrInvalidBatch) {
 		t.Fatalf("PreviewBatch(oversized) error = %v", err)
-	}
-	pendingOnly := []PreviewRequest{{Operation: OperationKeepPending, ProposalID: fixture.preview.Items[0].ProposalID}}
-	if _, err := fixture.promoter.PreviewBatch(context.Background(), pendingOnly); !errors.Is(err, ErrInvalidBatch) {
-		t.Fatalf("PreviewBatch(pending only) error = %v", err)
-	}
-}
-
-func TestApplyBatchCanLeaveSelectedProposalPending(t *testing.T) {
-	fixture := newBatchFixture(t)
-	defer fixture.promoter.Close()
-	preview, err := fixture.promoter.PreviewBatch(context.Background(), []PreviewRequest{
-		fixture.preview.Items[0].request,
-		{Operation: OperationKeepPending, ProposalID: fixture.preview.Items[1].ProposalID},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := fixture.promoter.ApplyBatch(context.Background(), preview, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Items) != 2 || result.Items[1].Decision != "pending" {
-		t.Fatalf("ApplyBatch() = %+v", result)
-	}
-	if _, err := os.Stat(filepath.Join(fixture.root, fixture.proposalPaths[0])); !errors.Is(err, os.ErrNotExist) {
-		t.Fatal("consumed proposal remains")
-	}
-	if _, err := os.Stat(filepath.Join(fixture.root, fixture.proposalPaths[1])); err != nil {
-		t.Fatal("pending proposal was removed")
-	}
-	changed := strings.Split(gitOutput(t, fixture.root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"), "\n")
-	want := []string{fixture.proposalPaths[0], "memories/domains/first.md"}
-	slices.Sort(changed)
-	slices.Sort(want)
-	if !slices.Equal(changed, want) {
-		t.Fatalf("pending batch paths = %v, want %v", changed, want)
 	}
 }
 
@@ -154,7 +112,7 @@ func TestBatchRecoveryReturnsToBaselineBeforeRefUpdate(t *testing.T) {
 	}
 	_ = fixture.promoter.Close()
 
-	recovery, err := New(fixture.cfg)
+	recovery, err := New(fixture.cfg, fixture.root, fixture.branch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +151,7 @@ func TestBatchRetryRecoversSameCommitAfterRefUpdate(t *testing.T) {
 	}
 	_ = fixture.promoter.Close()
 
-	recovery, err := New(fixture.cfg)
+	recovery, err := New(fixture.cfg, fixture.root, fixture.branch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +188,7 @@ func TestBatchRetryRecognizesCommitAfterMarkerRemoval(t *testing.T) {
 		t.Fatal("interruption occurred before marker removal")
 	}
 	_ = fixture.promoter.Close()
-	retry, err := New(fixture.cfg)
+	retry, err := New(fixture.cfg, fixture.root, fixture.branch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +225,7 @@ func TestRecoveryNeverRemovesForeignIndexLock(t *testing.T) {
 	if err := os.WriteFile(indexPath+".lock", foreign, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	recovery, err := New(fixture.cfg)
+	recovery, err := New(fixture.cfg, fixture.root, fixture.branch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +271,7 @@ func TestBatchFaultWindowsConverge(t *testing.T) {
 			}
 			interruptedHead := gitOutput(t, fixture.root, "rev-parse", "HEAD")
 			_ = fixture.promoter.Close()
-			recovery, err := New(fixture.cfg)
+			recovery, err := New(fixture.cfg, fixture.root, fixture.branch)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -375,6 +333,7 @@ func TestRecoveryWithoutMarkerRemovesOnlyControlledArtifacts(t *testing.T) {
 
 type batchFixture struct {
 	root          string
+	branch        string
 	stateRoot     string
 	cfg           config.Config
 	promoter      *Promoter
@@ -383,69 +342,64 @@ type batchFixture struct {
 	proposalPaths []string
 }
 
-func newBatchFixture(t *testing.T) batchFixture {
+// addProposals files the requests through the proposals worktree and publishes them.
+func addProposals(t *testing.T, m *workspacetest.Managed, requests []inbox.Request) []inbox.Proposal {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "memory")
-	if err := os.MkdirAll(filepath.Join(root, "memories", "domains"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{
-		"gpm.json":     "{\"schema_version\":1,\"memory_categories\":[\"domains\"]}\n",
-		"staged.txt":   "staged old\n",
-		"unstaged.txt": "unstaged old\n",
-	}
-	for path, contents := range files {
-		if err := os.WriteFile(filepath.Join(root, path), []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	runGit(t, root, "init", "--quiet", "--initial-branch=main")
-	runGit(t, root, "config", "user.name", "Test")
-	runGit(t, root, "config", "user.email", "test@example.invalid")
-	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "--quiet", "-m", "initial")
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	proposalInbox, err := inbox.New(root, stateRoot)
+	box, err := inbox.NewWriter(m.Config.Workspace(), m.Config.Paths.Proposals, "proposals")
 	if err != nil {
 		t.Fatal(err)
 	}
-	proposals := make([]inbox.Proposal, 2)
-	for index, request := range []inbox.Request{
-		{Title: "First memory", SuggestedAction: inbox.ActionCreate, Knowledge: "First current fact.", SourcePaths: []string{"source/first.go"}},
-		{Title: "Second memory", SuggestedAction: inbox.ActionCreate, Knowledge: "Second current fact.", SourcePaths: []string{"source/second.go"}},
-	} {
-		proposals[index], err = proposalInbox.Add(context.Background(), request)
+	defer box.Close()
+	proposals := make([]inbox.Proposal, 0, len(requests))
+	for _, request := range requests {
+		proposal, err := box.Add(context.Background(), request)
 		if err != nil {
 			t.Fatal(err)
 		}
+		proposals = append(proposals, proposal)
 	}
-	if err := proposalInbox.Close(); err != nil {
-		t.Fatal(err)
+	if pushed, err := box.Publish(context.Background()); err != nil || !pushed {
+		t.Fatalf("Publish() = %v, %v", pushed, err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "staged.txt"), []byte("staged new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "add", "staged.txt")
-	if err := os.WriteFile(filepath.Join(root, "unstaged.txt"), []byte("unstaged new\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg := config.Config{MemoryRoot: root, StateRoot: stateRoot, MemoryCategories: []string{"domains"}}
-	promoter, err := New(cfg)
+	return proposals
+}
+
+// newBatchPromoter seeds main with seed, files the proposals, opens a release and
+// returns a Promoter on the release worktree.
+func newBatchPromoter(t *testing.T, seed map[string]string, requests []inbox.Request) (batchFixture, []inbox.Proposal) {
+	t.Helper()
+	m := workspacetest.Setup(t, seed)
+	proposals := addProposals(t, m, requests)
+	status := m.OpenRelease(t)
+	promoter, err := New(m.Config, status.ReleaseRoot, status.Marker.ReleaseBranch)
 	if err != nil {
 		t.Fatal(err)
 	}
-	requests := []PreviewRequest{
-		{Operation: OperationCreatePage, ProposalID: proposals[0].ID, TargetPath: "memories/domains/first.md"},
-		{Operation: OperationCreatePage, ProposalID: proposals[1].ID, TargetPath: "memories/domains/second.md"},
-	}
-	preview, err := promoter.PreviewBatch(context.Background(), requests)
-	if err != nil {
-		t.Fatal(err)
+	paths := make([]string, len(proposals))
+	for index, proposal := range proposals {
+		paths[index] = proposal.Path
 	}
 	return batchFixture{
-		root: root, stateRoot: stateRoot, cfg: cfg, promoter: promoter, preview: preview,
-		parent: gitOutput(t, root, "rev-parse", "HEAD"), proposalPaths: []string{proposals[0].Path, proposals[1].Path},
+		root: status.ReleaseRoot, branch: status.Marker.ReleaseBranch, stateRoot: m.Config.StateRoot, cfg: m.Config, promoter: promoter,
+		parent: gitOutput(t, status.ReleaseRoot, "rev-parse", "HEAD"), proposalPaths: paths,
+	}, proposals
+}
+
+func newBatchFixture(t *testing.T) batchFixture {
+	t.Helper()
+	fixture, proposals := newBatchPromoter(t, nil, []inbox.Request{
+		{Title: "First memory", SuggestedAction: inbox.ActionCreate, Knowledge: "First current fact.", SourcePaths: []string{"source/first.go"}},
+		{Title: "Second memory", SuggestedAction: inbox.ActionCreate, Knowledge: "Second current fact.", SourcePaths: []string{"source/second.go"}},
+	})
+	preview, err := fixture.promoter.PreviewBatch(context.Background(), []PreviewRequest{
+		{Operation: OperationCreatePage, ProposalID: proposals[0].ID, TargetPath: "memories/domains/first.md"},
+		{Operation: OperationCreatePage, ProposalID: proposals[1].ID, TargetPath: "memories/domains/second.md"},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	fixture.preview = preview
+	return fixture
 }
 
 func assertTransactionClean(t *testing.T, fixture batchFixture) {

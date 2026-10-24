@@ -23,7 +23,7 @@ A documentação do domínio e a preservação de decisões são consequências 
 
 ## Visão de uso
 
-Um time pode trabalhar em vários repositórios de código e manter um único repositório de memória. Cada pessoa configura a ferramenta com o caminho local desse repositório, previamente clonado.
+Um time pode trabalhar em vários repositórios de código e manter um único repositório de memória. Cada pessoa configura a ferramenta com a URL Git desse repositório.
 
 Durante uma sessão, hooks e comandos identificam propostas de memória. A captura segue um modelo híbrido:
 
@@ -65,7 +65,7 @@ Uma proposta não é automaticamente uma memória válida. Antes da consolidaç�
 O primeiro ciclo será validado com:
 
 - um desenvolvedor de um time;
-- um repositório de memória já clonado localmente;
+- um repositório de memória em um remote Git (GitHub);
 - integração com Claude Code;
 - armazenamento em Markdown e Git;
 - operação sem backend.
@@ -130,65 +130,57 @@ make install
 
 Por padrao, o binario e instalado em `~/.local/bin`. Use `make install INSTALL_DIR=/outro/diretorio` para escolher outro destino.
 
-O repositorio de memoria deve ter pelo menos um commit, estar em `main` para criar propostas e conter `gpm.json` na raiz:
+### Configuracao
 
-```json
-{
-  "schema_version": 1,
-  "memory_categories": ["domains", "decision"]
-}
-```
-
-As categorias devem ser unicas e usar lowercase kebab-case. Configure o repositorio uma unica vez:
+A memoria vive em um repositorio Git remoto (GitHub para o `/promote`; qualquer URL Git serve para o resto). Crie um repositorio vazio e configure-o uma unica vez, em cada maquina:
 
 ```bash
-gpm setup /path/to/memory-repository
+gpm setup git@github.com:org/memoria.git --categories domains,decision
 ```
 
-O setup registra o MCP e instala `/remember` e `/promote` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode propor um fato e consumir ou descartar uma proposta.
+O setup e idempotente. Em um repositorio vazio ele cria `gpm.json` (`{"schema_version": 1, "memory_categories": [...]}`, categorias unicas em lowercase kebab-case), a `main` e a `proposals`; em um repositorio que ja tem `gpm.json` ele so clona e valida; se o repositorio tem conteudo sem `gpm.json`, falha. `--yes` roda sem prompts (obrigatorio fora de um terminal; com repositorio vazio exige `--categories`).
 
-Memorias canonicas ficam em `memories/<categoria-configurada>/**/*.md`. Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. Propostas ficam em `proposals/<id>-<slug>.md` e recebem um commit path-scoped diretamente na `main`, sem consumir staging alheio.
+O GPM mantem um clone bare gerenciado em `$XDG_STATE_HOME/git-push-memories/<id>` e nunca toca em nenhum repositorio seu. O setup tambem registra o MCP e instala `/remember` e `/promote` no escopo global do Claude Code. Pre-requisitos: `git` com worktree, `claude`, identidade Git (`user.name` e `user.email`) e credenciais Git para o remote. O `gh` instalado e autenticado so e exigido pelo `/promote`.
 
-O servidor publica onze tools:
+Para forcar squash nos PRs de release e proteger a `main`, veja [docs/workflow.md](docs/workflow.md): ative a protecao da `main` **depois** do setup, porque o push inicial seria bloqueado.
 
-- `memory_search`, para buscar secoes nas categorias configuradas dentro de um orçamento em bytes;
-- `memory_expand`, para expandir uma seção por handle e detectar conteúdo obsoleto;
-- `memory_reference_snapshot`, para identificar blobs commitados por lineage, revisao, path e hash sem persistir o checkout local;
-- `memory_reference_expand`, para revisar linhas limitadas dos bytes commitados identificados sem persistir o conteudo;
-- `memory_propose`, para registrar uma proposta Markdown v1/v2 ou retornar a proposta byte-identica ja existente sem novo commit;
-- `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
-- `memory_page_read`, para ler uma pagina canonica inteira com seu content hash (ou o erro `budget_too_small`), base de `rewrite_page`;
-- `memory_promote_preview`, para gerar sem escrita o diff e evidencia separada de candidatos canonicos e propostas relacionadas;
-- `memory_promote_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP;
-- `memory_promote_batch_preview`, para revisar de uma a dezesseis decisoes como uma unica transacao, incluindo `rewrite_page` (reescrita da pagina inteira) e `fold_proposal` (proposta absorvida pela reescrita ou pela criacao de pagina do mesmo lote);
-- `memory_promote_batch_apply`, para aplicar o lote confirmado em um unico commit recuperavel.
+### Fluxo
 
-O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário. Se uma curadoria anterior foi interrompida, o servidor reconcilia seu marcador privado antes de aceitar chamadas.
+Tres branches (modelo completo em [docs/workflow.md](docs/workflow.md)):
 
-O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A curadoria processa uma proposta ou um lote limitado de targets distintos e exige confirmacao do diff antes de alterar memoria ou descartar propostas.
+- `main`: memoria canonica (`memories/<categoria>/**/*.md`) e `gpm.json`; protegida, so recebe PR de release;
+- `proposals`: `main` mais as propostas pendentes (`proposals/<id>-<slug>.md`); o `/remember` escreve e envia aqui;
+- `release/<opened_at>`: onde o `/promote` consolida todas as propostas; vira o PR para a `main`.
 
-A mesma recuperação também pode ser chamada diretamente pela CLI:
+```text
+/remember <fato>     # cria uma proposta e a envia para a branch proposals
+/promote             # abre o release, consolida todas as propostas em lotes e abre o PR
+```
+
+Depois do merge do PR (squash recomendado), o proximo `/promote` ou `gpm promote --finish` finaliza o release. Release abandonado: `gpm promote --resume` ou `gpm promote --abort`.
+
+Memorias canonicas: Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. A leitura sempre usa a `main` publicada, atualizada com `fetch` no maximo a cada 10 minutos.
+
+O servidor MCP publica estas tools:
+
+- `memory_search`, `memory_expand` e `memory_page_read`, para buscar secoes, expandir por handle (detectando conteudo obsoleto) e ler uma pagina inteira com seu content hash; aceitam `source: release` durante o `/promote`;
+- `memory_reference_snapshot` e `memory_reference_expand`, para identificar e revisar blobs commitados sem persistir o checkout local;
+- `memory_propose`, para registrar uma proposta Markdown v1/v2 na `proposals` e envia-la (`pushed`), ou retornar a proposta byte-identica ja existente;
+- `memory_proposal_list`, para listar as propostas (`source: proposals`, ou `release`);
+- `memory_promote_open`, `memory_promote_status` e `memory_promote_submit`, para abrir ou retomar o release, consultar o que falta e enviar para revisao (push da branch e PR via `gh`);
+- `memory_promote_preview`, `memory_promote_apply`, `memory_promote_batch_preview` e `memory_promote_batch_apply`, para revisar o diff e aplicar de uma a dezesseis decisoes (`rewrite_page`, `fold_proposal`, descarte com motivo...) como um unico commit recuperavel na `release`.
+
+O servidor e transitorio sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container e necessario. Se uma promocao anterior foi interrompida, o servidor reconcilia seu marcador privado ao iniciar.
+
+O [material de integracao com Claude Code](integrations/claude-code/README.md) descreve os detalhes. Nenhum hook de sessao e instalado e a captura nao altera memoria canonica. A mesma recuperacao pode ser chamada pela CLI:
 
 ```bash
 gpm retrieve "checkout timeout team" --budget-bytes 2048
 ```
 
-Depois da confirmacao em `/remember`, a proposta ja esta legivel no worktree e commitada localmente em `main`. O produto nao acessa remotos; o push permanece humano:
+O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas; cada lote e um commit com recovery antes e depois do avanco da `release`.
 
-```bash
-git -C <memory-repository> show --stat HEAD
-git -C <memory-repository> push
-```
-
-A curadoria e iniciada em uma sessao do Claude Code:
-
-```text
-/promote [proposal-id]
-```
-
-Sem ID, a skill lista o inbox para a pessoa selecionar ate dezesseis propostas. O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas no inbox; lotes usam targets distintos, um commit e recovery antes/depois do avanco de `main`.
-
-O lifecycle tecnico completo pode ser reproduzido em repositorios descartaveis com `tests/e2e/run-phase-3.sh`. A run preserva somente evidencia sanitizada sob `.artifacts/`, executa `make verify` e `make verify-offline` e nao acessa remotos.
+O ciclo tecnico completo (setup, remember, promote, merge, finish, leitura) roda sem rede em remotos locais com `tests/e2e/run-phase-3.sh`. A run preserva somente evidencia sanitizada sob `.artifacts/` e executa `make verify` e `make verify-offline`.
 
 ## Licença
 

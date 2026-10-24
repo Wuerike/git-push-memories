@@ -41,4 +41,4 @@ case ":${PATH}:" in
   *":${install_dir}:"*) ;;
   *) printf '%s\n' "Add ${install_dir} to PATH before continuing." ;;
 esac
-printf '%s\n' "Next: ${install_target} setup /path/to/memory-repository"
+printf '%s\n' "Next: ${install_target} setup <git-url-of-memory-repository>"

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -15,17 +15,21 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
+	"github.com/Wuerike/git-push-memories/internal/promotion"
+	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
+	wt "github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 const populatedPage = "# Checkout API\n<!-- @id: checkout-api -->\n\n## Operation\n<!-- @id: checkout-api-operation -->\nTimeout is three seconds.\n"
 
-func TestRememberContractSearchesThenCommitsConfirmedProposal(t *testing.T) {
-	memoryRoot := gitRoot(t, populatedPage)
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	parent := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
-	session, stop := startMCP(t, memoryRoot, stateRoot)
+func TestRememberContractSearchesThenCommitsAndPushesConfirmedProposal(t *testing.T) {
+	managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": populatedPage})
+	proposals := managed.Config.Paths.Proposals
+	parent := wt.Git(t, proposals, "rev-parse", "HEAD")
+	session, stop := startMCP(t, managed.Config)
 	defer stop()
 
 	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -43,8 +47,8 @@ func TestRememberContractSearchesThenCommitsConfirmedProposal(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("search/expand created state before confirmation: %v", err)
+	if got := wt.Git(t, proposals, "rev-parse", "HEAD"); got != parent {
+		t.Fatalf("search/expand moved proposals before confirmation: %s -> %s", parent, got)
 	}
 
 	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -58,20 +62,35 @@ func TestRememberContractSearchesThenCommitsConfirmedProposal(t *testing.T) {
 		t.Fatalf("confirmed proposal = %+v, %v", proposalResult, err)
 	}
 	proposal := decodeProposal(t, proposalResult)
-	if proposal.ID == "" || proposal.Commit != gitOutput(t, memoryRoot, "rev-parse", "HEAD") || gitOutput(t, memoryRoot, "rev-parse", "HEAD^") != parent {
+	head := wt.Git(t, proposals, "rev-parse", "HEAD")
+	if proposal.ID == "" || proposal.Commit != head || wt.Git(t, proposals, "rev-parse", "HEAD^") != parent {
 		t.Fatalf("proposal = %+v", proposal)
 	}
-	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"); changed != proposal.Path {
+	if branch := wt.Git(t, proposals, "symbolic-ref", "--short", "HEAD"); branch != workspace.ProposalsBranch {
+		t.Fatalf("proposal was written on %q", branch)
+	}
+	if changed := wt.Git(t, proposals, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"); changed != proposal.Path {
 		t.Fatalf("proposal commit changed %q", changed)
+	}
+	if remote := wt.Git(t, managed.Remote, "rev-parse", "proposals"); remote != head {
+		t.Fatalf("remote proposals = %s, want the pushed commit %s", remote, head)
+	}
+	if main := wt.Git(t, managed.Remote, "log", "--format=%s", "main"); strings.Contains(main, "proposal") || strings.Count(main, "\n") != 0 {
+		t.Fatalf("remember changed main: %q", main)
+	}
+	if status := wt.Git(t, managed.Config.Paths.Read, "status", "--porcelain"); status != "" {
+		t.Fatalf("remember dirtied the read worktree: %q", status)
 	}
 }
 
-func TestRememberCancellationAndBudgetFailureCreateNoState(t *testing.T) {
+func TestRememberReadingAndBudgetFailureDoNotModifyProposals(t *testing.T) {
 	for _, budget := range []int{2048, 1} {
 		t.Run(string(rune('a'+budget%2)), func(t *testing.T) {
-			memoryRoot := gitRoot(t, populatedPage)
-			stateRoot := filepath.Join(t.TempDir(), "state")
-			session, stop := startMCP(t, memoryRoot, stateRoot)
+			managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": populatedPage})
+			proposals := managed.Config.Paths.Proposals
+			beforeProposals := wt.Git(t, proposals, "rev-parse", "HEAD")
+			beforeRemote := wt.Git(t, managed.Remote, "for-each-ref")
+			session, stop := startMCP(t, managed.Config)
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 				Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout", "budget_bytes": budget},
 			})
@@ -82,10 +101,79 @@ func TestRememberCancellationAndBudgetFailureCreateNoState(t *testing.T) {
 				t.Fatal("insufficient budget succeeded")
 			}
 			stop()
-			if _, err := os.Stat(stateRoot); !errors.Is(err, os.ErrNotExist) {
-				t.Fatalf("cancelled/failed flow created state: %v", err)
+			if got := wt.Git(t, proposals, "rev-parse", "HEAD"); got != beforeProposals {
+				t.Fatalf("reading moved the proposals worktree: %s -> %s", beforeProposals, got)
+			}
+			if status := wt.Git(t, proposals, "status", "--porcelain"); status != "" {
+				t.Fatalf("reading dirtied the proposals worktree: %q", status)
+			}
+			if got := wt.Git(t, managed.Remote, "for-each-ref"); got != beforeRemote {
+				t.Fatalf("reading changed the remote:\n%s\n%s", beforeRemote, got)
 			}
 		})
+	}
+}
+
+func TestPromoteCreateFlowRunsOnAReleaseAndSendsItForReview(t *testing.T) {
+	managed := wt.Setup(t, nil)
+	wt.FakeGH(t)
+	proposal := managed.Remember(t, "Checkout timeout")
+	session, stop := startMCP(t, managed.Config)
+	defer stop()
+	mainBefore := wt.Git(t, managed.Remote, "rev-parse", "main")
+
+	opened := decodeEnvelope[release.Status](t, callOK(t, session, "memory_promote_open", map[string]any{}))
+	if !opened.Open || opened.Marker == nil || !strings.HasPrefix(opened.Marker.ReleaseBranch, workspace.ReleasePrefix) || len(opened.Pending) != 1 {
+		t.Fatalf("memory_promote_open = %+v", opened)
+	}
+	releaseRoot := managed.Config.Paths.Release
+	if branch := wt.Git(t, releaseRoot, "symbolic-ref", "--short", "HEAD"); branch != opened.Marker.ReleaseBranch {
+		t.Fatalf("release worktree is on %q", branch)
+	}
+	listed := decodeEnvelope[promotion.List](t, callOK(t, session, "memory_proposal_list", map[string]any{"source": "release"}))
+	if len(listed.Proposals) != 1 || listed.Proposals[0].ID != proposal.ID {
+		t.Fatalf("release proposals = %+v", listed.Proposals)
+	}
+
+	// Submitting while a proposal is still pending is refused.
+	refused, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_promote_submit", Arguments: map[string]any{}})
+	if err != nil || !refused.IsError || errorCode(t, refused) != "proposals_pending" {
+		t.Fatalf("submit with pending proposals = %+v, %v", refused, err)
+	}
+
+	preview := decodeEnvelope[struct {
+		PreviewToken string `json:"preview_token"`
+	}](t, callOK(t, session, "memory_promote_preview", map[string]any{
+		"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout.md",
+	}))
+	applied := decodeEnvelope[promotion.Result](t, callOK(t, session, "memory_promote_apply", map[string]any{"preview_token": preview.PreviewToken}))
+	if got := wt.Git(t, releaseRoot, "rev-parse", "HEAD"); got != applied.Commit {
+		t.Fatalf("promotion commit %s is not the release head %s", applied.Commit, got)
+	}
+	changed := strings.Fields(wt.Git(t, releaseRoot, "diff-tree", "--no-commit-id", "--name-only", "-r", applied.Commit))
+	if !slices.Contains(changed, "memories/domains/checkout-timeout.md") || !slices.Contains(changed, proposal.Path) {
+		t.Fatalf("promotion commit changed %v", changed)
+	}
+	// Published memory and the shared inbox stay untouched until the PR merges.
+	if got := wt.Git(t, managed.Remote, "rev-parse", "main"); got != mainBefore {
+		t.Fatal("promotion moved main")
+	}
+	if _, err := os.Stat(filepath.Join(managed.Config.Paths.Read, "memories", "domains", "checkout-timeout.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unreviewed memory is visible to readers: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(managed.Config.Paths.Proposals, proposal.Path)); err != nil {
+		t.Fatalf("proposal left the proposals branch before merge: %v", err)
+	}
+
+	submitted := decodeEnvelope[struct {
+		PullRequest string `json:"pull_request"`
+		Finalized   bool   `json:"finalized"`
+	}](t, callOK(t, session, "memory_promote_submit", map[string]any{}))
+	if submitted.PullRequest == "" || submitted.Finalized {
+		t.Fatalf("memory_promote_submit = %+v", submitted)
+	}
+	if got := wt.Git(t, managed.Remote, "rev-parse", opened.Marker.ReleaseBranch); got != applied.Commit {
+		t.Fatalf("remote release branch = %s, want %s", got, applied.Commit)
 	}
 }
 
@@ -153,9 +241,54 @@ func decodeProposal(t *testing.T, result *mcp.CallToolResult) inbox.Proposal {
 	return response.Data
 }
 
-func startMCP(t *testing.T, memoryRoot, stateRoot string) (*mcp.ClientSession, func()) {
+func callOK(t *testing.T, session *mcp.ClientSession, name string, arguments map[string]any) *mcp.CallToolResult {
 	t.Helper()
-	server, err := mcpserver.New(config.Config{MemoryRoot: memoryRoot, StateRoot: stateRoot, MemoryCategories: []string{"domains", "decision"}}, "test")
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
+	if err != nil || result.IsError {
+		t.Fatalf("%s = %+v, %v", name, result, err)
+	}
+	return result
+}
+
+func decodeEnvelope[T any](t *testing.T, result *mcp.CallToolResult) T {
+	t.Helper()
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Data T `json:"data"`
+	}
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		t.Fatal(err)
+	}
+	return response.Data
+}
+
+func errorCode(t *testing.T, result *mcp.CallToolResult) string {
+	t.Helper()
+	encoded, err := json.Marshal(result.StructuredContent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var response struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(encoded, &response); err != nil {
+		t.Fatal(err)
+	}
+	return response.Error.Code
+}
+
+func startMCP(t *testing.T, cfg config.Config) (*mcp.ClientSession, func()) {
+	t.Helper()
+	// A fresh fetch stamp keeps the server's detached background refresh from racing with the assertions.
+	if err := os.WriteFile(filepath.Join(cfg.Paths.State, "fetch-attempt"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server, err := mcpserver.New(cfg, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,48 +319,4 @@ func startMCP(t *testing.T, memoryRoot, stateRoot string) (*mcp.ClientSession, f
 			t.Fatal("MCP server did not stop")
 		}
 	}
-}
-
-func gitRoot(t *testing.T, page string) string {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), "root")
-	if err := os.Mkdir(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "init", "--quiet", "--initial-branch=main")
-	runGit(t, root, "config", "user.name", "Test")
-	runGit(t, root, "config", "user.email", "test@example.invalid")
-	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte(`{"schema_version":1,"memory_categories":["domains","decision"]}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if page != "" {
-		pagePath := filepath.Join(root, "memories", "domains", "checkout-api.md")
-		if err := os.MkdirAll(filepath.Dir(pagePath), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(pagePath, []byte(page), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "--quiet", "-m", "initial")
-	return root
-}
-
-func runGit(t *testing.T, root string, args ...string) {
-	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, args...)...)
-	if output, err := command.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v: %s", args, err, output)
-	}
-}
-
-func gitOutput(t *testing.T, root string, args ...string) string {
-	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, args...)...)
-	output, err := command.Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return strings.TrimSpace(string(output))
 }

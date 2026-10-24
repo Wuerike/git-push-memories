@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 if [[ -n "$(git -C "$ROOT" status --porcelain=v1)" ]]; then
-  printf 'T8 technical E2E requires a clean product worktree\n' >&2
+  printf 'technical E2E requires a clean product worktree\n' >&2
   exit 1
 fi
 
@@ -25,7 +25,7 @@ REVISION="$(git -C "$ROOT" rev-parse HEAD)"
 
 assert_fixed_point() {
   if [[ "$(git -C "$ROOT" rev-parse HEAD)" != "$REVISION" || -n "$(git -C "$ROOT" status --porcelain=v1)" ]]; then
-    printf 'product worktree changed during T8 run\n' >&2
+    printf 'product worktree changed during the E2E run\n' >&2
     exit 1
   fi
 }
@@ -50,8 +50,8 @@ run_recorded() {
 
 run_recorded \
   technical-e2e focused-e2e.log \
-  timeout 2m env GOTOOLCHAIN=go1.25.12 GOPROXY=off GPM_PHASE3_E2E_EVIDENCE_ROOT="$EVIDENCE_ROOT" \
-  go -C "$ROOT" test ./tests/e2e -run '^TestPhase3TechnicalWorkflow$' -count=1 -v
+  timeout 4m env GOTOOLCHAIN=go1.25.12 GOPROXY=off GPM_PHASE3_E2E_EVIDENCE_ROOT="$EVIDENCE_ROOT" \
+  go -C "$ROOT" test ./tests/e2e -run '^TestManagedWorkflowEndToEnd$' -count=1 -v
 
 assert_fixed_point
 run_recorded verify verify.log timeout 4m make -C "$ROOT" verify

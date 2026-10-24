@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
@@ -33,49 +32,12 @@ type rewriteFixture struct {
 // [rewrite_page(A), fold_proposal(B -> A)].
 func newRewriteFixture(t *testing.T) rewriteFixture {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "memory")
-	if err := os.MkdirAll(filepath.Join(root, "memories", "domains"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	files := map[string]string{
-		"gpm.json":      "{\"schema_version\":1,\"memory_categories\":[\"domains\"]}\n",
-		rewritePagePath: rewriteBaseline,
-	}
-	for path, contents := range files {
-		if err := os.WriteFile(filepath.Join(root, path), []byte(contents), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	runGit(t, root, "init", "--quiet", "--initial-branch=main")
-	runGit(t, root, "config", "user.name", "Test")
-	runGit(t, root, "config", "user.email", "test@example.invalid")
-	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "--quiet", "-m", "initial")
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	proposalInbox, err := inbox.New(root, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proposals := make([]inbox.Proposal, 0, 3)
-	for _, request := range []inbox.Request{
+	batch, proposals := newBatchPromoter(t, map[string]string{rewritePagePath: rewriteBaseline}, []inbox.Request{
 		{Title: "Wuerike é do time da camada de leitura", SuggestedAction: inbox.ActionUpdate, Target: rewritePagePath, Knowledge: "Wuerike faz parte do time da camada de leitura.", SourcePaths: []string{}},
 		{Title: "Guilherme é membro do time da camada de leitura", SuggestedAction: inbox.ActionCreate, Knowledge: "Guilherme é membro do time da camada de leitura.", SourcePaths: []string{}},
 		{Title: "Time usa Go", SuggestedAction: inbox.ActionCreate, Knowledge: "O time da camada de leitura usa Go.", SourcePaths: []string{}},
-	} {
-		proposal, err := proposalInbox.Add(context.Background(), request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		proposals = append(proposals, proposal)
-	}
-	if err := proposalInbox.Close(); err != nil {
-		t.Fatal(err)
-	}
-	cfg := config.Config{MemoryRoot: root, StateRoot: stateRoot, MemoryCategories: []string{"domains"}}
-	promoter, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
+	promoter := batch.promoter
 	page, err := promoter.repository.ReadPage(context.Background(), rewritePagePath)
 	if err != nil {
 		t.Fatal(err)
@@ -88,13 +50,9 @@ func newRewriteFixture(t *testing.T) rewriteFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rewriteFixture{
-		batchFixture: batchFixture{
-			root: root, stateRoot: stateRoot, cfg: cfg, promoter: promoter, preview: preview,
-			parent: gitOutput(t, root, "rev-parse", "HEAD"), proposalPaths: []string{proposals[0].Path, proposals[1].Path},
-		},
-		proposals: proposals, contentHash: page.ContentHash, requests: requests,
-	}
+	batch.preview = preview
+	batch.proposalPaths = []string{proposals[0].Path, proposals[1].Path}
+	return rewriteFixture{batchFixture: batch, proposals: proposals, contentHash: page.ContentHash, requests: requests}
 }
 
 func readRewriteGolden(t *testing.T) string {
@@ -392,7 +350,7 @@ func TestRewriteBatchFaultWindowsConverge(t *testing.T) {
 			}
 			interruptedHead := gitOutput(t, fixture.root, "rev-parse", "HEAD")
 			_ = fixture.promoter.Close()
-			recovery, err := New(fixture.cfg)
+			recovery, err := New(fixture.cfg, fixture.root, fixture.branch)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -454,7 +412,7 @@ func TestRewritePageAfterMarkerRemovalIsRecognized(t *testing.T) {
 		t.Fatal("interruption occurred before marker removal")
 	}
 	_ = fixture.promoter.Close()
-	retry, err := New(fixture.cfg)
+	retry, err := New(fixture.cfg, fixture.root, fixture.branch)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,43 +434,12 @@ func TestRewritePageAfterMarkerRemovalIsRecognized(t *testing.T) {
 // previews the batch [create_page(A, replacement), fold_proposal(B -> A)].
 func newCreateReplacementFixture(t *testing.T) rewriteFixture {
 	t.Helper()
-	root := filepath.Join(t.TempDir(), "memory")
-	if err := os.MkdirAll(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte("{\"schema_version\":1,\"memory_categories\":[\"domains\"]}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "init", "--quiet", "--initial-branch=main")
-	runGit(t, root, "config", "user.name", "Test")
-	runGit(t, root, "config", "user.email", "test@example.invalid")
-	runGit(t, root, "add", ".")
-	runGit(t, root, "commit", "--quiet", "-m", "initial")
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	proposalInbox, err := inbox.New(root, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proposals := make([]inbox.Proposal, 0, 3)
-	for _, request := range []inbox.Request{
+	batch, proposals := newBatchPromoter(t, nil, []inbox.Request{
 		{Title: "Wuerike é do time da camada de leitura", SuggestedAction: inbox.ActionCreate, Knowledge: "Wuerike faz parte do time da camada de leitura.", SourcePaths: []string{}},
 		{Title: "Guilherme é membro do time da camada de leitura", SuggestedAction: inbox.ActionCreate, Knowledge: "Guilherme é membro do time da camada de leitura.", SourcePaths: []string{}},
 		{Title: "Time usa Go", SuggestedAction: inbox.ActionCreate, Knowledge: "O time da camada de leitura usa Go.", SourcePaths: []string{}},
-	} {
-		proposal, err := proposalInbox.Add(context.Background(), request)
-		if err != nil {
-			t.Fatal(err)
-		}
-		proposals = append(proposals, proposal)
-	}
-	if err := proposalInbox.Close(); err != nil {
-		t.Fatal(err)
-	}
-	cfg := config.Config{MemoryRoot: root, StateRoot: stateRoot, MemoryCategories: []string{"domains"}}
-	promoter, err := New(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	})
+	promoter := batch.promoter
 	requests := []PreviewRequest{
 		{Operation: OperationCreatePage, ProposalID: proposals[0].ID, TargetPath: rewritePagePath, Replacement: rewriteReplacement},
 		{Operation: OperationFoldProposal, ProposalID: proposals[1].ID, FoldInto: proposals[0].ID},
@@ -521,13 +448,9 @@ func newCreateReplacementFixture(t *testing.T) rewriteFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rewriteFixture{
-		batchFixture: batchFixture{
-			root: root, stateRoot: stateRoot, cfg: cfg, promoter: promoter, preview: preview,
-			parent: gitOutput(t, root, "rev-parse", "HEAD"), proposalPaths: []string{proposals[0].Path, proposals[1].Path},
-		},
-		proposals: proposals, requests: requests,
-	}
+	batch.preview = preview
+	batch.proposalPaths = []string{proposals[0].Path, proposals[1].Path}
+	return rewriteFixture{batchFixture: batch, proposals: proposals, requests: requests}
 }
 
 func assertPageAbsent(t *testing.T, fixture rewriteFixture) {
@@ -672,7 +595,7 @@ func TestCreatePageWithReplacementFaultWindowsConverge(t *testing.T) {
 			}
 			interruptedHead := gitOutput(t, fixture.root, "rev-parse", "HEAD")
 			_ = fixture.promoter.Close()
-			recovery, err := New(fixture.cfg)
+			recovery, err := New(fixture.cfg, fixture.root, fixture.branch)
 			if err != nil {
 				t.Fatal(err)
 			}

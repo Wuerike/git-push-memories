@@ -22,7 +22,7 @@ func TestPromoteSkillGrantsOnlyPromotionToolsAndConfirmsExactPreview(t *testing.
 		t.Fatal("invalid skill frontmatter")
 	}
 	frontmatter := text[:frontmatterEnd+4]
-	for _, tool := range []string{"memory_proposal_list", "memory_search", "memory_expand", "memory_reference_snapshot", "memory_reference_expand", "memory_promote_preview", "memory_promote_apply", "memory_promote_batch_preview", "memory_promote_batch_apply"} {
+	for _, tool := range []string{"memory_promote_open", "memory_promote_status", "memory_promote_submit", "memory_page_read", "memory_proposal_list", "memory_search", "memory_expand", "memory_reference_snapshot", "memory_reference_expand", "memory_promote_preview", "memory_promote_apply", "memory_promote_batch_preview", "memory_promote_batch_apply"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)
 		}
@@ -33,7 +33,16 @@ func TestPromoteSkillGrantsOnlyPromotionToolsAndConfirmsExactPreview(t *testing.
 		}
 	}
 	preview := strings.Index(text, "call `memory_promote_preview` exactly once")
-	confirmation := strings.Index(text, "explicit confirmation")
+	// The first "explicit confirmation" guards opening the release; the one that matters follows the preview.
+	if !strings.Contains(text, "after explicit confirmation, call `memory_promote_open`") {
+		t.Fatal("skill does not require confirmation before opening a release")
+	}
+	confirmation := -1
+	if preview >= 0 {
+		if offset := strings.Index(text[preview:], "explicit confirmation"); offset >= 0 {
+			confirmation = preview + offset
+		}
+	}
 	apply := strings.Index(text, "call `memory_promote_apply` exactly once")
 	if preview < 0 || confirmation < preview || apply < confirmation {
 		t.Fatalf("skill does not require preview, confirmation, and apply in order")
@@ -58,7 +67,7 @@ func TestPromoteSkillGrantsOnlyPromotionToolsAndConfirmsExactPreview(t *testing.
 			t.Fatalf("skill is missing reference evidence contract %q", contract)
 		}
 	}
-	for _, contract := range []string{"one to sixteen", "distinct target paths", "memory_promote_batch_preview` exactly once", "memory_promote_batch_apply` exactly once"} {
+	for _, contract := range []string{"batches of at most sixteen proposals", "distinct target paths", "memory_promote_batch_preview` exactly once", "memory_promote_batch_apply` exactly once"} {
 		if !strings.Contains(text, contract) {
 			t.Fatalf("skill is missing batch contract %q", contract)
 		}

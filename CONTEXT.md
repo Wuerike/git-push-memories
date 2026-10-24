@@ -39,3 +39,15 @@ _Avoid_: Page edit, overwrite, section replace
 **Folded proposal**:
 A proposal consumed by a page rewrite in the same curation transaction, with no canonical change of its own.
 _Avoid_: Merged proposal, duplicate, silent discard
+
+**Release**:
+The consolidation of every pending proposal into canonical memory on a dedicated branch, reviewed and merged as one pull request into `main`.
+_Avoid_: Publish, sync, batch (a batch is one commit inside a release)
+
+**Release marker**:
+The `release.lock.json` file on the proposals branch that lists the proposals included in a release and doubles as its lock; it never enters the release branch.
+_Avoid_: Lock file, state file
+
+**Release finalization**:
+Closing a merged release by bringing the new `main` into the proposals branch and removing the consumed proposals and the marker in one push.
+_Avoid_: Cleanup, sync

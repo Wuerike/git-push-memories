@@ -1,7 +1,6 @@
 package mcpserver_test
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -24,46 +23,37 @@ O usuário se chama Wuerike e faz parte do time da camada de leitura.
 const rewriteReplacement = "# Time da camada de leitura\n\n## Membros\n- Wuerike\n- Guilherme\n"
 
 type rewriteFixture struct {
-	root     string
-	session  *mcp.ClientSession
+	*env
+	root     string // the release worktree
 	hash     string
 	proposal [2]string
 	paths    [2]string
 }
 
-func newRewriteFixture(t *testing.T) *rewriteFixture {
+// newRewriteFixture proposes two team proposals, opens the release and, with a baseline page, reads its release hash.
+func newRewriteFixture(t *testing.T, baseline bool) *rewriteFixture {
 	t.Helper()
-	root := newGitRoot(t, map[string]string{rewriteBaselinePath: rewriteBaselinePage})
-	session, stop := startServer(t, root, filepath.Join(t.TempDir(), "state"))
-	t.Cleanup(stop)
-	fixture := &rewriteFixture{root: root, session: session}
+	files := map[string]string(nil)
+	if baseline {
+		files = map[string]string{rewriteBaselinePath: rewriteBaselinePage}
+	}
+	e := newEnv(t, files)
+	fixture := &rewriteFixture{env: e}
 	for index, title := range []string{"Wuerike é do time da camada de leitura", "Guilherme é membro do time da camada de leitura"} {
 		arguments := map[string]any{"title": title, "suggested_action": "create", "knowledge": title + ".", "source_paths": []string{"source.go"}}
-		if index == 0 {
+		if index == 0 && baseline {
 			arguments["suggested_action"], arguments["target"] = "update", rewriteBaselinePath
 		}
-		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_propose", Arguments: arguments})
-		if err != nil || result.IsError {
-			t.Fatalf("memory_propose = %+v, %v", result, err)
-		}
-		proposal := decodeInboxResponse(t, result).Data
+		proposal := e.propose(t, arguments)
 		fixture.proposal[index], fixture.paths[index] = proposal.ID, proposal.Path
 	}
-	read, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_page_read", Arguments: map[string]any{"path": rewriteBaselinePath, "budget_bytes": 8192},
-	})
-	if err != nil || read.IsError {
-		t.Fatalf("memory_page_read = %+v, %v", read, err)
-	}
-	var page struct {
-		Data struct {
-			ContentHash string `json:"content_hash"`
-		} `json:"data"`
-	}
-	decodeStructured(t, read, &page)
-	fixture.hash = page.Data.ContentHash
-	if fixture.hash == "" {
-		t.Fatal("memory_page_read returned no content_hash")
+	fixture.root = e.openRelease(t)
+	if baseline {
+		result, page := e.pageRead(t, "release", rewriteBaselinePath, 8192)
+		if result.IsError || page.Data == nil || page.Data.ContentHash == "" {
+			t.Fatalf("memory_page_read = %+v, %+v", result, page)
+		}
+		fixture.hash = page.Data.ContentHash
 	}
 	return fixture
 }
@@ -74,10 +64,7 @@ func (f *rewriteFixture) rewriteItem(proposalID, replacement string) map[string]
 
 func (f *rewriteFixture) call(t *testing.T, name string, arguments map[string]any) (*mcp.CallToolResult, string, string) {
 	t.Helper()
-	result, err := f.session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
-	if err != nil {
-		t.Fatal(err)
-	}
+	result := f.env.call(t, name, arguments)
 	var decoded struct {
 		Data struct {
 			PreviewToken string `json:"preview_token"`
@@ -133,7 +120,7 @@ func (f *rewriteFixture) wantPage(t *testing.T, want string) {
 }
 
 func TestBatchPreviewAcceptsRewriteAndFold(t *testing.T) {
-	f := newRewriteFixture(t)
+	f := newRewriteFixture(t, true)
 	parent := gitOutput(t, f.root, "rev-parse", "HEAD")
 	result, token, _ := f.call(t, "memory_promote_batch_preview", map[string]any{"items": []map[string]any{
 		f.rewriteItem(f.proposal[0], rewriteReplacement),
@@ -179,7 +166,7 @@ func TestBatchPreviewAcceptsRewriteAndFold(t *testing.T) {
 }
 
 func TestSinglePreviewRejectsFold(t *testing.T) {
-	f := newRewriteFixture(t)
+	f := newRewriteFixture(t, true)
 	result, token, code := f.call(t, "memory_promote_preview", map[string]any{
 		"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0],
 	})
@@ -190,7 +177,7 @@ func TestSinglePreviewRejectsFold(t *testing.T) {
 
 func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 	t.Run("same proposal single previews", func(t *testing.T) {
-		f := newRewriteFixture(t)
+		f := newRewriteFixture(t, true)
 		first := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		second := f.preview(t, f.rewriteItem(f.proposal[0], "# Time\n\n## Membros\n- Outra pessoa\n"))
 		f.wantInvalid(t, "memory_promote_apply", first)
@@ -201,7 +188,7 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		f.wantPage(t, "# Time\n<!-- @id: time-camada-de-leitura -->\n\n## Membros\n<!-- @id: time-camada-de-leitura-membros -->\n- Outra pessoa\n")
 	})
 	t.Run("different proposal does not invalidate", func(t *testing.T) {
-		f := newRewriteFixture(t)
+		f := newRewriteFixture(t, true)
 		first := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		f.preview(t, map[string]any{"operation": "create_page", "proposal_id": f.proposal[1], "target_path": "memories/domains/guilherme.md"})
 		if result, _, code := f.call(t, "memory_promote_apply", map[string]any{"preview_token": first}); result.IsError {
@@ -209,7 +196,7 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		}
 	})
 	t.Run("batch preview invalidates single token sharing a proposal", func(t *testing.T) {
-		f := newRewriteFixture(t)
+		f := newRewriteFixture(t, true)
 		single := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		batch := f.batchPreview(t, f.rewriteItem(f.proposal[0], rewriteReplacement),
 			map[string]any{"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0]})
@@ -219,7 +206,7 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		}
 	})
 	t.Run("single preview invalidates batch token sharing a proposal", func(t *testing.T) {
-		f := newRewriteFixture(t)
+		f := newRewriteFixture(t, true)
 		batch := f.batchPreview(t, f.rewriteItem(f.proposal[0], rewriteReplacement),
 			map[string]any{"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0]})
 		single := f.preview(t, map[string]any{"operation": "create_page", "proposal_id": f.proposal[1], "target_path": "memories/domains/guilherme.md"})
@@ -230,7 +217,7 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		}
 	})
 	t.Run("failing preview keeps existing tokens", func(t *testing.T) {
-		f := newRewriteFixture(t)
+		f := newRewriteFixture(t, true)
 		first := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		bad := f.rewriteItem(f.proposal[0], rewriteReplacement)
 		bad["content_hash"] = strings.Repeat("0", 64)
@@ -244,28 +231,15 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 }
 
 func TestBatchPreviewAcceptsCreatePageWithReplacementAndFold(t *testing.T) {
-	root := newGitRoot(t, nil)
-	session, stop := startServer(t, root, filepath.Join(t.TempDir(), "state"))
-	t.Cleanup(stop)
-	var proposals, paths [2]string
-	for index, title := range []string{"Wuerike é do time da camada de leitura", "Guilherme é membro do time da camada de leitura"} {
-		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_propose", Arguments: map[string]any{
-			"title": title, "suggested_action": "create", "knowledge": title + ".", "source_paths": []string{"source.go"},
-		}})
-		if err != nil || result.IsError {
-			t.Fatalf("memory_propose = %+v, %v", result, err)
-		}
-		proposal := decodeInboxResponse(t, result).Data
-		proposals[index], paths[index] = proposal.ID, proposal.Path
-	}
-	f := &rewriteFixture{root: root, session: session}
+	f := newRewriteFixture(t, false)
+	root := f.root
 	parent := gitOutput(t, root, "rev-parse", "HEAD")
 	token := f.batchPreview(t,
-		map[string]any{"operation": "create_page", "proposal_id": proposals[0], "target_path": rewriteBaselinePath, "replacement": rewriteReplacement},
-		map[string]any{"operation": "fold_proposal", "proposal_id": proposals[1], "fold_into": proposals[0]},
+		map[string]any{"operation": "create_page", "proposal_id": f.proposal[0], "target_path": rewriteBaselinePath, "replacement": rewriteReplacement},
+		map[string]any{"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0]},
 	)
-	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rewriteBaselinePath))); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("preview created the page: %v", err)
+	if exists(root, rewriteBaselinePath) {
+		t.Fatal("preview created the page")
 	}
 	if result, _, code := f.call(t, "memory_promote_batch_apply", map[string]any{"preview_token": token}); result.IsError {
 		t.Fatalf("memory_promote_batch_apply = %+v, code %q", result, code)
@@ -275,9 +249,9 @@ func TestBatchPreviewAcceptsCreatePageWithReplacementAndFold(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.wantPage(t, string(golden))
-	for _, path := range paths {
-		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(path))); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("proposal %s remains: %v", path, err)
+	for _, path := range f.paths {
+		if exists(root, path) {
+			t.Fatalf("proposal %s remains", path)
 		}
 	}
 	if got := gitOutput(t, root, "rev-parse", "HEAD^"); got != parent {
