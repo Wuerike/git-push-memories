@@ -175,30 +175,33 @@ func (w *Workspace) EnsureRead(ctx context.Context) error {
 // UpdateRead moves the read worktree to origin/main under the repository lock.
 // It also takes the directory lock memory readers share, so a reader never sees a half-written checkout.
 func (w *Workspace) UpdateRead(ctx context.Context) error {
-	return repolock.With(ctx, w.Paths.State, func() error {
-		dir, err := os.Open(w.Paths.Read)
-		if err != nil {
-			return errors.New("read worktree is missing; run setup")
+	return repolock.With(ctx, w.Paths.State, func() error { return w.UpdateReadLocked(ctx) })
+}
+
+// UpdateReadLocked is UpdateRead for callers that already hold the repository lock.
+func (w *Workspace) UpdateReadLocked(ctx context.Context) error {
+	dir, err := os.Open(w.Paths.Read)
+	if err != nil {
+		return errors.New("read worktree is missing; run setup")
+	}
+	defer dir.Close()
+	for {
+		err := unix.Flock(int(dir.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+		if err == nil {
+			break
 		}
-		defer dir.Close()
-		for {
-			err := unix.Flock(int(dir.Fd()), unix.LOCK_EX|unix.LOCK_NB)
-			if err == nil {
-				break
-			}
-			if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
-				return err
-			}
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(5 * time.Millisecond):
-			}
+		if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
+			return err
 		}
-		defer unix.Flock(int(dir.Fd()), unix.LOCK_UN)
-		_, err = Git{Dir: w.Paths.Read}.Output(ctx, "checkout", "--detach", "-f", "origin/main")
-		return err
-	})
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+	defer unix.Flock(int(dir.Fd()), unix.LOCK_UN)
+	_, err = Git{Dir: w.Paths.Read}.Output(ctx, "checkout", "--detach", "-f", "origin/main")
+	return err
 }
 
 // Refresh fetches when the TTL expired and, on success, moves the read worktree.

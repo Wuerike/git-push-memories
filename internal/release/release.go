@@ -190,6 +190,13 @@ func (m *Manager) open(ctx context.Context) (Status, error) {
 		if marker, found, err := m.remoteMarker(ctx); err != nil {
 			return Status{}, err
 		} else if found {
+			finalized, err := m.finalizeIfMerged(ctx, marker)
+			if err != nil {
+				return Status{}, err
+			}
+			if finalized {
+				continue
+			}
 			return Status{}, fmt.Errorf("%w: opened by %s at %s", ErrActive, marker.OpenedBy, marker.OpenedAt)
 		}
 		m.cleanOrphans(ctx, "")
@@ -255,6 +262,29 @@ func (m *Manager) open(ctx context.Context) (Status, error) {
 	return Status{}, workspace.ErrRejected
 }
 
+// OpenOrResume continues the release in progress, closing it first when its PR was merged, or opens a new one.
+func (m *Manager) OpenOrResume(ctx context.Context) (Status, error) {
+	status, err := m.Status(ctx)
+	if err != nil {
+		return Status{}, err
+	}
+	if !status.Open {
+		return m.Open(ctx)
+	}
+	var finalized bool
+	if err := m.locked(ctx, func() error {
+		var err error
+		finalized, err = m.finalizeIfMerged(ctx, *status.Marker)
+		return err
+	}); err != nil {
+		return Status{}, err
+	}
+	if finalized {
+		return m.Open(ctx)
+	}
+	return m.Resume(ctx)
+}
+
 // Resume makes the release worktree available on this machine and reports its status.
 func (m *Manager) Resume(ctx context.Context) (Status, error) {
 	var status Status
@@ -304,6 +334,9 @@ func (m *Manager) Abort(ctx context.Context) error {
 			return err
 		}
 		if found {
+			if err := m.checkNotMerged(ctx, marker); err != nil {
+				return err
+			}
 			if err := m.dropMarker(ctx); err != nil {
 				return err
 			}

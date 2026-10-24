@@ -12,6 +12,7 @@ import (
 	"sync"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/forge/github"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
@@ -112,6 +113,10 @@ func New(cfg config.Config, version string) (*Server, error) {
 		Name:        "memory_promote_status",
 		Description: "Report the release in progress: who opened it, the proposals it includes, and which are still pending in the release branch.",
 	}, server.releaseStatus)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_promote_submit",
+		Description: "Send the consolidated release for review: push the release branch and open its pull request into main (or reuse the open one). Refused while proposals are still pending in the release. If the latest pull request was already merged, the release is finalized instead.",
+	}, server.submitRelease)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_promote_preview",
 		Description: "Preview one promotion decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
@@ -928,27 +933,43 @@ func releaseFailure(err error) (*mcp.CallToolResult, releaseResponse, error) {
 		code = "network_unavailable"
 	case errors.Is(err, workspace.ErrDirty):
 		code = "worktree_dirty"
+	case errors.Is(err, release.ErrPending):
+		code = "proposals_pending"
+	case errors.Is(err, release.ErrNothingToResume):
+		code = "release_not_local"
+	case errors.Is(err, github.ErrUnavailable), errors.Is(err, github.ErrNotGitHub):
+		code = "gh_unavailable"
 	}
 	return &mcp.CallToolResult{IsError: true}, releaseResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
 // openRelease resumes the release already in progress here, or opens a new one.
 func (s *Server) openRelease(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, releaseResponse, error) {
-	status, err := s.releases.Status(ctx)
-	if err == nil && status.Open {
-		if status, err = s.releases.Resume(ctx); err != nil {
-			return releaseFailure(err)
-		}
-		return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
-	}
-	if err != nil {
-		return releaseFailure(err)
-	}
-	status, err = s.releases.Open(ctx)
+	status, err := s.releases.OpenOrResume(ctx)
 	if err != nil {
 		return releaseFailure(err)
 	}
 	return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
+}
+
+type submitData struct {
+	PullRequest string `json:"pull_request,omitempty"`
+	Finalized   bool   `json:"finalized"`
+}
+
+type submitResponse struct {
+	SchemaVersion int         `json:"schema_version"`
+	Data          *submitData `json:"data,omitempty"`
+	Error         *toolError  `json:"error,omitempty"`
+}
+
+func (s *Server) submitRelease(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, submitResponse, error) {
+	url, err := s.releases.Submit(ctx)
+	if err != nil {
+		result, failure, _ := releaseFailure(err)
+		return result, submitResponse{SchemaVersion: 1, Error: failure.Error}, nil
+	}
+	return nil, submitResponse{SchemaVersion: 1, Data: &submitData{PullRequest: url, Finalized: url == ""}}, nil
 }
 
 func (s *Server) releaseStatus(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, releaseResponse, error) {

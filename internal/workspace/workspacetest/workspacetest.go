@@ -109,6 +109,9 @@ func (gh *GH) SetPR(t *testing.T, state, mergeOID string) {
 	os.WriteFile(filepath.Join(gh.dir, "oid"), []byte(mergeOID), 0o644)
 }
 
+// GitHubURL is the repository URL every Managed fixture is configured with.
+const GitHubURL = "git@github.com:o/r.git"
+
 // Managed is a fully set-up repository: a bare remote seeded with main, and the
 // managed clone with read and proposals worktrees.
 type Managed struct {
@@ -126,11 +129,20 @@ func Setup(t *testing.T, files map[string]string) *Managed {
 		seed[name] = contents
 	}
 	Seed(t, remote, "main", seed)
-	prepared, err := setup.Prepare(context.Background(), setup.Options{URL: remote})
+	// The configured URL looks like GitHub (so gh -R works) while Git resolves it to the local bare repository.
+	configFile := filepath.Join(os.Getenv("HOME"), ".gitconfig")
+	existing, err := os.ReadFile(configFile)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := config.Save(remote); err != nil {
+	if err := os.WriteFile(configFile, append(existing, []byte("[url \""+remote+"\"]\n\tinsteadOf = "+GitHubURL+"\n")...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := setup.Prepare(context.Background(), setup.Options{URL: GitHubURL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(GitHubURL); err != nil {
 		t.Fatal(err)
 	}
 	return &Managed{Remote: remote, Config: prepared.Config}
