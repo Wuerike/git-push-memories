@@ -20,7 +20,6 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
-	"github.com/Wuerike/git-push-memories/internal/workspace"
 	"golang.org/x/sys/unix"
 )
 
@@ -67,13 +66,14 @@ type transactionItem struct {
 	PostStateGitMode string        `json:"post_state_git_mode,omitempty"`
 }
 
-func Recover(ctx context.Context, cfg config.Config) (BatchResult, error) {
+// Recover finishes or rolls back an interrupted transaction on the release worktree at root.
+func Recover(ctx context.Context, cfg config.Config, root, branch string) (BatchResult, error) {
 	if _, err := os.Lstat(cfg.StateRoot); errors.Is(err, os.ErrNotExist) {
 		return BatchResult{}, nil
 	} else if err != nil {
 		return BatchResult{}, ErrRecovery
 	}
-	promoter, err := New(cfg, cfg.Paths.Proposals, workspace.ProposalsBranch)
+	promoter, err := New(cfg, root, branch)
 	if err != nil {
 		return BatchResult{}, err
 	}
@@ -193,9 +193,6 @@ func (promoter *Promoter) recoverLocked(ctx context.Context) (BatchResult, trans
 			}
 		}
 		for _, item := range marker.Items {
-			if item.Decision == "pending" {
-				continue
-			}
 			if err := promoter.removeRecoveredProposal(item); err != nil {
 				return BatchResult{}, marker, err
 			}
@@ -251,16 +248,8 @@ func (promoter *Promoter) recognizeCommittedBatch(ctx context.Context, batch Bat
 		if err != nil {
 			return BatchResult{}, false, ErrDrift
 		}
-		if item.Decision == "pending" {
-			contents, _, err := promoter.readControlledFile(item.ProposalPath)
-			mode, blob, entryErr := parseIndexEntry(proposalEntry, item.ProposalPath)
-			if err != nil || contentHash(contents) != item.ProposalHash || entryErr != nil || mode != "100644" || blob != item.ProposalBlob {
-				return BatchResult{}, false, ErrDrift
-			}
-		} else {
-			if _, _, err := promoter.readControlledFile(item.ProposalPath); !errors.Is(err, os.ErrNotExist) || len(proposalEntry) != 0 {
-				return BatchResult{}, false, ErrDrift
-			}
+		if _, _, err := promoter.readControlledFile(item.ProposalPath); !errors.Is(err, os.ErrNotExist) || len(proposalEntry) != 0 {
+			return BatchResult{}, false, ErrDrift
 		}
 		if item.TargetPath == "" {
 			continue
@@ -293,7 +282,7 @@ func (promoter *Promoter) commitBatch(ctx context.Context, batch BatchPreview, v
 		return BatchResult{}, fmt.Errorf("resolve Git index")
 	}
 	branch, err := promoter.gitText(ctx, nil, "symbolic-ref", "--quiet", "HEAD")
-	if err != nil || branch != "refs/heads/main" {
+	if err != nil || branch != promoter.ref() {
 		return BatchResult{}, ErrDrift
 	}
 	head, err := promoter.gitText(ctx, nil, "rev-parse", "--verify", "HEAD")
@@ -344,10 +333,8 @@ func (promoter *Promoter) commitBatch(ctx context.Context, batch BatchPreview, v
 				return BatchResult{}, fmt.Errorf("remove memory from promotion tree")
 			}
 		}
-		if preview.Operation != OperationKeepPending {
-			if _, err := promoter.gitInput(ctx, commitEnvironment, nil, "update-index", "--force-remove", "--", preview.ProposalPath); err != nil {
-				return BatchResult{}, fmt.Errorf("remove proposal from promotion tree")
-			}
+		if _, err := promoter.gitInput(ctx, commitEnvironment, nil, "update-index", "--force-remove", "--", preview.ProposalPath); err != nil {
+			return BatchResult{}, fmt.Errorf("remove proposal from promotion tree")
 		}
 		marker.Items[index] = item
 	}
@@ -401,10 +388,8 @@ func (promoter *Promoter) commitBatch(ctx context.Context, batch BatchPreview, v
 				return BatchResult{}, fmt.Errorf("reconcile removed memory index entry")
 			}
 		}
-		if item.Decision != "pending" {
-			if _, err := promoter.gitInput(ctx, finalEnvironment, nil, "update-index", "--force-remove", "--", item.ProposalPath); err != nil {
-				return BatchResult{}, fmt.Errorf("reconcile proposal index entry")
-			}
+		if _, err := promoter.gitInput(ctx, finalEnvironment, nil, "update-index", "--force-remove", "--", item.ProposalPath); err != nil {
+			return BatchResult{}, fmt.Errorf("reconcile proposal index entry")
 		}
 	}
 	finalIndex, _, err := readRegularFile(marker.IndexArtifact)
@@ -512,10 +497,8 @@ func (promoter *Promoter) commitBatch(ctx context.Context, batch BatchPreview, v
 		return BatchResult{}, err
 	}
 	for index, item := range marker.Items {
-		if item.Decision != "pending" {
-			if err := promoter.removeRecoveredProposal(item); err != nil {
-				return BatchResult{}, err
-			}
+		if err := promoter.removeRecoveredProposal(item); err != nil {
+			return BatchResult{}, err
 		}
 		if err := promoter.injectFault(fmt.Sprintf("after_proposal_removal_%d", index+1)); err != nil {
 			return BatchResult{}, err
@@ -615,10 +598,6 @@ func (promoter *Promoter) applyWorktree(ctx context.Context, preview Preview) er
 			}, Mode: memory.ApplyBaseline,
 		})
 	case OperationFoldProposal:
-		if err = preflight(); err == nil {
-			result.State = memory.ReconcilePostState
-		}
-	case OperationKeepPending:
 		if err = preflight(); err == nil {
 			result.State = memory.ReconcilePostState
 		}
@@ -766,16 +745,9 @@ func (promoter *Promoter) verifyTransactionCommit(ctx context.Context, marker tr
 				return ErrRecovery
 			}
 		}
-		if item.Decision == "pending" {
-			committedBlob, err := promoter.gitText(ctx, nil, "rev-parse", marker.Commit+":"+item.ProposalPath)
-			if err != nil || committedBlob != item.ProposalBlob {
-				return ErrRecovery
-			}
-		} else {
-			want = append(want, item.ProposalPath)
-			if _, err := promoter.gitInput(ctx, nil, nil, "cat-file", "-e", marker.Commit+":"+item.ProposalPath); err == nil {
-				return ErrRecovery
-			}
+		want = append(want, item.ProposalPath)
+		if _, err := promoter.gitInput(ctx, nil, nil, "cat-file", "-e", marker.Commit+":"+item.ProposalPath); err == nil {
+			return ErrRecovery
 		}
 		trailer := "Git-Push-Memories-Proposal: " + item.ProposalID + "\nGit-Push-Memories-Decision: " + item.Decision
 		if item.Reason != "" {
@@ -846,7 +818,7 @@ func (promoter *Promoter) readTransactionMarker() (transactionMarker, error) {
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return marker, ErrRecovery
 	}
-	if marker.SchemaVersion != transactionSchemaVersion || !transactionIDPattern.MatchString(marker.ID) || marker.MemoryRoot == "" || marker.Branch != "refs/heads/main" ||
+	if marker.SchemaVersion != transactionSchemaVersion || !transactionIDPattern.MatchString(marker.ID) || marker.MemoryRoot == "" || marker.Branch != promoter.ref() ||
 		!validObjectID(marker.Parent) || !validObjectID(marker.Commit) || !validObjectID(marker.Tree) || !filepath.IsAbs(marker.IndexPath) ||
 		!filepath.IsAbs(marker.IndexArtifact) || filepath.Base(marker.IndexArtifact) != ".git-push-memories-promotion-index-"+marker.ID || !validContentHash(marker.OriginalIndexHash) ||
 		!validContentHash(marker.FinalIndexHash) || !validContentHash(marker.PreviewHash) || !validContentHash(marker.EvidenceHash) || len(marker.Items) == 0 || len(marker.Items) > MaxBatchItems {
@@ -860,7 +832,6 @@ func (promoter *Promoter) readTransactionMarker() (transactionMarker, error) {
 		_, duplicateProposal := proposalIDs[item.ProposalID]
 		proposalIDs[item.ProposalID] = struct{}{}
 		validDiscard := item.Operation == OperationDiscard && item.Decision == "discarded" && validDiscardReason(item.Reason) && item.TargetPath == "" && !item.BaselineExists && !item.PostStateExists
-		validPending := item.Operation == OperationKeepPending && item.Decision == "pending" && item.Reason == "" && item.TargetPath == "" && item.SectionID == "" && !item.BaselineExists && !item.PostStateExists
 		validFold := item.Operation == OperationFoldProposal && item.Decision == "consumed" && item.Reason == "" && item.TargetPath == "" && item.SectionID == "" && !item.BaselineExists && !item.PostStateExists
 		validOperation := item.Operation == OperationCreatePage || item.Operation == OperationCreateSection || item.Operation == OperationReplaceSection || item.Operation == OperationRemoveSection || item.Operation == OperationRemovePage || item.Operation == OperationRewritePage
 		validMutation := validOperation && item.Decision == "consumed" && item.Reason == "" && item.SectionID != "" && promoter.cfg.IsMemoryPath(item.TargetPath) &&
@@ -872,10 +843,10 @@ func (promoter *Promoter) readTransactionMarker() (transactionMarker, error) {
 		validBaseline := !item.BaselineExists && item.BaselineBlob == "" && item.BaselineHash == "" && item.BaselineMode == 0 ||
 			item.BaselineExists && validObjectID(item.BaselineBlob) && validContentHash(item.BaselineHash) && item.BaselineMode <= 0o777
 		validPostState := !item.PostStateExists && item.PostStateBlob == "" && item.PostStateGitMode == "" &&
-			((item.Operation == OperationDiscard || item.Operation == OperationKeepPending || item.Operation == OperationFoldProposal) && item.PostStateHash == "" || item.Operation == OperationRemovePage && item.PostStateHash == contentHash(nil)) ||
+			((item.Operation == OperationDiscard || item.Operation == OperationFoldProposal) && item.PostStateHash == "" || item.Operation == OperationRemovePage && item.PostStateHash == contentHash(nil)) ||
 			item.PostStateExists && validObjectID(item.PostStateBlob) && validContentHash(item.PostStateHash) && (item.PostStateGitMode == "100644" || item.PostStateGitMode == "100755")
 		if !transactionIDPattern.MatchString(item.ProposalID) || !validProposalPath || duplicateProposal || duplicateTarget && item.TargetPath != "" ||
-			!validObjectID(item.ProposalBlob) || !validContentHash(item.ProposalHash) || !(validDiscard || validPending || validFold || validMutation) || !validBaseline || !validPostState {
+			!validObjectID(item.ProposalBlob) || !validContentHash(item.ProposalHash) || !(validDiscard || validFold || validMutation) || !validBaseline || !validPostState {
 			return marker, ErrRecovery
 		}
 	}
@@ -980,8 +951,6 @@ func transactionItemFromPreview(preview Preview) transactionItem {
 	switch preview.Operation {
 	case OperationDiscard:
 		item.Decision = "discarded"
-	case OperationKeepPending:
-		item.Decision = "pending"
 	case OperationFoldProposal:
 	default:
 		item.BaselineExists = preview.Operation != OperationCreatePage

@@ -43,7 +43,6 @@ const (
 	OperationRemoveSection  Operation = "remove_section"
 	OperationRemovePage     Operation = "remove_page"
 	OperationDiscard        Operation = "discard_proposal"
-	OperationKeepPending    Operation = "keep_pending"
 	OperationRewritePage    Operation = "rewrite_page"
 	OperationFoldProposal   Operation = "fold_proposal"
 )
@@ -168,6 +167,7 @@ type Promoter struct {
 	rootPath   string
 	inbox      *inbox.Inbox
 	repository *memory.Repository
+	branch     string // short name of the branch the worktree must be on
 	guard      *intake.Guard
 	fault      func(string) error
 }
@@ -200,7 +200,7 @@ func New(cfg config.Config, rootDir, branch string) (*Promoter, error) {
 		_ = root.Close()
 		return nil, err
 	}
-	return &Promoter{cfg: cfg, root: root, rootPath: rootPath, inbox: proposalInbox, repository: repository, guard: guard}, nil
+	return &Promoter{cfg: cfg, root: root, rootPath: rootPath, inbox: proposalInbox, repository: repository, branch: branch, guard: guard}, nil
 }
 
 func (promoter *Promoter) Close() error {
@@ -358,7 +358,6 @@ func (promoter *Promoter) PreviewBatch(ctx context.Context, requests []PreviewRe
 		return BatchPreview{}, ErrInvalidBatch
 	}
 	batch := BatchPreview{Items: make([]Preview, 0, len(requests))}
-	hasCommittedDecision := false
 	proposalIDs := make(map[string]struct{}, len(requests))
 	targets := make(map[string]struct{}, len(requests))
 	for _, request := range requests {
@@ -385,10 +384,6 @@ func (promoter *Promoter) PreviewBatch(ctx context.Context, requests []PreviewRe
 			return BatchPreview{}, ErrDrift
 		}
 		batch.Items = append(batch.Items, preview)
-		hasCommittedDecision = hasCommittedDecision || preview.Operation != OperationKeepPending
-	}
-	if !hasCommittedDecision {
-		return BatchPreview{}, ErrInvalidBatch
 	}
 	diffs := make([]string, len(batch.Items))
 	for index, preview := range batch.Items {
@@ -412,7 +407,7 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 	if operation != OperationFoldProposal && request.FoldInto != "" {
 		return Preview{}, memory.ErrInvalidPath
 	}
-	if operation != OperationDiscard && operation != OperationKeepPending && operation != OperationFoldProposal && !promoter.cfg.IsMemoryPath(targetPath) {
+	if operation != OperationDiscard && operation != OperationFoldProposal && !promoter.cfg.IsMemoryPath(targetPath) {
 		return Preview{}, memory.ErrInvalidPath
 	}
 	if err := promoter.inbox.Confirm(ctx, snapshot); err != nil {
@@ -589,20 +584,13 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 			return Preview{}, memory.ErrInvalidPath
 		}
 		preview.head = snapshot.Head
-	case OperationKeepPending:
-		if targetPath != "" || sectionID != "" || request.ContentHash != "" || heading != "" || request.Replacement != "" || request.Reason != "" {
-			return Preview{}, memory.ErrInvalidPath
-		}
-		preview.head = snapshot.Head
 	default:
 		return Preview{}, ErrUnsupported
 	}
 	if preview.head != snapshot.Head {
 		return Preview{}, ErrDrift
 	}
-	if operation == OperationKeepPending {
-		preview.Diff = ""
-	} else if targetDiff == "" {
+	if targetDiff == "" {
 		preview.Diff = unifieddiff.Delete(snapshot.Proposal.Path, snapshot.Contents)
 	} else {
 		preview.Diff = targetDiff + "\n" + unifieddiff.Delete(snapshot.Proposal.Path, snapshot.Contents)
@@ -620,7 +608,7 @@ func supports(operation Operation, action inbox.Action) bool {
 		return action == inbox.ActionRemove
 	case OperationRewritePage, OperationFoldProposal:
 		return action == inbox.ActionCreate || action == inbox.ActionUpdate || action == inbox.ActionRemove
-	case OperationDiscard, OperationKeepPending:
+	case OperationDiscard:
 		return true
 	default:
 		return false
@@ -636,9 +624,11 @@ func validDiscardReason(reason DiscardReason) bool {
 	}
 }
 
+func (promoter *Promoter) ref() string { return "refs/heads/" + promoter.branch }
+
 func (promoter *Promoter) confirmConfig(ctx context.Context, expectedHead string) error {
-	current, err := config.Resolve(promoter.rootPath)
-	if err != nil || current.MemoryRoot != promoter.cfg.MemoryRoot || !slices.Equal(current.MemoryCategories, promoter.cfg.MemoryCategories) {
+	categories, err := config.LoadRepositoryConfig(promoter.rootPath)
+	if err != nil || !slices.Equal(categories, promoter.cfg.MemoryCategories) {
 		return ErrDrift
 	}
 	for _, arguments := range [][]string{

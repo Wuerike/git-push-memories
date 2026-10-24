@@ -401,3 +401,49 @@ func CheckIdentity(ctx context.Context) error {
 	}
 	return nil
 }
+
+// Rev resolves ref to a commit in dir.
+func Rev(ctx context.Context, dir, ref string) (string, error) {
+	return Git{Dir: dir}.Output(ctx, "rev-parse", "--verify", ref+"^{commit}")
+}
+
+// ResetHard moves dir's branch and worktree to ref, discarding everything after it.
+func ResetHard(ctx context.Context, dir, ref string) error {
+	_, err := Git{Dir: dir}.Output(ctx, "reset", "--hard", ref)
+	return err
+}
+
+// DeleteRemoteBranch removes branch from the remote; a branch that is already gone is not an error.
+func (w *Workspace) DeleteRemoteBranch(ctx context.Context, branch string) error {
+	exists, err := w.RemoteBranchExists(ctx, branch)
+	if err != nil || !exists {
+		return err
+	}
+	if _, err := w.Repo().Net(ctx, "push", "origin", "--delete", "refs/heads/"+branch); err != nil {
+		return err
+	}
+	return w.Fetch(ctx)
+}
+
+// AddReleaseWorktree creates the release worktree on branch. With create, the branch is cut at start.
+func (w *Workspace) AddReleaseWorktree(ctx context.Context, branch, start string, create bool) error {
+	_, _ = w.Repo().Output(ctx, "worktree", "prune")
+	if create {
+		_, err := w.Repo().Output(ctx, "worktree", "add", "-b", branch, w.Paths.Release, start)
+		return err
+	}
+	_, err := w.Repo().Output(ctx, "worktree", "add", w.Paths.Release, branch)
+	return err
+}
+
+// ReleaseBranch returns the branch checked out in the release worktree, or "" when there is none.
+func (w *Workspace) ReleaseBranch(ctx context.Context) string {
+	if _, err := os.Stat(filepath.Join(w.Paths.Release, ".git")); err != nil {
+		return ""
+	}
+	branch, err := Git{Dir: w.Paths.Release}.Output(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return branch
+}

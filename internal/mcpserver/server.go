@@ -17,6 +17,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/promotion"
 	"github.com/Wuerike/git-push-memories/internal/reference"
+	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/workspace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,7 +31,8 @@ type Server struct {
 	stateRoot  string
 	inbox      *inbox.Inbox
 	inboxMu    sync.Mutex
-	promoter   *promotion.Promoter
+	releases   *release.Manager
+	recoverErr error // set when startup recovery of an interrupted promotion failed
 	promoterMu sync.Mutex
 	previews   map[string]pendingPromotion
 	batches    map[string]pendingBatchPromotion
@@ -67,6 +69,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 		guard:      guard,
 		references: reference.New(),
 		cfg:        cfg,
+		releases:   release.New(cfg),
 		stateRoot:  cfg.StateRoot,
 		inner: mcp.NewServer(&mcp.Implementation{
 			Name:    "git-push-memories",
@@ -102,8 +105,16 @@ func New(cfg config.Config, version string) (*Server, error) {
 		Description: "List committed Markdown proposals and configured memory categories for explicit human promotion.",
 	}, server.listProposals)
 	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_promote_open",
+		Description: "Open a release (locks promotion for everyone and cuts the release branch from the proposals branch) or return the one already open on this machine. Only /promote calls this, after explicit human confirmation.",
+	}, server.openRelease)
+	mcp.AddTool(server.inner, &mcp.Tool{
+		Name:        "memory_promote_status",
+		Description: "Report the release in progress: who opened it, the proposals it includes, and which are still pending in the release branch.",
+	}, server.releaseStatus)
+	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_promote_preview",
-		Description: "Preview one promotion decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal, keep_pending) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
+		Description: "Preview one promotion decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
 	}, server.previewPromotion)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_promote_apply",
@@ -123,10 +134,12 @@ func New(cfg config.Config, version string) (*Server, error) {
 func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	defer s.retriever.Close()
 	defer s.closeInbox()
-	defer s.closePromoter()
 	defer s.closePages()
-	if _, err := promotion.Recover(ctx, s.cfg); err != nil {
-		return err
+	// A failed recovery must not take /remember and search down; it only blocks /promote.
+	if root, branch, ok := s.releases.Active(ctx); ok {
+		if _, err := promotion.Recover(ctx, s.cfg, root, branch); err != nil {
+			s.recoverErr = err
+		}
 	}
 	transport := &mcp.IOTransport{
 		Reader: io.NopCloser(input),
@@ -139,16 +152,19 @@ type searchInput struct {
 	Query       string `json:"query" jsonschema:"retrieval query"`
 	PathPrefix  string `json:"path_prefix,omitempty" jsonschema:"optional canonical relative path scope"`
 	BudgetBytes int    `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the ContextBundle JSON"`
+	Source      string `json:"source,omitempty" jsonschema:"main (default, published memory) or release (the open release; only for /promote)"`
 }
 
 type expandInput struct {
 	Handle      retrieval.Handle `json:"handle" jsonschema:"handle returned by memory_search"`
 	BudgetBytes int              `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the ContextBundle JSON"`
+	Source      string           `json:"source,omitempty" jsonschema:"must match the source of the search that returned the handle: main (default) or release"`
 }
 
 type pageReadInput struct {
 	Path        string `json:"path" jsonschema:"canonical relative memory page path inside a configured category"`
 	BudgetBytes int    `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the page JSON data object"`
+	Source      string `json:"source,omitempty" jsonschema:"main (default) or release (the open release; only for /promote)"`
 }
 
 type pageReadData struct {
@@ -189,7 +205,7 @@ type listProposalsInput struct {
 }
 
 type previewPromotionInput struct {
-	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, discard_proposal, or keep_pending; fold_proposal is accepted only by memory_promote_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
+	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, or discard_proposal; fold_proposal is accepted only by memory_promote_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
 	ProposalID  string `json:"proposal_id" jsonschema:"identifier of one committed proposal"`
 	TargetPath  string `json:"target_path,omitempty" jsonschema:"canonical page path inside a configured memory category; omitted for fold_proposal and discard_proposal"`
 	SectionID   string `json:"section_id,omitempty" jsonschema:"leaf section identifier required by replace_section, remove_section, or remove_page"`
@@ -291,31 +307,94 @@ type toolResponse struct {
 	Error         *toolError               `json:"error,omitempty"`
 }
 
-// touchRead answers from the read worktree as it is and refreshes it in the background when the TTL expired.
-func (s *Server) touchRead(ctx context.Context) {
-	_, _ = s.cfg.Workspace().ResolveRead(ctx, false)
+var errUnknownSource = errors.New("unknown source")
+
+// sourceRoot picks the worktree a read tool looks at. "main" (default) answers from the read
+// worktree and refreshes it in the background; "release" needs a release checked out here.
+func (s *Server) sourceRoot(ctx context.Context, source string) (string, error) {
+	switch source {
+	case "", "main":
+		return s.cfg.Workspace().ResolveRead(ctx, false)
+	case "release":
+		root, _, ok := s.releases.Active(ctx)
+		if !ok {
+			return "", release.ErrNoRelease
+		}
+		return root, nil
+	}
+	return "", errUnknownSource
+}
+
+func sourceErrorCode(err error, fallback string) string {
+	switch {
+	case errors.Is(err, release.ErrNoRelease):
+		return "no_release"
+	case errors.Is(err, errUnknownSource):
+		return "invalid_source"
+	}
+	return fallback
+}
+
+// retrieverFor returns the long-lived retriever for main, or a short-lived one over the release worktree.
+func (s *Server) retrieverFor(ctx context.Context, source string) (*retrieval.Retriever, func(), error) {
+	root, err := s.sourceRoot(ctx, source)
+	if err != nil {
+		return nil, nil, err
+	}
+	if source == "" || source == "main" {
+		return s.retriever, func() {}, nil
+	}
+	retriever, err := retrieval.New(root, s.cfg.MemoryCategories...)
+	if err != nil {
+		return nil, nil, err
+	}
+	return retriever, func() { _ = retriever.Close() }, nil
+}
+
+func retrieverFailure(err error) (*mcp.CallToolResult, toolResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, toolResponse{SchemaVersion: 1, Error: &toolError{Code: sourceErrorCode(err, retrieval.ErrorCode(err))}}, nil
+}
+
+func (s *Server) pagesFor(ctx context.Context, source string) (*memory.Repository, func(), error) {
+	root, err := s.sourceRoot(ctx, source)
+	if err != nil {
+		return nil, nil, err
+	}
+	if source == "" || source == "main" {
+		repository, err := s.pageRepository()
+		return repository, func() {}, err
+	}
+	repository, err := memory.Open(root)
+	if err != nil {
+		return nil, nil, err
+	}
+	return repository, func() { _ = repository.Close() }, nil
 }
 
 func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searchInput) (*mcp.CallToolResult, toolResponse, error) {
-	s.touchRead(ctx)
-	bundle, err := s.retriever.Retrieve(ctx, input.Query, retrieval.Scope{PathPrefix: input.PathPrefix}, input.BudgetBytes)
+	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
+	if err != nil {
+		return retrieverFailure(err)
+	}
+	defer closeRetriever()
+	bundle, err := retriever.Retrieve(ctx, input.Query, retrieval.Scope{PathPrefix: input.PathPrefix}, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
 }
 
 // readPage returns the whole page or a typed error. Codes: invalid_budget, invalid_path
 // (outside categories, missing, or not a canonical page path), invalid_page (schema), budget_too_small, page_read_failed.
 func (s *Server) readPage(ctx context.Context, _ *mcp.CallToolRequest, input pageReadInput) (*mcp.CallToolResult, pageReadResponse, error) {
-	s.touchRead(ctx)
 	if input.BudgetBytes <= 0 {
 		return pageReadFailure("invalid_budget")
 	}
 	if !s.cfg.IsMemoryPath(input.Path) {
 		return pageReadFailure("invalid_path")
 	}
-	repository, err := s.pageRepository()
+	repository, closeRepository, err := s.pagesFor(ctx, input.Source)
 	if err != nil {
-		return pageReadFailure("page_read_failed")
+		return pageReadFailure(sourceErrorCode(err, "page_read_failed"))
 	}
+	defer closeRepository()
 	page, err := repository.ReadPage(ctx, input.Path)
 	if err != nil {
 		switch {
@@ -443,11 +522,21 @@ func (s *Server) expandReference(ctx context.Context, _ *mcp.CallToolRequest, in
 	return nil, referenceExpandResponse{SchemaVersion: 1, Data: &excerpt}, nil
 }
 
-func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, _ listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
-	promoter, err := s.proposalPromoter()
-	if err != nil {
-		return proposalListFailure("promotion_unavailable")
+func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, input listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
+	var promoter *promotion.Promoter
+	var err error
+	switch input.Source {
+	case "", "proposals":
+		promoter, err = promotion.New(s.cfg, s.cfg.Paths.Proposals, workspace.ProposalsBranch)
+	case "release":
+		promoter, err = s.releasePromoter(ctx)
+	default:
+		return proposalListFailure("invalid_source")
 	}
+	if err != nil {
+		return proposalListFailure(releaseErrorCode(err))
+	}
+	defer promoter.Close()
 	listed, err := promoter.List(ctx)
 	if err != nil {
 		return proposalListFailure(promotionErrorCode(err))
@@ -456,10 +545,11 @@ func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, _ li
 }
 
 func (s *Server) previewPromotion(ctx context.Context, _ *mcp.CallToolRequest, input previewPromotionInput) (*mcp.CallToolResult, promotionPreviewResponse, error) {
-	promoter, err := s.proposalPromoter()
+	promoter, err := s.releasePromoter(ctx)
 	if err != nil {
-		return promotionPreviewFailure("promotion_unavailable")
+		return promotionPreviewFailure(releaseErrorCode(err))
 	}
+	defer promoter.Close()
 	preview, err := promoter.Preview(ctx, promotionRequest(input))
 	if err != nil {
 		return promotionPreviewFailure(promotionErrorCode(err))
@@ -497,11 +587,15 @@ func (s *Server) applyPromotion(ctx context.Context, _ *mcp.CallToolRequest, inp
 	s.promoterMu.Lock()
 	pending, found := s.previews[input.PreviewToken]
 	delete(s.previews, input.PreviewToken)
-	promoter := s.promoter
 	s.promoterMu.Unlock()
-	if !found || promoter == nil {
+	if !found {
 		return promotionApplyFailure("invalid_preview")
 	}
+	promoter, err := s.releasePromoter(ctx)
+	if err != nil {
+		return promotionApplyFailure(releaseErrorCode(err))
+	}
+	defer promoter.Close()
 	result, err := promoter.Apply(ctx, pending.Preview, func() (string, error) {
 		evidence, err := s.buildPromotionEvidence(ctx, promoter, pending.Preview)
 		if err != nil {
@@ -524,10 +618,11 @@ func (s *Server) applyPromotion(ctx context.Context, _ *mcp.CallToolRequest, inp
 }
 
 func (s *Server) previewPromotionBatch(ctx context.Context, _ *mcp.CallToolRequest, input previewPromotionBatchInput) (*mcp.CallToolResult, promotionBatchPreviewResponse, error) {
-	promoter, err := s.proposalPromoter()
+	promoter, err := s.releasePromoter(ctx)
 	if err != nil {
-		return promotionBatchPreviewFailure("promotion_unavailable")
+		return promotionBatchPreviewFailure(releaseErrorCode(err))
 	}
+	defer promoter.Close()
 	requests := make([]promotion.PreviewRequest, len(input.Items))
 	for index, item := range input.Items {
 		requests[index] = promotionRequest(item)
@@ -573,11 +668,15 @@ func (s *Server) applyPromotionBatch(ctx context.Context, _ *mcp.CallToolRequest
 	s.promoterMu.Lock()
 	pending, found := s.batches[input.PreviewToken]
 	delete(s.batches, input.PreviewToken)
-	promoter := s.promoter
 	s.promoterMu.Unlock()
-	if !found || promoter == nil {
+	if !found {
 		return promotionBatchApplyFailure("invalid_preview")
 	}
+	promoter, err := s.releasePromoter(ctx)
+	if err != nil {
+		return promotionBatchApplyFailure(releaseErrorCode(err))
+	}
+	defer promoter.Close()
 	result, err := promoter.ApplyBatch(ctx, pending.Preview, func() (string, error) {
 		for index, preview := range pending.Preview.Items {
 			evidence, err := s.buildPromotionEvidence(ctx, promoter, preview)
@@ -644,7 +743,12 @@ func promotionRequest(input previewPromotionInput) promotion.PreviewRequest {
 
 func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion.Promoter, preview promotion.Preview) (promotionEvidence, error) {
 	query := preview.Title + " " + preview.Knowledge
-	canonicalCandidates, err := s.retriever.Retrieve(ctx, query, retrieval.Scope{}, 4096)
+	retriever, closeRetriever, err := s.retrieverFor(ctx, "release")
+	if err != nil {
+		return promotionEvidence{}, err
+	}
+	defer closeRetriever()
+	canonicalCandidates, err := retriever.Retrieve(ctx, query, retrieval.Scope{}, 4096)
 	if err != nil {
 		return promotionEvidence{}, err
 	}
@@ -667,8 +771,12 @@ func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion
 }
 
 func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
-	s.touchRead(ctx)
-	bundle, err := s.retriever.Expand(ctx, input.Handle, input.BudgetBytes)
+	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
+	if err != nil {
+		return retrieverFailure(err)
+	}
+	defer closeRetriever()
+	bundle, err := retriever.Expand(ctx, input.Handle, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
 }
 
@@ -677,14 +785,6 @@ func (s *Server) closeInbox() {
 	defer s.inboxMu.Unlock()
 	if s.inbox != nil {
 		_ = s.inbox.Close()
-	}
-}
-
-func (s *Server) closePromoter() {
-	s.promoterMu.Lock()
-	defer s.promoterMu.Unlock()
-	if s.promoter != nil {
-		_ = s.promoter.Close()
 	}
 }
 
@@ -702,18 +802,27 @@ func (s *Server) proposalInbox() (*inbox.Inbox, error) {
 	return proposalInbox, nil
 }
 
-func (s *Server) proposalPromoter() (*promotion.Promoter, error) {
-	s.promoterMu.Lock()
-	defer s.promoterMu.Unlock()
-	if s.promoter != nil {
-		return s.promoter, nil
+// releasePromoter opens a promoter over the release worktree for one operation; the caller closes it,
+// so it never points at a release that was aborted or finalized in between.
+func (s *Server) releasePromoter(ctx context.Context) (*promotion.Promoter, error) {
+	if s.recoverErr != nil {
+		return nil, promotion.ErrRecovery
 	}
-	promoter, err := promotion.New(s.cfg, s.cfg.Paths.Proposals, workspace.ProposalsBranch)
-	if err != nil {
-		return nil, err
+	root, branch, ok := s.releases.Active(ctx)
+	if !ok {
+		return nil, release.ErrNoRelease
 	}
-	s.promoter = promoter
-	return promoter, nil
+	return promotion.New(s.cfg, root, branch)
+}
+
+func releaseErrorCode(err error) string {
+	switch {
+	case errors.Is(err, release.ErrNoRelease):
+		return "no_release"
+	case errors.Is(err, promotion.ErrRecovery):
+		return "promotion_recovery_failed"
+	}
+	return "promotion_unavailable"
 }
 
 func inboxFailure(code string) (*mcp.CallToolResult, inboxToolResponse, error) {
@@ -795,3 +904,57 @@ type nopWriteCloser struct {
 }
 
 func (nopWriteCloser) Close() error { return nil }
+
+type releaseInput struct{}
+
+type releaseResponse struct {
+	SchemaVersion int             `json:"schema_version"`
+	Data          *release.Status `json:"data,omitempty"`
+	Error         *toolError      `json:"error,omitempty"`
+}
+
+func releaseFailure(err error) (*mcp.CallToolResult, releaseResponse, error) {
+	code := "release_failed"
+	switch {
+	case errors.Is(err, release.ErrActive):
+		code = "release_active"
+	case errors.Is(err, release.ErrNoProposals):
+		code = "no_proposals"
+	case errors.Is(err, release.ErrNoRelease):
+		code = "no_release"
+	case errors.Is(err, workspace.ErrPermission):
+		code = "push_denied"
+	case errors.Is(err, workspace.ErrNetwork):
+		code = "network_unavailable"
+	case errors.Is(err, workspace.ErrDirty):
+		code = "worktree_dirty"
+	}
+	return &mcp.CallToolResult{IsError: true}, releaseResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+}
+
+// openRelease resumes the release already in progress here, or opens a new one.
+func (s *Server) openRelease(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, releaseResponse, error) {
+	status, err := s.releases.Status(ctx)
+	if err == nil && status.Open {
+		if status, err = s.releases.Resume(ctx); err != nil {
+			return releaseFailure(err)
+		}
+		return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
+	}
+	if err != nil {
+		return releaseFailure(err)
+	}
+	status, err = s.releases.Open(ctx)
+	if err != nil {
+		return releaseFailure(err)
+	}
+	return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
+}
+
+func (s *Server) releaseStatus(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, releaseResponse, error) {
+	status, err := s.releases.Status(ctx)
+	if err != nil {
+		return releaseFailure(err)
+	}
+	return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
+}

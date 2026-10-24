@@ -11,7 +11,9 @@ import (
 	"testing"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/setup"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
 )
 
 // Env isolates HOME, XDG_STATE_HOME and the Git configuration for one test.
@@ -138,4 +140,22 @@ func Setup(t *testing.T, files map[string]string) *Managed {
 func (m *Managed) PublishMain(t *testing.T, files map[string]string) {
 	t.Helper()
 	Seed(t, m.Remote, "main", files)
+}
+
+// Remember adds one proposal through the inbox and publishes it, like /remember does.
+func (m *Managed) Remember(t *testing.T, title string) inbox.Proposal {
+	t.Helper()
+	box, err := inbox.NewWriter(m.Config.Workspace(), m.Config.Paths.Proposals, workspace.ProposalsBranch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer box.Close()
+	proposal, err := box.Add(context.Background(), inbox.Request{Title: title, SuggestedAction: inbox.ActionCreate, Knowledge: "A durable fact about " + title + ".", SourcePaths: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pushed, err := box.Publish(context.Background()); err != nil || !pushed {
+		t.Fatalf("Publish() = %v, %v", pushed, err)
+	}
+	return proposal
 }
