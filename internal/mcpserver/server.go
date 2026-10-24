@@ -286,7 +286,13 @@ type toolResponse struct {
 	Error         *toolError               `json:"error,omitempty"`
 }
 
+// touchRead answers from the read worktree as it is and refreshes it in the background when the TTL expired.
+func (s *Server) touchRead(ctx context.Context) {
+	_, _ = s.cfg.Workspace().ResolveRead(ctx, false)
+}
+
 func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searchInput) (*mcp.CallToolResult, toolResponse, error) {
+	s.touchRead(ctx)
 	bundle, err := s.retriever.Retrieve(ctx, input.Query, retrieval.Scope{PathPrefix: input.PathPrefix}, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
 }
@@ -294,6 +300,7 @@ func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searc
 // readPage returns the whole page or a typed error. Codes: invalid_budget, invalid_path
 // (outside categories, missing, or not a canonical page path), invalid_page (schema), budget_too_small, page_read_failed.
 func (s *Server) readPage(ctx context.Context, _ *mcp.CallToolRequest, input pageReadInput) (*mcp.CallToolResult, pageReadResponse, error) {
+	s.touchRead(ctx)
 	if input.BudgetBytes <= 0 {
 		return pageReadFailure("invalid_budget")
 	}
@@ -644,6 +651,7 @@ func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion
 }
 
 func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
+	s.touchRead(ctx)
 	bundle, err := s.retriever.Expand(ctx, input.Handle, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
 }

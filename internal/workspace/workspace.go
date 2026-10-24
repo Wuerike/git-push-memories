@@ -11,7 +11,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sys/unix"
+
+	"github.com/Wuerike/git-push-memories/internal/repolock"
 )
 
 const (
@@ -167,10 +172,63 @@ func (w *Workspace) EnsureRead(ctx context.Context) error {
 	return err
 }
 
-// UpdateRead moves the read worktree to origin/main. The caller holds the repository lock.
+// UpdateRead moves the read worktree to origin/main under the repository lock.
+// It also takes the directory lock memory readers share, so a reader never sees a half-written checkout.
 func (w *Workspace) UpdateRead(ctx context.Context) error {
-	_, err := Git{Dir: w.Paths.Read}.Output(ctx, "checkout", "--detach", "-f", "origin/main")
-	return err
+	return repolock.With(ctx, w.Paths.State, func() error {
+		dir, err := os.Open(w.Paths.Read)
+		if err != nil {
+			return errors.New("read worktree is missing; run setup")
+		}
+		defer dir.Close()
+		for {
+			err := unix.Flock(int(dir.Fd()), unix.LOCK_EX|unix.LOCK_NB)
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, unix.EWOULDBLOCK) && !errors.Is(err, unix.EAGAIN) {
+				return err
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+		defer unix.Flock(int(dir.Fd()), unix.LOCK_UN)
+		_, err = Git{Dir: w.Paths.Read}.Output(ctx, "checkout", "--detach", "-f", "origin/main")
+		return err
+	})
+}
+
+// Refresh fetches when the TTL expired and, on success, moves the read worktree.
+func (w *Workspace) Refresh(ctx context.Context) error {
+	ran, err := w.FetchIfStale(ctx, FetchTTL)
+	if !ran || err != nil {
+		return err
+	}
+	return w.UpdateRead(ctx)
+}
+
+var refreshing atomic.Bool
+
+// ResolveRead returns the read worktree root right away. When the TTL expired it
+// refreshes: synchronously for one-shot commands, in the background for the MCP.
+func (w *Workspace) ResolveRead(ctx context.Context, wait bool) (string, error) {
+	if _, err := os.Stat(filepath.Join(w.Paths.Read, ".git")); err != nil {
+		return "", errors.New("memory repository is not prepared; run setup")
+	}
+	if wait {
+		_ = w.Refresh(ctx) // offline: keep using the last known checkout
+		return w.Paths.Read, nil
+	}
+	if refreshing.CompareAndSwap(false, true) {
+		go func() {
+			defer refreshing.Store(false)
+			_ = w.Refresh(context.Background())
+		}()
+	}
+	return w.Paths.Read, nil
 }
 
 // RemoveRelease deletes the release worktree and the given local branch, tolerating absence.

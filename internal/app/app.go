@@ -147,7 +147,12 @@ func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) i
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	retriever, err := retrieval.New(cfg.MemoryRoot, cfg.MemoryCategories...)
+	readRoot, err := cfg.Workspace().ResolveRead(ctx, true)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	retriever, err := retrieval.New(readRoot, cfg.MemoryCategories...)
 	if err != nil {
 		fmt.Fprintln(stderr, "retrieval could not initialize")
 		return 1
