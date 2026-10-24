@@ -16,9 +16,9 @@ import (
 const managedMarker = "<!-- managed-by: git-push-memories -->"
 
 type Result struct {
-	MemoryRoot      string
-	SkillPath       string
-	CurateSkillPath string
+	MemoryRoot       string
+	SkillPath        string
+	PromoteSkillPath string
 }
 
 func Setup(ctx context.Context, memoryRoot string) (Result, error) {
@@ -37,14 +37,14 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if err != nil {
 		return Result{}, errors.New("Claude Code skill path could not be resolved")
 	}
-	curateSkillPath, err := skillPath("curate")
+	promoteSkillPath, err := skillPath("promote")
 	if err != nil {
 		return Result{}, errors.New("Claude Code skill path could not be resolved")
 	}
 	if err := ensureSkillCanBeManaged(rememberPath, claudeintegration.RememberSkill, "/remember"); err != nil {
 		return Result{}, err
 	}
-	if err := ensureSkillCanBeManaged(curateSkillPath, claudeintegration.CurateSkill, "/curate"); err != nil {
+	if err := ensureSkillCanBeManaged(promoteSkillPath, claudeintegration.PromoteSkill, "/promote"); err != nil {
 		return Result{}, err
 	}
 	cfg, err := config.Save(memoryRoot)
@@ -54,7 +54,7 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if err := installSkill(rememberPath, claudeintegration.RememberSkill); err != nil {
 		return Result{}, err
 	}
-	if err := installSkill(curateSkillPath, claudeintegration.CurateSkill); err != nil {
+	if err := installSkill(promoteSkillPath, claudeintegration.PromoteSkill); err != nil {
 		return Result{}, err
 	}
 
@@ -68,7 +68,7 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if output, err := check.CombinedOutput(); err != nil {
 		return Result{}, fmt.Errorf("Claude Code MCP health check failed: %s", bytes.TrimSpace(output))
 	}
-	return Result{MemoryRoot: cfg.MemoryRoot, SkillPath: rememberPath, CurateSkillPath: curateSkillPath}, nil
+	return Result{MemoryRoot: cfg.MemoryRoot, SkillPath: rememberPath, PromoteSkillPath: promoteSkillPath}, nil
 }
 
 func rememberSkillPath() (string, error) {

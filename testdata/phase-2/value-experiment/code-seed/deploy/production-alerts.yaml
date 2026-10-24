@@ -1,7 +1,0 @@
-policies:
-  - name: priority-dispatch-stalled
-    status: current
-    effective_date: 2026-08-17
-    parcel_tier: priority
-    after_seconds: 90
-    escalation_queue: route-amber

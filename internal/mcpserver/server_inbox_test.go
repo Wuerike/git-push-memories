@@ -204,12 +204,12 @@ func TestReferenceSnapshotFlowsIntoProposalAndVerifiedPreviewEvidence(t *testing
 	}
 	preview := func(current *mcp.ClientSession) (reference.Evidence, string) {
 		result, err := current.CallTool(context.Background(), &mcp.CallToolParams{
-			Name: "memory_curate_preview", Arguments: map[string]any{
+			Name: "memory_promote_preview", Arguments: map[string]any{
 				"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-source.md",
 			},
 		})
 		if err != nil || result.IsError {
-			t.Fatalf("memory_curate_preview = %+v, %v", result, err)
+			t.Fatalf("memory_promote_preview = %+v, %v", result, err)
 		}
 		var response struct {
 			Data struct {
@@ -244,7 +244,7 @@ func TestReferenceSnapshotFlowsIntoProposalAndVerifiedPreviewEvidence(t *testing
 	}
 	mismatchProposal := decodeInboxResponse(t, mismatchProposalResult).Data
 	mismatchPreviewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": mismatchProposal.ID, "target_path": "memories/domains/divergent-checkout-source.md",
 		},
 	})
@@ -281,9 +281,9 @@ func TestReferenceSnapshotFlowsIntoProposalAndVerifiedPreviewEvidence(t *testing
 		t.Fatalf("rebind memory_reference_snapshot = %+v, %v", reboundResult, err)
 	}
 	applyResult, err := freshSession.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": unavailableToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": unavailableToken},
 	})
-	if err != nil || !applyResult.IsError || decodeResponse(t, applyResult).Error.Code != "curation_drift" {
+	if err != nil || !applyResult.IsError || decodeResponse(t, applyResult).Error.Code != "promotion_drift" {
 		t.Fatalf("apply after reference status drift = %+v, %v", applyResult, err)
 	}
 	if _, err := os.Stat(filepath.Join(memoryRoot, "memories", "domains", "checkout-source.md")); !errors.Is(err, os.ErrNotExist) {
@@ -380,7 +380,7 @@ func TestMemoryProposeReportsGitIndexLock(t *testing.T) {
 	}
 }
 
-func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
+func TestPromoteCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{
 		"staged.txt":   "before staged\n",
 		"unstaged.txt": "before unstaged\n",
@@ -441,14 +441,14 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 
 	target := "memories/domains/parcel-dispatch-retry-policy.md"
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview",
+		Name: "memory_promote_preview",
 		Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": proposal.ID,
 			"target_path": target,
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -484,13 +484,13 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	}
 
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply",
+		Name: "memory_promote_apply",
 		Arguments: map[string]any{
 			"preview_token": preview.Data.PreviewToken,
 		},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	var applied struct {
 		Data struct {
@@ -510,7 +510,7 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD")
 	wantChanged := "A\t" + target + "\nD\t" + proposal.Path
 	if changed != wantChanged {
-		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+		t.Fatalf("promotion changed %q, want %q", changed, wantChanged)
 	}
 	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(proposal.Path))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("consumed proposal remains: %v", err)
@@ -533,15 +533,15 @@ func TestCurateCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 		Name: "memory_search", Arguments: map[string]any{"query": "parcel dispatch exponential backoff", "budget_bytes": 2048},
 	})
 	if err != nil || searchResult.IsError {
-		t.Fatalf("memory_search after curation = %+v, %v", searchResult, err)
+		t.Fatalf("memory_search after promotion = %+v, %v", searchResult, err)
 	}
 	search := decodeResponse(t, searchResult)
 	if search.Data == nil || len(search.Data.Items) != 1 || search.Data.Items[0].Handle.Path != target {
-		t.Fatalf("curated search = %+v", search.Data)
+		t.Fatalf("promoted search = %+v", search.Data)
 	}
 }
 
-func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T) {
+func TestPromoteCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	target := "memories/domains/checkout-api.md"
 	if err := os.Chmod(filepath.Join(memoryRoot, filepath.FromSlash(target)), 0o755); err != nil {
@@ -567,12 +567,12 @@ func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T)
 	}
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_section", "proposal_id": proposal.ID, "target_path": target, "heading": "Retry Policy",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -595,10 +595,10 @@ func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T)
 	}
 
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	var applied struct {
 		Data struct {
@@ -614,10 +614,10 @@ func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T)
 	}
 	wantChanged := "M\t" + target + "\nD\t" + proposal.Path
 	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
-		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+		t.Fatalf("promotion changed %q, want %q", changed, wantChanged)
 	}
 	if treeEntry := gitOutput(t, memoryRoot, "ls-tree", "HEAD", "--", target); !strings.HasPrefix(treeEntry, "100755 blob ") {
-		t.Fatalf("curation changed target mode: %q", treeEntry)
+		t.Fatalf("promotion changed target mode: %q", treeEntry)
 	}
 	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(target)))
 	wantSuffix := "\n## Retry Policy\n<!-- @id: checkout-api-retry-policy -->\nCheckout retries stop after three failures.\n"
@@ -632,7 +632,7 @@ func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T)
 		Name: "memory_search", Arguments: map[string]any{"query": "checkout retries failures", "budget_bytes": 2048},
 	})
 	if err != nil || searchResult.IsError {
-		t.Fatalf("memory_search after curation = %+v, %v", searchResult, err)
+		t.Fatalf("memory_search after promotion = %+v, %v", searchResult, err)
 	}
 	search := decodeResponse(t, searchResult)
 	found := false
@@ -644,11 +644,11 @@ func TestCurateCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T)
 		}
 	}
 	if !found {
-		t.Fatalf("curated section not retrieved: %+v", search.Data)
+		t.Fatalf("promoted section not retrieved: %+v", search.Data)
 	}
 }
 
-func TestCurateCreateSectionRejectsExistingHeadingWithoutWriting(t *testing.T) {
+func TestPromoteCreateSectionRejectsExistingHeadingWithoutWriting(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -664,7 +664,7 @@ func TestCurateCreateSectionRejectsExistingHeadingWithoutWriting(t *testing.T) {
 	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_section", "proposal_id": proposal.ID,
 			"target_path": "memories/domains/checkout-api.md", "heading": "Operacao",
 		},
@@ -693,7 +693,7 @@ func TestCurateCreateSectionRejectsExistingHeadingWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T) {
+func TestPromoteReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{
 		"memories/domains/checkout-api.md": memoryPage,
 		"staged.txt":                       "before staged\n", "unstaged.txt": "before unstaged\n",
@@ -731,15 +731,15 @@ func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T
 		Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout team-b", "budget_bytes": 2048},
 	})
 	if err != nil || searchBefore.IsError {
-		t.Fatalf("memory_search before curation = %+v, %v", searchBefore, err)
+		t.Fatalf("memory_search before promotion = %+v, %v", searchBefore, err)
 	}
 	beforeBundle := decodeResponse(t, searchBefore)
 	if beforeBundle.Data == nil || len(beforeBundle.Data.Items) != 1 {
-		t.Fatalf("memory_search before curation = %+v", beforeBundle.Data)
+		t.Fatalf("memory_search before promotion = %+v", beforeBundle.Data)
 	}
 	contentHash := beforeBundle.Data.Items[0].Handle.ContentHash
 	invalidConsumption, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "replace_section", "proposal_id": proposal.ID, "target_path": target,
 			"section_id": "checkout-api-operation", "content_hash": contentHash,
 			"replacement": "Timeout is five seconds.\nOwned by team-b.", "reason": "incorrect",
@@ -753,14 +753,14 @@ func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T
 	}
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "replace_section", "proposal_id": proposal.ID,
 			"target_path": target, "section_id": "checkout-api-operation", "content_hash": contentHash,
 			"replacement": "- timeout: cinco segundos\n- owner: team-b\n",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -788,10 +788,10 @@ func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T
 	}
 
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	var applied struct {
 		Data struct {
@@ -807,10 +807,10 @@ func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T
 	}
 	wantChanged := "M\t" + target + "\nD\t" + proposal.Path
 	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
-		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+		t.Fatalf("promotion changed %q, want %q", changed, wantChanged)
 	}
 	if treeEntry := gitOutput(t, memoryRoot, "ls-tree", "HEAD", "--", target); !strings.HasPrefix(treeEntry, "100755 blob ") {
-		t.Fatalf("curation changed target mode: %q", treeEntry)
+		t.Fatalf("promotion changed target mode: %q", treeEntry)
 	}
 	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(target)))
 	wantPage := "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n- timeout: cinco segundos\n- owner: team-b\n"
@@ -831,16 +831,16 @@ func TestCurateReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.T
 		Name: "memory_search", Arguments: map[string]any{"query": "checkout cinco team-b", "budget_bytes": 2048},
 	})
 	if err != nil || searchResult.IsError {
-		t.Fatalf("memory_search after curation = %+v, %v", searchResult, err)
+		t.Fatalf("memory_search after promotion = %+v, %v", searchResult, err)
 	}
 	search := decodeResponse(t, searchResult)
 	if search.Data == nil || len(search.Data.Items) != 1 || search.Data.Items[0].Handle.SectionID != "checkout-api-operation" ||
 		strings.Contains(search.Data.Items[0].Content, "tres segundos") || !strings.Contains(search.Data.Items[0].Content, "team-b") {
-		t.Fatalf("curated replacement search = %+v", search.Data)
+		t.Fatalf("promoted replacement search = %+v", search.Data)
 	}
 }
 
-func TestCurateReplaceSectionRejectsNonLeafTargetWithoutWriting(t *testing.T) {
+func TestPromoteReplaceSectionRejectsNonLeafTargetWithoutWriting(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -857,7 +857,7 @@ func TestCurateReplaceSectionRejectsNonLeafTargetWithoutWriting(t *testing.T) {
 	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "replace_section", "proposal_id": proposal.ID,
 			"target_path": "memories/domains/checkout-api.md", "section_id": "checkout-api",
 			"content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "replacement": "Replacement.",
@@ -887,7 +887,7 @@ func TestCurateReplaceSectionRejectsNonLeafTargetWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestCurateReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T) {
+func TestPromoteReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -904,7 +904,7 @@ func TestCurateReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T)
 	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "replace_section", "proposal_id": proposal.ID,
 			"target_path": "memories/domains/checkout-api.md", "section_id": "checkout-api-operation",
 			"content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
@@ -920,7 +920,7 @@ func TestCurateReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T)
 		} `json:"error"`
 	}
 	decodeStructured(t, previewResult, &response)
-	if !previewResult.IsError || response.Error == nil || response.Error.Code != "curation_drift" {
+	if !previewResult.IsError || response.Error == nil || response.Error.Code != "promotion_drift" {
 		t.Fatalf("stale preview = %+v, response = %+v", previewResult, response)
 	}
 	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
@@ -935,7 +935,7 @@ func TestCurateReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T)
 	}
 }
 
-func TestCurateReplaceSectionRejectsCreateProposal(t *testing.T) {
+func TestPromoteReplaceSectionRejectsCreateProposal(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -949,7 +949,7 @@ func TestCurateReplaceSectionRejectsCreateProposal(t *testing.T) {
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "replace_section", "proposal_id": proposal.ID,
 			"target_path": "memories/domains/checkout-api.md", "section_id": "checkout-api-operation",
 			"content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "replacement": "New fact.\n",
@@ -976,7 +976,7 @@ func TestCurateReplaceSectionRejectsCreateProposal(t *testing.T) {
 	}
 }
 
-func TestCurateRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
+func TestPromoteRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": removableMemoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -1003,13 +1003,13 @@ func TestCurateRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
 	proposal := decodeInboxResponse(t, proposalResult).Data
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "remove_section", "proposal_id": proposal.ID, "target_path": handle.Path,
 			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1033,14 +1033,14 @@ func TestCurateRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
 	}
 
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	wantChanged := "M\t" + handle.Path + "\nD\t" + proposal.Path
 	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
-		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+		t.Fatalf("promotion changed %q, want %q", changed, wantChanged)
 	}
 	wantPage := "# Checkout API\n<!-- @id: checkout-api -->\n\n## Ownership\n<!-- @id: checkout-api-ownership -->\nOwned by team-b.\n"
 	page, err := os.ReadFile(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path)))
@@ -1062,7 +1062,7 @@ func TestCurateRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
 	}
 }
 
-func TestCurateRemovePageDeletesEligiblePageAndConsumesProposal(t *testing.T) {
+func TestPromoteRemovePageDeletesEligiblePageAndConsumesProposal(t *testing.T) {
 	const page = `# Legacy Retry Policy
 <!-- @id: legacy-retry-policy -->
 
@@ -1096,13 +1096,13 @@ Retries use the retired queue.
 	proposal := decodeInboxResponse(t, proposalResult).Data
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "remove_page", "proposal_id": proposal.ID, "target_path": handle.Path,
 			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1125,14 +1125,14 @@ Retries use the retired queue.
 	}
 
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	wantChanged := "D\t" + handle.Path + "\nD\t" + proposal.Path
 	if changed := gitOutput(t, memoryRoot, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD"); changed != wantChanged {
-		t.Fatalf("curation changed %q, want %q", changed, wantChanged)
+		t.Fatalf("promotion changed %q, want %q", changed, wantChanged)
 	}
 	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(handle.Path))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("removed page remains: %v", err)
@@ -1152,7 +1152,7 @@ Retries use the retired queue.
 	}
 }
 
-func TestCurateRemovePageRejectsIneligiblePageWithoutWriting(t *testing.T) {
+func TestPromoteRemovePageRejectsIneligiblePageWithoutWriting(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": removableMemoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -1180,7 +1180,7 @@ func TestCurateRemovePageRejectsIneligiblePageWithoutWriting(t *testing.T) {
 	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "remove_page", "proposal_id": proposal.ID, "target_path": handle.Path,
 			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
 		},
@@ -1203,7 +1203,7 @@ func TestCurateRemovePageRejectsIneligiblePageWithoutWriting(t *testing.T) {
 	}
 }
 
-func TestCurateRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T) {
+func TestPromoteRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": removableMemoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -1226,13 +1226,13 @@ func TestCurateRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T) 
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "remove_section", "proposal_id": proposal.ID, "target_path": handle.Path,
 			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1247,14 +1247,14 @@ func TestCurateRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T) 
 	}
 	apply := func() (*mcp.CallToolResult, string) {
 		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-			Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+			Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return result, decodeResponse(t, result).Error.Code
 	}
-	if result, code := apply(); !result.IsError || code != "curation_drift" {
+	if result, code := apply(); !result.IsError || code != "promotion_drift" {
 		t.Fatalf("drifted remove apply = %+v, code = %q", result, code)
 	}
 	if result, code := apply(); !result.IsError || code != "invalid_preview" {
@@ -1272,7 +1272,7 @@ func TestCurateRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T) 
 	}
 }
 
-func TestCurateDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
+func TestPromoteDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{
 		"memories/domains/checkout-api.md": memoryPage,
 		"staged.txt":                       "before staged\n",
@@ -1299,12 +1299,12 @@ func TestCurateDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
 	}
 
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "incorrect",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1323,10 +1323,10 @@ func TestCurateDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
 	}
 
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	var applied struct {
 		Data struct {
@@ -1364,14 +1364,14 @@ func TestCurateDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
 	}
 }
 
-func TestCurateDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t *testing.T) {
+func TestPromoteDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
 	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose", Arguments: map[string]any{
 			"title": "Questionable checkout note", "suggested_action": "update", "target": "memories/domains/checkout-api.md",
-			"knowledge": "This note requires a curation decision.", "source_paths": []string{},
+			"knowledge": "This note requires a promotion decision.", "source_paths": []string{},
 		},
 	})
 	if err != nil || proposalResult.IsError {
@@ -1381,7 +1381,7 @@ func TestCurateDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t 
 	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 
 	invalidResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "maybe_later",
 		},
 	})
@@ -1399,7 +1399,7 @@ func TestCurateDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t 
 	}
 
 	validResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "duplicate",
 		},
 	})
@@ -1478,7 +1478,7 @@ func TestProposalListRejectsSensitiveCommittedProposalBeforeDisclosure(t *testin
 	}
 }
 
-func TestCuratePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T) {
+func TestPromotePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -1513,12 +1513,12 @@ func TestCuratePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T)
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	head := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-ownership.md",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1549,7 +1549,7 @@ func TestCuratePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T)
 	}
 }
 
-func TestCurateApplyRejectsDriftInReviewedEvidence(t *testing.T) {
+func TestPromoteApplyRejectsDriftInReviewedEvidence(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -1564,12 +1564,12 @@ func TestCurateApplyRejectsDriftInReviewedEvidence(t *testing.T) {
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout-note.md",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1589,12 +1589,12 @@ func TestCurateApplyRejectsDriftInReviewedEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || !applyResult.IsError {
 		t.Fatalf("apply with evidence drift = %+v, %v", applyResult, err)
 	}
-	if code := decodeResponse(t, applyResult).Error.Code; code != "curation_drift" {
+	if code := decodeResponse(t, applyResult).Error.Code; code != "promotion_drift" {
 		t.Fatalf("apply with evidence drift code = %q", code)
 	}
 	if current := gitOutput(t, memoryRoot, "rev-parse", "HEAD"); current != head {
@@ -1608,7 +1608,7 @@ func TestCurateApplyRejectsDriftInReviewedEvidence(t *testing.T) {
 	}
 }
 
-func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
+func TestPromoteApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 	memoryRoot := newGitRoot(t, nil)
 	session, stop := startServer(t, memoryRoot, filepath.Join(t.TempDir(), "state"))
 	defer stop()
@@ -1623,12 +1623,12 @@ func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/retry-policy.md",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1646,7 +1646,7 @@ func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 
 	apply := func() (*mcp.CallToolResult, string) {
 		result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-			Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+			Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -1662,7 +1662,7 @@ func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 		}
 		return result, response.Error.Code
 	}
-	if result, code := apply(); !result.IsError || code != "curation_drift" {
+	if result, code := apply(); !result.IsError || code != "promotion_drift" {
 		t.Fatalf("drift apply = %+v, code = %q", result, code)
 	}
 	if result, code := apply(); !result.IsError || code != "invalid_preview" {
@@ -1679,7 +1679,7 @@ func TestCurateApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 	}
 }
 
-func TestCurateBatchPreviewAndApplyUsesOneCommit(t *testing.T) {
+func TestPromoteBatchPreviewAndApplyUsesOneCommit(t *testing.T) {
 	memoryRoot := newGitRoot(t, nil)
 	stateRoot := filepath.Join(t.TempDir(), "state")
 	session, stop := startServer(t, memoryRoot, stateRoot)
@@ -1698,13 +1698,13 @@ func TestCurateBatchPreviewAndApplyUsesOneCommit(t *testing.T) {
 	}
 	parent := gitOutput(t, memoryRoot, "rev-parse", "HEAD")
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_batch_preview", Arguments: map[string]any{"items": []map[string]any{
+		Name: "memory_promote_batch_preview", Arguments: map[string]any{"items": []map[string]any{
 			{"operation": "create_page", "proposal_id": proposalIDs[0], "target_path": "memories/domains/first-batch.md"},
 			{"operation": "create_page", "proposal_id": proposalIDs[1], "target_path": "memories/domains/second-batch.md"},
 		}},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_batch_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_batch_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -1720,10 +1720,10 @@ func TestCurateBatchPreviewAndApplyUsesOneCommit(t *testing.T) {
 		t.Fatalf("batch preview = %+v", preview.Data)
 	}
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_batch_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_batch_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_batch_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_batch_apply = %+v, %v", applyResult, err)
 	}
 	var applied struct {
 		Data struct {

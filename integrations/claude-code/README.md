@@ -1,6 +1,6 @@
 # Claude Code
 
-Esta integracao usa MCP sobre stdio e os skills explicitos `/remember` e `/curate`. Ela nao instala hooks, nao captura sessoes e nao altera memoria canonica durante a captura.
+Esta integracao usa MCP sobre stdio e os skills explicitos `/remember` e `/promote`. Ela nao instala hooks, nao captura sessoes e nao altera memoria canonica durante a captura.
 
 ## Configurar
 
@@ -15,7 +15,7 @@ O repositorio deve ser um worktree Git ja clonado, possuir pelo menos um commit 
 - salva o memory root na configuracao global do usuario;
 - deriva um state root privado em `$XDG_STATE_HOME/git-push-memories` ou `~/.local/state/git-push-memories`;
 - registra `gpm mcp` no escopo `user` do Claude Code;
-- instala os skills globais em `~/.claude/skills/remember/SKILL.md` e `~/.claude/skills/curate/SKILL.md`.
+- instala os skills globais em `~/.claude/skills/remember/SKILL.md` e `~/.claude/skills/promote/SKILL.md`.
 
 O setup e idempotente. Execute-o novamente depois de mover o binario ou para selecionar outro repositorio de memoria.
 
@@ -41,7 +41,7 @@ O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `updat
 Para consumir ou descartar uma proposta:
 
 ```text
-/curate [proposal-id ...]
+/promote [proposal-id ...]
 ```
 
 A skill lista o inbox depois de revalidar sua privacidade, mostra de uma a dezesseis propostas selecionadas e pesquisa memoria relacionada. Cada target deve ser distinto. O preview apresenta candidatos canonicos, propostas relacionadas e referencia por referencia os estados `verified`, `unavailable`, `mismatch` ou `legacy_unverified`. Integridade nao implica que a fonte sustenta a afirmacao; a skill e a pessoa avaliam separadamente `supports`, `contradicts` ou `unclear`. O diff exato ainda exige confirmacao, staging alheio e preservado e qualquer mudanca de evidencia invalida o preview single-use.
@@ -55,10 +55,10 @@ O servidor expoe:
 - `memory_page_read`;
 - `memory_propose`;
 - `memory_proposal_list`;
-- `memory_curate_preview`;
-- `memory_curate_apply`;
-- `memory_curate_batch_preview`;
-- `memory_curate_batch_apply`.
+- `memory_promote_preview`;
+- `memory_promote_apply`;
+- `memory_promote_batch_preview`;
+- `memory_promote_batch_apply`.
 
 O commit local pode ser revisado e enviado com Git comum:
 

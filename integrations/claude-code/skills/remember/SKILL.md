@@ -7,7 +7,7 @@ argument-hint: "[fact to remember]"
 ---
 <!-- managed-by: git-push-memories -->
 
-Handle one subject only because the user explicitly invoked `/remember`. This skill always creates a new proposal; it never changes an existing one. Consolidating related proposals is the job of `/curate`.
+Handle one subject only because the user explicitly invoked `/remember`. This skill always creates a new proposal; it never changes an existing one. Consolidating related proposals is the job of `/promote`.
 
 1. **Interpret the input.** Extract the facts and identify the **subject** (the team, service, or domain, not the sentence), the **scope**, and the natural **shape** of the knowledge (member list, definition, rule, decision). If the input has facts about different subjects, ask the user to run `/remember` again for each one and continue with at most one.
 2. **Check the scope.** The memory repository is shared. A fact about someone's identity or role inside a team or domain becomes knowledge about that team ("Reading layer team. Members: Wuerike"), not about the person. A personal preference or a fact that only concerns the user does not belong in shared memory: say so, ask for a decision, and never decide silently. A request to restructure an existing page is not a personal fact; it becomes an `update` proposal.
@@ -16,7 +16,7 @@ Handle one subject only because the user explicitly invoked `/remember`. This sk
 
 | Situation | Suggested action and options |
 |---|---|
-| pending proposal about the same subject | warn with its title and ID; offer to create a new proposal anyway (`/curate` will group them; recommended) or cancel |
+| pending proposal about the same subject | warn with its title and ID; offer to create a new proposal anyway (`/promote` will group them; recommended) or cancel |
 | canonical page about the subject, no pending proposal | `update`, targeting its canonical Markdown path |
 | related memory is obsolete | `remove`, targeting its canonical Markdown path |
 | no related memory | `create`, with no target unless the user supplied one |
@@ -35,4 +35,4 @@ Search is guidance, not authoritative duplicate or contradiction detection. When
 git -C <memory-repository> push
 ```
 
-The proposal call receives only its closed fields; all session-private material remains outside tool arguments and durable evidence. Curating proposals into canonical memory is a separate flow.
+The proposal call receives only its closed fields; all session-private material remains outside tool arguments and durable evidence. Promoting proposals into canonical memory is a separate flow.

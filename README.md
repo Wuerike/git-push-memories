@@ -145,7 +145,7 @@ As categorias devem ser unicas e usar lowercase kebab-case. Configure o reposito
 gpm setup /path/to/memory-repository
 ```
 
-O setup registra o MCP e instala `/remember` e `/curate` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode propor um fato e consumir ou descartar uma proposta.
+O setup registra o MCP e instala `/remember` e `/promote` no escopo global do usuario. Depois disso, qualquer sessao do Claude Code pode propor um fato e consumir ou descartar uma proposta.
 
 Memorias canonicas ficam em `memories/<categoria-configurada>/**/*.md`. Markdown na raiz, arquivos diretos em `memories/`, categorias nao configuradas e `proposals/` sao ignorados pela busca. Propostas ficam em `proposals/<id>-<slug>.md` e recebem um commit path-scoped diretamente na `main`, sem consumir staging alheio.
 
@@ -158,10 +158,10 @@ O servidor publica onze tools:
 - `memory_propose`, para registrar uma proposta Markdown v1/v2 ou retornar a proposta byte-identica ja existente sem novo commit;
 - `memory_proposal_list`, para listar propostas commitadas e as categorias configuradas;
 - `memory_page_read`, para ler uma pagina canonica inteira com seu content hash (ou o erro `budget_too_small`), base de `rewrite_page`;
-- `memory_curate_preview`, para gerar sem escrita o diff e evidencia separada de candidatos canonicos e propostas relacionadas;
-- `memory_curate_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP;
-- `memory_curate_batch_preview`, para revisar de uma a dezesseis decisoes como uma unica transacao, incluindo `rewrite_page` (reescrita da pagina inteira) e `fold_proposal` (proposta absorvida pela reescrita ou pela criacao de pagina do mesmo lote);
-- `memory_curate_batch_apply`, para aplicar o lote confirmado em um unico commit recuperavel.
+- `memory_promote_preview`, para gerar sem escrita o diff e evidencia separada de candidatos canonicos e propostas relacionadas;
+- `memory_promote_apply`, para aplicar uma unica vez um preview emitido pelo mesmo processo MCP;
+- `memory_promote_batch_preview`, para revisar de uma a dezesseis decisoes como uma unica transacao, incluindo `rewrite_page` (reescrita da pagina inteira) e `fold_proposal` (proposta absorvida pela reescrita ou pela criacao de pagina do mesmo lote);
+- `memory_promote_batch_apply`, para aplicar o lote confirmado em um unico commit recuperavel.
 
 O servidor é transitório sobre stdio: o cliente MCP inicia o processo localmente e nenhuma porta, daemon ou container é necessário. Se uma curadoria anterior foi interrompida, o servidor reconcilia seu marcador privado antes de aceitar chamadas.
 
@@ -183,7 +183,7 @@ git -C <memory-repository> push
 A curadoria e iniciada em uma sessao do Claude Code:
 
 ```text
-/curate [proposal-id]
+/promote [proposal-id]
 ```
 
 Sem ID, a skill lista o inbox para a pessoa selecionar ate dezesseis propostas. O preview separa candidatos canonicos, propostas relacionadas e integridade das referencias de fonte. `verified` significa apenas que lineage, commit, blob e hash correspondem em um checkout local vinculado; sustentacao semantica continua sendo avaliada separadamente como `supports`, `contradicts` ou `unclear`. Propostas byte-identicas sao deduplicadas no inbox; lotes usam targets distintos, um commit e recovery antes/depois do avanco de `main`.

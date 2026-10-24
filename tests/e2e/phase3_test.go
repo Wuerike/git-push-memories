@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
-	"github.com/Wuerike/git-push-memories/internal/curation"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
+	"github.com/Wuerike/git-push-memories/internal/promotion"
 	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -42,9 +42,9 @@ type toolError struct {
 }
 
 type previewEvidence struct {
-	CanonicalCandidates retrieval.ContextBundle   `json:"canonical_candidates"`
-	RelatedProposals    curation.RelatedProposals `json:"related_proposals"`
-	References          []reference.Evidence      `json:"references"`
+	CanonicalCandidates retrieval.ContextBundle    `json:"canonical_candidates"`
+	RelatedProposals    promotion.RelatedProposals `json:"related_proposals"`
+	References          []reference.Evidence       `json:"references"`
 }
 
 type batchPreviewItem struct {
@@ -209,7 +209,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 		"source_paths": []string{}, "source_references": []reference.Reference{snapshot.References[0]},
 	})
 
-	createPreviewResult := callTool(t, ctx, sessionA, "memory_curate_batch_preview", map[string]any{"items": []map[string]any{
+	createPreviewResult := callTool(t, ctx, sessionA, "memory_promote_batch_preview", map[string]any{"items": []map[string]any{
 		{"operation": "create_page", "proposal_id": createA.ID, "target_path": "memories/domains/checkout-policy.md"},
 		{"operation": "create_page", "proposal_id": createB.ID, "target_path": "memories/domains/legacy-cleanup.md"},
 	}})
@@ -219,8 +219,8 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 	}
 	assertReferenceStatuses(t, createPreview.Items[0].Evidence.References, reference.IntegrityVerified, reference.IntegrityMismatch)
 	assertReferenceStatuses(t, createPreview.Items[1].Evidence.References, reference.IntegrityLegacyUnverified)
-	createApplyResult := callTool(t, ctx, sessionA, "memory_curate_batch_apply", map[string]any{"preview_token": createPreview.PreviewToken})
-	createResult := requireData(t, decodeTool[curation.BatchResult](t, createApplyResult))
+	createApplyResult := callTool(t, ctx, sessionA, "memory_promote_batch_apply", map[string]any{"preview_token": createPreview.PreviewToken})
+	createResult := requireData(t, decodeTool[promotion.BatchResult](t, createApplyResult))
 	assertCommitPaths(t, ctx, realGit, memoryRoot, environment, createResult.Commit, []string{
 		createA.Path, createB.Path, "memories/domains/checkout-policy.md", "memories/domains/legacy-cleanup.md",
 	})
@@ -230,16 +230,16 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 
 	sectionSession := connectMCP(t, ctx, binary, environment, "phase3-e2e-sections")
 	checkoutOverview := searchOne(t, ctx, sectionSession, "checkout three team-blue")
-	createSectionPreviewResult := callTool(t, ctx, sectionSession, "memory_curate_preview", map[string]any{
+	createSectionPreviewResult := callTool(t, ctx, sectionSession, "memory_promote_preview", map[string]any{
 		"operation": "create_section", "proposal_id": createSection.ID, "target_path": checkoutOverview.Path, "heading": "Temporary detail",
 	})
 	createSectionPreview := requireData(t, decodeTool[singlePreview](t, createSectionPreviewResult))
-	createSectionApplyResult := callTool(t, ctx, sectionSession, "memory_curate_apply", map[string]any{"preview_token": createSectionPreview.PreviewToken})
-	createSectionResult := requireData(t, decodeTool[curation.Result](t, createSectionApplyResult))
+	createSectionApplyResult := callTool(t, ctx, sectionSession, "memory_promote_apply", map[string]any{"preview_token": createSectionPreview.PreviewToken})
+	createSectionResult := requireData(t, decodeTool[promotion.Result](t, createSectionApplyResult))
 	assertCommitPaths(t, ctx, realGit, memoryRoot, environment, createSectionResult.Commit, []string{checkoutOverview.Path, createSection.Path})
 	sectionBaselineCommit := gitOutput(t, ctx, realGit, memoryRoot, environment, "rev-parse", "HEAD")
 	temporaryHandle := searchOne(t, ctx, sectionSession, "temporary migration detail")
-	removeSectionPreviewResult := callTool(t, ctx, sectionSession, "memory_curate_preview", map[string]any{
+	removeSectionPreviewResult := callTool(t, ctx, sectionSession, "memory_promote_preview", map[string]any{
 		"operation": "remove_section", "proposal_id": removeSection.ID, "target_path": temporaryHandle.Path,
 		"section_id": temporaryHandle.SectionID, "content_hash": temporaryHandle.ContentHash,
 	})
@@ -248,7 +248,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, beforeRefErr := sectionSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": removeSectionPreview.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": removeSectionPreview.PreviewToken},
 	})
 	if beforeRefErr == nil {
 		t.Fatal("pre-update-ref interruption returned a normal MCP response")
@@ -257,7 +257,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 	if gitOutput(t, ctx, realGit, memoryRoot, environment, "rev-parse", "HEAD") != sectionBaselineCommit {
 		t.Fatal("pre-update-ref interruption advanced HEAD")
 	}
-	markerPath := filepath.Join(stateRoot, "curation-transaction.json")
+	markerPath := filepath.Join(stateRoot, "promotion-transaction.json")
 	if missing(markerPath) {
 		t.Fatal("pre-update-ref interruption omitted its recovery marker")
 	}
@@ -267,18 +267,18 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 	baselineRecoverySession := connectMCP(t, ctx, binary, environment, "phase3-e2e-baseline-recovery")
 	gitDirectory := gitOutput(t, ctx, realGit, memoryRoot, environment, "rev-parse", "--absolute-git-dir")
 	indexPath := gitOutput(t, ctx, realGit, memoryRoot, environment, "rev-parse", "--path-format=absolute", "--git-path", "index")
-	baselineArtifacts, _ := filepath.Glob(filepath.Join(gitDirectory, ".git-push-memories-curation-index-*"))
+	baselineArtifacts, _ := filepath.Glob(filepath.Join(gitDirectory, ".git-push-memories-promotion-index-*"))
 	if !missing(markerPath) || !missing(indexPath+".lock") || len(baselineArtifacts) != 0 || missing(filepath.Join(memoryRoot, filepath.FromSlash(removeSection.Path))) {
 		t.Fatal("baseline recovery did not restore proposals or clean controlled artifacts")
 	}
 	restoredTemporary := searchOne(t, ctx, baselineRecoverySession, "temporary migration detail")
-	retryRemovePreviewResult := callTool(t, ctx, baselineRecoverySession, "memory_curate_preview", map[string]any{
+	retryRemovePreviewResult := callTool(t, ctx, baselineRecoverySession, "memory_promote_preview", map[string]any{
 		"operation": "remove_section", "proposal_id": removeSection.ID, "target_path": restoredTemporary.Path,
 		"section_id": restoredTemporary.SectionID, "content_hash": restoredTemporary.ContentHash,
 	})
 	retryRemovePreview := requireData(t, decodeTool[singlePreview](t, retryRemovePreviewResult))
-	retryRemoveResult := callTool(t, ctx, baselineRecoverySession, "memory_curate_apply", map[string]any{"preview_token": retryRemovePreview.PreviewToken})
-	removeSectionResult := requireData(t, decodeTool[curation.Result](t, retryRemoveResult))
+	retryRemoveResult := callTool(t, ctx, baselineRecoverySession, "memory_promote_apply", map[string]any{"preview_token": retryRemovePreview.PreviewToken})
+	removeSectionResult := requireData(t, decodeTool[promotion.Result](t, retryRemoveResult))
 	assertCommitPaths(t, ctx, realGit, memoryRoot, environment, removeSectionResult.Commit, []string{restoredTemporary.Path, removeSection.Path})
 	if err := baselineRecoverySession.Close(); err != nil {
 		t.Fatal(err)
@@ -288,7 +288,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 	decisionSession := connectMCP(t, ctx, binary, environment, "phase3-e2e-decisions")
 	checkoutHandle := searchOne(t, ctx, decisionSession, "checkout three team-blue")
 	cleanupHandle := searchOne(t, ctx, decisionSession, "legacy cleanup hour")
-	decisionPreviewResult := callTool(t, ctx, decisionSession, "memory_curate_batch_preview", map[string]any{"items": []map[string]any{
+	decisionPreviewResult := callTool(t, ctx, decisionSession, "memory_promote_batch_preview", map[string]any{"items": []map[string]any{
 		{"operation": "replace_section", "proposal_id": updateA.ID, "target_path": checkoutHandle.Path, "section_id": checkoutHandle.SectionID, "content_hash": checkoutHandle.ContentHash, "replacement": updatedCheckoutFact},
 		{"operation": "remove_page", "proposal_id": removeB.ID, "target_path": cleanupHandle.Path, "section_id": cleanupHandle.SectionID, "content_hash": cleanupHandle.ContentHash},
 		{"operation": "discard_proposal", "proposal_id": discard.ID, "reason": "duplicate"},
@@ -311,7 +311,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, applyErr := decisionSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "memory_curate_batch_apply", Arguments: map[string]any{"preview_token": decisionPreview.PreviewToken},
+		Name: "memory_promote_batch_apply", Arguments: map[string]any{"preview_token": decisionPreview.PreviewToken},
 	})
 	if applyErr == nil {
 		t.Fatal("interrupted apply returned a normal MCP response")
@@ -337,7 +337,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 			t.Fatal("transaction marker retained forbidden content")
 		}
 	}
-	artifacts, err := filepath.Glob(filepath.Join(gitDirectory, ".git-push-memories-curation-index-*"))
+	artifacts, err := filepath.Glob(filepath.Join(gitDirectory, ".git-push-memories-promotion-index-*"))
 	if err != nil || len(artifacts) != 1 {
 		t.Fatalf("interrupted index artifacts = %v, %v", artifacts, err)
 	}
@@ -352,7 +352,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 
 	recoverySession := connectMCP(t, ctx, binary, environment, "phase3-e2e-recovery")
 	listResult := callTool(t, ctx, recoverySession, "memory_proposal_list", map[string]any{})
-	listed := requireData(t, decodeTool[curation.List](t, listResult))
+	listed := requireData(t, decodeTool[promotion.List](t, listResult))
 	if len(listed.Proposals) != 0 {
 		t.Fatalf("recovery retained %d proposals", len(listed.Proposals))
 	}
@@ -371,7 +371,7 @@ func TestPhase3TechnicalWorkflow(t *testing.T) {
 	if !missing(markerPath) || !missing(indexPath+".lock") {
 		t.Fatal("recovery retained transaction marker or index lock")
 	}
-	artifacts, _ = filepath.Glob(filepath.Join(gitDirectory, ".git-push-memories-curation-index-*"))
+	artifacts, _ = filepath.Glob(filepath.Join(gitDirectory, ".git-push-memories-promotion-index-*"))
 	if len(artifacts) != 0 || !missing(filepath.Join(memoryRoot, "memories", "domains", "legacy-cleanup.md")) {
 		t.Fatal("recovery retained controlled transaction artifacts or removed memory")
 	}
@@ -526,7 +526,7 @@ func bundleContains(bundle retrieval.ContextBundle, value string) bool {
 	return bytes.Contains(encoded, []byte(value))
 }
 
-func relatedContains(related curation.RelatedProposals, proposalID string) bool {
+func relatedContains(related promotion.RelatedProposals, proposalID string) bool {
 	for _, item := range related.Items {
 		if item.ID == proposalID {
 			return true

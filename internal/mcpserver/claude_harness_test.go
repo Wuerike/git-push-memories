@@ -63,7 +63,7 @@ func TestClaudeAdapterCommitsProposalToMemoryRepository(t *testing.T) {
 	}
 }
 
-func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T) {
+func TestClaudeAdapterPromotesCreateProposalForFreshProcessRetrieval(t *testing.T) {
 	memoryRoot := newGitRoot(t, nil)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -72,7 +72,7 @@ func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T
 	}
 	binary := buildBinary(t)
 
-	client := mcp.NewClient(&mcp.Implementation{Name: "claude-curation-harness", Version: "test"}, nil)
+	client := mcp.NewClient(&mcp.Implementation{Name: "claude-promotion-harness", Version: "test"}, nil)
 	session, err := client.Connect(context.Background(), &mcp.CommandTransport{Command: exec.Command(binary, "mcp")}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -88,12 +88,12 @@ func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/settlement-retry-policy.md",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -102,10 +102,10 @@ func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T
 	}
 	decodeStructured(t, previewResult, &preview)
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
@@ -131,7 +131,7 @@ func TestClaudeAdapterCuratesCreateProposalForFreshProcessRetrieval(t *testing.T
 	}
 }
 
-func TestClaudeAdapterCuratesUpdateForFreshProcessRetrieval(t *testing.T) {
+func TestClaudeAdapterPromotesUpdateForFreshProcessRetrieval(t *testing.T) {
 	memoryRoot := newGitRoot(t, map[string]string{"memories/domains/checkout-api.md": memoryPage})
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
@@ -166,14 +166,14 @@ func TestClaudeAdapterCuratesUpdateForFreshProcessRetrieval(t *testing.T) {
 	}
 	proposal := decodeInboxResponse(t, proposalResult).Data
 	previewResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_preview", Arguments: map[string]any{
+		Name: "memory_promote_preview", Arguments: map[string]any{
 			"operation": "replace_section", "proposal_id": proposal.ID, "target_path": handle.Path,
 			"section_id": handle.SectionID, "content_hash": handle.ContentHash,
 			"replacement": "- timeout: cinco segundos\n- owner: team-b\n",
 		},
 	})
 	if err != nil || previewResult.IsError {
-		t.Fatalf("memory_curate_preview = %+v, %v", previewResult, err)
+		t.Fatalf("memory_promote_preview = %+v, %v", previewResult, err)
 	}
 	var preview struct {
 		Data struct {
@@ -182,10 +182,10 @@ func TestClaudeAdapterCuratesUpdateForFreshProcessRetrieval(t *testing.T) {
 	}
 	decodeStructured(t, previewResult, &preview)
 	applyResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_curate_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
+		Name: "memory_promote_apply", Arguments: map[string]any{"preview_token": preview.Data.PreviewToken},
 	})
 	if err != nil || applyResult.IsError {
-		t.Fatalf("memory_curate_apply = %+v, %v", applyResult, err)
+		t.Fatalf("memory_promote_apply = %+v, %v", applyResult, err)
 	}
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
@@ -236,7 +236,7 @@ func TestE2EReadingTeamPageIsRestructuredByRewrite(t *testing.T) {
 		map[string]any{"operation": "rewrite_page", "proposal_id": first.ID, "target_path": rewriteBaselinePath, "content_hash": page.Data.ContentHash, "replacement": rewriteReplacement},
 		map[string]any{"operation": "fold_proposal", "proposal_id": second.ID, "fold_into": first.ID},
 	)
-	e2eCall(t, session, "memory_curate_batch_apply", map[string]any{"preview_token": token})
+	e2eCall(t, session, "memory_promote_batch_apply", map[string]any{"preview_token": token})
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestE2ENewTeamPageIsCreatedFromTwoProposalsInOneRun(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(memoryRoot, filepath.FromSlash(rewriteBaselinePath))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("preview created the page: %v", err)
 	}
-	e2eCall(t, session, "memory_curate_batch_apply", map[string]any{"preview_token": token})
+	e2eCall(t, session, "memory_promote_batch_apply", map[string]any{"preview_token": token})
 	if err := session.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -317,9 +317,9 @@ func e2eBatchPreview(t *testing.T, session *mcp.ClientSession, items ...map[stri
 			PreviewToken string `json:"preview_token"`
 		} `json:"data"`
 	}
-	decodeStructured(t, e2eCall(t, session, "memory_curate_batch_preview", map[string]any{"items": items}), &preview)
+	decodeStructured(t, e2eCall(t, session, "memory_promote_batch_preview", map[string]any{"items": items}), &preview)
 	if preview.Data.PreviewToken == "" {
-		t.Fatal("memory_curate_batch_preview returned no preview_token")
+		t.Fatal("memory_promote_batch_preview returned no preview_token")
 	}
 	return preview.Data.PreviewToken
 }
@@ -342,7 +342,7 @@ func e2eAssertTeamPage(t *testing.T, binary, memoryRoot, parent string, proposal
 		}
 	}
 	if got := gitOutput(t, memoryRoot, "rev-parse", "HEAD^"); got != parent {
-		t.Fatalf("curation commit parent = %s, want %s (one commit)", got, parent)
+		t.Fatalf("promotion commit parent = %s, want %s (one commit)", got, parent)
 	}
 	if status := gitOutput(t, memoryRoot, "status", "--porcelain"); status != "" {
 		t.Fatalf("dirty status after apply: %q", status)

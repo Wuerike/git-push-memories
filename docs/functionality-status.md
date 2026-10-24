@@ -15,7 +15,7 @@ Descreve o que a implementacao atual expoe ao mundo externo e o que cada acao al
 | Acao | Efeito |
 |---|---|
 | `install.sh` / `make install` | Instala o binario `gpm` (padrao `~/.local/bin`). |
-| `gpm setup <memory-root>` | Valida o repositorio (worktree Git com ao menos um commit e `gpm.json` valido). Exige `claude` no `PATH`. Grava o memory root em `<UserConfigDir>/git-push-memories/config.json`, registra `gpm mcp` no escopo `user` do Claude Code e instala `~/.claude/skills/{remember,curate}/SKILL.md`. Recusa sobrescrever skill com mesmo nome que nao seja gerenciado por este projeto. Pode ser repetido para trocar de repositorio ou apos mover o binario. |
+| `gpm setup <memory-root>` | Valida o repositorio (worktree Git com ao menos um commit e `gpm.json` valido). Exige `claude` no `PATH`. Grava o memory root em `<UserConfigDir>/git-push-memories/config.json`, registra `gpm mcp` no escopo `user` do Claude Code e instala `~/.claude/skills/{remember,promote}/SKILL.md`. Recusa sobrescrever skill com mesmo nome que nao seja gerenciado por este projeto. Pode ser repetido para trocar de repositorio ou apos mover o binario. |
 
 `gpm.json`:
 
@@ -43,9 +43,9 @@ Ambos so rodam quando invocados pela pessoa (nao sao acionados pelo modelo) e ex
 | Comando | O que acontece | Efeito no repositorio |
 |---|---|---|
 | `/remember <fato>` | Interpreta o fato (assunto, escopo, forma), pesquisa a memoria e as propostas pendentes, avisa se ja existe proposta do mesmo assunto, sugere `create`, `update` ou `remove` e mostra os campos exatos. Apos confirmar, chama `memory_propose` uma vez. | **1 commit** em `main` que adiciona `proposals/<id>-<slug>.md`. Memoria canonica nao muda. Proposta identica a uma existente reaproveita a existente (`duplicate: true`), sem commit. Falha ou cancelamento nao escrevem nada. |
-| `/curate [id ...]` | Lista o inbox (ou usa os IDs dados, de 1 a 16), agrupa por assunto/pagina com aprovacao, mostra plano, diff completo e evidencias; repete previews ate a pessoa confirmar o diff exato. | **1 commit** em `main` que aplica todas as decisoes do lote e remove as propostas consumidas do inbox. Cancelar nao altera nada. |
+| `/promote [id ...]` | Lista o inbox (ou usa os IDs dados, de 1 a 16), agrupa por assunto/pagina com aprovacao, mostra plano, diff completo e evidencias; repete previews ate a pessoa confirmar o diff exato. | **1 commit** em `main` que aplica todas as decisoes do lote e remove as propostas consumidas do inbox. Cancelar nao altera nada. |
 
-Decisoes possiveis em `/curate`:
+Decisoes possiveis em `/promote`:
 
 | Decisao | Efeito |
 |---|---|
@@ -70,8 +70,8 @@ Regras do lote: targets canonicos distintos (exceto folds), preview de uso unico
 | `memory_reference_snapshot` | le | Referencias imutaveis (lineage, commit, path, SHA-256 do blob) para ate 16 arquivos de um checkout local de codigo; o root local e vinculado so ao processo atual e nunca persistido. |
 | `memory_reference_expand` | le | Trecho de linhas de uma referencia `verified` (UTF-8, ate 64 KiB). |
 | `memory_propose` | **escreve** | Commit da proposta no inbox (ver `/remember`). |
-| `memory_curate_preview`, `memory_curate_batch_preview` | le | Diff e evidencias de 1 a 16 decisoes, mais token de uso unico. Novo preview invalida tokens anteriores das mesmas propostas. |
-| `memory_curate_apply`, `memory_curate_batch_apply` | **escreve** | Consome o token e cria o commit da curadoria. |
+| `memory_promote_preview`, `memory_promote_batch_preview` | le | Diff e evidencias de 1 a 16 decisoes, mais token de uso unico. Novo preview invalida tokens anteriores das mesmas propostas. |
+| `memory_promote_apply`, `memory_promote_batch_apply` | **escreve** | Consome o token e cria o commit da promocao. |
 
 ## 5. Restricoes que o usuario sente
 

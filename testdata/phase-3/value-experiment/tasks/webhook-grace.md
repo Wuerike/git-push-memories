@@ -1,1 +1,0 @@
-Implement the current rotated-key acceptance window in `policy.WebhookKeyAccepted`. Preserve the exported API and existing behavior outside the current policy. Use repository evidence and configured memory when useful. Do not ask for policy values.

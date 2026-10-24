@@ -12,10 +12,10 @@ import (
 	"sync"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
-	"github.com/Wuerike/git-push-memories/internal/curation"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
+	"github.com/Wuerike/git-push-memories/internal/promotion"
 	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,22 +29,22 @@ type Server struct {
 	stateRoot  string
 	inbox      *inbox.Inbox
 	inboxMu    sync.Mutex
-	curator    *curation.Curator
-	curatorMu  sync.Mutex
-	previews   map[string]pendingCuration
-	batches    map[string]pendingBatchCuration
+	promoter   *promotion.Promoter
+	promoterMu sync.Mutex
+	previews   map[string]pendingPromotion
+	batches    map[string]pendingBatchPromotion
 	references *reference.Verifier
 	pages      *memory.Repository
 	pagesMu    sync.Mutex
 }
 
-type pendingCuration struct {
-	Preview      curation.Preview
+type pendingPromotion struct {
+	Preview      promotion.Preview
 	EvidenceHash [sha256.Size]byte
 }
 
-type pendingBatchCuration struct {
-	Preview        curation.BatchPreview
+type pendingBatchPromotion struct {
+	Preview        promotion.BatchPreview
 	EvidenceHashes [][sha256.Size]byte
 }
 
@@ -98,33 +98,33 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}, server.expandReference)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_proposal_list",
-		Description: "List committed Markdown proposals and configured memory categories for explicit human curation.",
+		Description: "List committed Markdown proposals and configured memory categories for explicit human promotion.",
 	}, server.listProposals)
 	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_curate_preview",
-		Description: "Preview one curation decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal, keep_pending) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
-	}, server.previewCuration)
+		Name:        "memory_promote_preview",
+		Description: "Preview one promotion decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal, keep_pending) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
+	}, server.previewPromotion)
 	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_curate_apply",
-		Description: "Apply one previously previewed curation after explicit human confirmation.",
-	}, server.applyCuration)
+		Name:        "memory_promote_apply",
+		Description: "Apply one previously previewed promotion after explicit human confirmation.",
+	}, server.applyPromotion)
 	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_curate_batch_preview",
-		Description: "Preview a bounded batch of curation decisions for one atomic commit, including fold_proposal items that fold other proposals into a rewrite_page or into a create_page that carries a replacement. A new preview invalidates older pending tokens for the same proposals.",
-	}, server.previewCurationBatch)
+		Name:        "memory_promote_batch_preview",
+		Description: "Preview a bounded batch of promotion decisions for one atomic commit, including fold_proposal items that fold other proposals into a rewrite_page or into a create_page that carries a replacement. A new preview invalidates older pending tokens for the same proposals.",
+	}, server.previewPromotionBatch)
 	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_curate_batch_apply",
-		Description: "Apply one previously previewed curation batch after explicit human confirmation.",
-	}, server.applyCurationBatch)
+		Name:        "memory_promote_batch_apply",
+		Description: "Apply one previously previewed promotion batch after explicit human confirmation.",
+	}, server.applyPromotionBatch)
 	return server, nil
 }
 
 func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	defer s.retriever.Close()
 	defer s.closeInbox()
-	defer s.closeCurator()
+	defer s.closePromoter()
 	defer s.closePages()
-	if _, err := curation.Recover(ctx, s.cfg); err != nil {
+	if _, err := promotion.Recover(ctx, s.cfg); err != nil {
 		return err
 	}
 	transport := &mcp.IOTransport{
@@ -164,9 +164,9 @@ type pageReadResponse struct {
 
 type addProposalInput struct {
 	Title            string                `json:"title" jsonschema:"concise human-readable proposal title"`
-	SuggestedAction  string                `json:"suggested_action" jsonschema:"suggested curation action: create, update, or remove"`
+	SuggestedAction  string                `json:"suggested_action" jsonschema:"suggested promotion action: create, update, or remove"`
 	Target           string                `json:"target,omitempty" jsonschema:"optional canonical relative memory target"`
-	Knowledge        string                `json:"knowledge" jsonschema:"knowledge for a future curator to evaluate"`
+	Knowledge        string                `json:"knowledge" jsonschema:"knowledge for a future promoter to evaluate"`
 	SourcePaths      []string              `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
 	SourceReferences []reference.Reference `json:"source_references,omitempty" jsonschema:"immutable references returned by memory_reference_snapshot; source_paths must be empty"`
 }
@@ -185,8 +185,8 @@ type expandReferenceInput struct {
 
 type listProposalsInput struct{}
 
-type previewCurationInput struct {
-	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, discard_proposal, or keep_pending; fold_proposal is accepted only by memory_curate_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
+type previewPromotionInput struct {
+	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, discard_proposal, or keep_pending; fold_proposal is accepted only by memory_promote_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
 	ProposalID  string `json:"proposal_id" jsonschema:"identifier of one committed proposal"`
 	TargetPath  string `json:"target_path,omitempty" jsonschema:"canonical page path inside a configured memory category; omitted for fold_proposal and discard_proposal"`
 	SectionID   string `json:"section_id,omitempty" jsonschema:"leaf section identifier required by replace_section, remove_section, or remove_page"`
@@ -197,65 +197,65 @@ type previewCurationInput struct {
 	Reason      string `json:"reason,omitempty" jsonschema:"discard reason required only by discard_proposal: not_relevant, incorrect, sensitive, wrong_target, superseded, or duplicate"`
 }
 
-type applyCurationInput struct {
-	PreviewToken string `json:"preview_token" jsonschema:"single-use token returned by memory_curate_preview"`
+type applyPromotionInput struct {
+	PreviewToken string `json:"preview_token" jsonschema:"single-use token returned by memory_promote_preview"`
 }
 
-type previewCurationBatchInput struct {
-	Items []previewCurationInput `json:"items" jsonschema:"one to sixteen curation decisions with distinct proposals; canonical items have distinct target paths, while fold_proposal items have no target path and depend on a rewrite_page or replacement-carrying create_page item in the same batch"`
+type previewPromotionBatchInput struct {
+	Items []previewPromotionInput `json:"items" jsonschema:"one to sixteen promotion decisions with distinct proposals; canonical items have distinct target paths, while fold_proposal items have no target path and depend on a rewrite_page or replacement-carrying create_page item in the same batch"`
 }
 
-type curationPreview struct {
-	PreviewToken string           `json:"preview_token"`
-	Evidence     curationEvidence `json:"evidence"`
-	curation.Preview
+type promotionPreview struct {
+	PreviewToken string            `json:"preview_token"`
+	Evidence     promotionEvidence `json:"evidence"`
+	promotion.Preview
 }
 
-type curationBatchItem struct {
-	Evidence curationEvidence `json:"evidence"`
-	curation.Preview
+type promotionBatchItem struct {
+	Evidence promotionEvidence `json:"evidence"`
+	promotion.Preview
 }
 
-type curationBatchPreview struct {
-	PreviewToken string              `json:"preview_token"`
-	Items        []curationBatchItem `json:"items"`
-	Diff         string              `json:"diff"`
+type promotionBatchPreview struct {
+	PreviewToken string               `json:"preview_token"`
+	Items        []promotionBatchItem `json:"items"`
+	Diff         string               `json:"diff"`
 }
 
-type curationEvidence struct {
-	CanonicalCandidates retrieval.ContextBundle   `json:"canonical_candidates"`
-	RelatedProposals    curation.RelatedProposals `json:"related_proposals"`
-	References          []reference.Evidence      `json:"references"`
+type promotionEvidence struct {
+	CanonicalCandidates retrieval.ContextBundle    `json:"canonical_candidates"`
+	RelatedProposals    promotion.RelatedProposals `json:"related_proposals"`
+	References          []reference.Evidence       `json:"references"`
 }
 
 type proposalListResponse struct {
-	SchemaVersion int            `json:"schema_version"`
-	Data          *curation.List `json:"data,omitempty"`
-	Error         *toolError     `json:"error,omitempty"`
+	SchemaVersion int             `json:"schema_version"`
+	Data          *promotion.List `json:"data,omitempty"`
+	Error         *toolError      `json:"error,omitempty"`
 }
 
-type curationPreviewResponse struct {
-	SchemaVersion int              `json:"schema_version"`
-	Data          *curationPreview `json:"data,omitempty"`
-	Error         *toolError       `json:"error,omitempty"`
+type promotionPreviewResponse struct {
+	SchemaVersion int               `json:"schema_version"`
+	Data          *promotionPreview `json:"data,omitempty"`
+	Error         *toolError        `json:"error,omitempty"`
 }
 
-type curationApplyResponse struct {
-	SchemaVersion int              `json:"schema_version"`
-	Data          *curation.Result `json:"data,omitempty"`
-	Error         *toolError       `json:"error,omitempty"`
+type promotionApplyResponse struct {
+	SchemaVersion int               `json:"schema_version"`
+	Data          *promotion.Result `json:"data,omitempty"`
+	Error         *toolError        `json:"error,omitempty"`
 }
 
-type curationBatchPreviewResponse struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Data          *curationBatchPreview `json:"data,omitempty"`
-	Error         *toolError            `json:"error,omitempty"`
+type promotionBatchPreviewResponse struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Data          *promotionBatchPreview `json:"data,omitempty"`
+	Error         *toolError             `json:"error,omitempty"`
 }
 
-type curationBatchApplyResponse struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Data          *curation.BatchResult `json:"data,omitempty"`
-	Error         *toolError            `json:"error,omitempty"`
+type promotionBatchApplyResponse struct {
+	SchemaVersion int                    `json:"schema_version"`
+	Data          *promotion.BatchResult `json:"data,omitempty"`
+	Error         *toolError             `json:"error,omitempty"`
 }
 
 type inboxToolResponse struct {
@@ -421,171 +421,171 @@ func (s *Server) expandReference(ctx context.Context, _ *mcp.CallToolRequest, in
 }
 
 func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, _ listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
-	curator, err := s.proposalCurator()
+	promoter, err := s.proposalPromoter()
 	if err != nil {
-		return proposalListFailure("curation_unavailable")
+		return proposalListFailure("promotion_unavailable")
 	}
-	listed, err := curator.List(ctx)
+	listed, err := promoter.List(ctx)
 	if err != nil {
-		return proposalListFailure(curationErrorCode(err))
+		return proposalListFailure(promotionErrorCode(err))
 	}
 	return nil, proposalListResponse{SchemaVersion: 1, Data: &listed}, nil
 }
 
-func (s *Server) previewCuration(ctx context.Context, _ *mcp.CallToolRequest, input previewCurationInput) (*mcp.CallToolResult, curationPreviewResponse, error) {
-	curator, err := s.proposalCurator()
+func (s *Server) previewPromotion(ctx context.Context, _ *mcp.CallToolRequest, input previewPromotionInput) (*mcp.CallToolResult, promotionPreviewResponse, error) {
+	promoter, err := s.proposalPromoter()
 	if err != nil {
-		return curationPreviewFailure("curation_unavailable")
+		return promotionPreviewFailure("promotion_unavailable")
 	}
-	preview, err := curator.Preview(ctx, curationRequest(input))
+	preview, err := promoter.Preview(ctx, promotionRequest(input))
 	if err != nil {
-		return curationPreviewFailure(curationErrorCode(err))
+		return promotionPreviewFailure(promotionErrorCode(err))
 	}
-	evidence, err := s.buildCurationEvidence(ctx, curator, preview)
+	evidence, err := s.buildPromotionEvidence(ctx, promoter, preview)
 	if err != nil {
-		return curationPreviewFailure(curationEvidenceErrorCode(err))
+		return promotionPreviewFailure(promotionEvidenceErrorCode(err))
 	}
 	encodedEvidence, err := json.Marshal(evidence)
 	if err != nil {
-		return curationPreviewFailure("curation_unavailable")
+		return promotionPreviewFailure("promotion_unavailable")
 	}
 	evidenceHash := sha256.Sum256(encodedEvidence)
 	tokenBytes := make([]byte, 16)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		return curationPreviewFailure("curation_unavailable")
+		return promotionPreviewFailure("promotion_unavailable")
 	}
 	token := hex.EncodeToString(tokenBytes)
-	s.curatorMu.Lock()
+	s.promoterMu.Lock()
 	if s.previews == nil {
-		s.previews = make(map[string]pendingCuration)
+		s.previews = make(map[string]pendingPromotion)
 	}
 	s.invalidatePendingLocked(proposalIDs(preview))
-	s.previews[token] = pendingCuration{Preview: preview, EvidenceHash: evidenceHash}
-	s.curatorMu.Unlock()
-	response := curationPreview{
+	s.previews[token] = pendingPromotion{Preview: preview, EvidenceHash: evidenceHash}
+	s.promoterMu.Unlock()
+	response := promotionPreview{
 		PreviewToken: token,
 		Evidence:     evidence,
 		Preview:      preview,
 	}
-	return nil, curationPreviewResponse{SchemaVersion: 1, Data: &response}, nil
+	return nil, promotionPreviewResponse{SchemaVersion: 1, Data: &response}, nil
 }
 
-func (s *Server) applyCuration(ctx context.Context, _ *mcp.CallToolRequest, input applyCurationInput) (*mcp.CallToolResult, curationApplyResponse, error) {
-	s.curatorMu.Lock()
+func (s *Server) applyPromotion(ctx context.Context, _ *mcp.CallToolRequest, input applyPromotionInput) (*mcp.CallToolResult, promotionApplyResponse, error) {
+	s.promoterMu.Lock()
 	pending, found := s.previews[input.PreviewToken]
 	delete(s.previews, input.PreviewToken)
-	curator := s.curator
-	s.curatorMu.Unlock()
-	if !found || curator == nil {
-		return curationApplyFailure("invalid_preview")
+	promoter := s.promoter
+	s.promoterMu.Unlock()
+	if !found || promoter == nil {
+		return promotionApplyFailure("invalid_preview")
 	}
-	result, err := curator.Apply(ctx, pending.Preview, func() (string, error) {
-		evidence, err := s.buildCurationEvidence(ctx, curator, pending.Preview)
+	result, err := promoter.Apply(ctx, pending.Preview, func() (string, error) {
+		evidence, err := s.buildPromotionEvidence(ctx, promoter, pending.Preview)
 		if err != nil {
-			return "", curation.ErrDrift
+			return "", promotion.ErrDrift
 		}
 		encodedEvidence, err := json.Marshal(evidence)
 		if err != nil {
-			return "", curation.ErrDrift
+			return "", promotion.ErrDrift
 		}
 		hash := sha256.Sum256(encodedEvidence)
 		if hash != pending.EvidenceHash {
-			return "", curation.ErrDrift
+			return "", promotion.ErrDrift
 		}
 		return "sha256:" + hex.EncodeToString(hash[:]), nil
 	})
 	if err != nil {
-		return curationApplyFailure(curationErrorCode(err))
+		return promotionApplyFailure(promotionErrorCode(err))
 	}
-	return nil, curationApplyResponse{SchemaVersion: 1, Data: &result}, nil
+	return nil, promotionApplyResponse{SchemaVersion: 1, Data: &result}, nil
 }
 
-func (s *Server) previewCurationBatch(ctx context.Context, _ *mcp.CallToolRequest, input previewCurationBatchInput) (*mcp.CallToolResult, curationBatchPreviewResponse, error) {
-	curator, err := s.proposalCurator()
+func (s *Server) previewPromotionBatch(ctx context.Context, _ *mcp.CallToolRequest, input previewPromotionBatchInput) (*mcp.CallToolResult, promotionBatchPreviewResponse, error) {
+	promoter, err := s.proposalPromoter()
 	if err != nil {
-		return curationBatchPreviewFailure("curation_unavailable")
+		return promotionBatchPreviewFailure("promotion_unavailable")
 	}
-	requests := make([]curation.PreviewRequest, len(input.Items))
+	requests := make([]promotion.PreviewRequest, len(input.Items))
 	for index, item := range input.Items {
-		requests[index] = curationRequest(item)
+		requests[index] = promotionRequest(item)
 	}
-	preview, err := curator.PreviewBatch(ctx, requests)
+	preview, err := promoter.PreviewBatch(ctx, requests)
 	if err != nil {
-		return curationBatchPreviewFailure(curationErrorCode(err))
+		return promotionBatchPreviewFailure(promotionErrorCode(err))
 	}
-	response := curationBatchPreview{Items: make([]curationBatchItem, len(preview.Items)), Diff: preview.Diff}
+	response := promotionBatchPreview{Items: make([]promotionBatchItem, len(preview.Items)), Diff: preview.Diff}
 	hashes := make([][sha256.Size]byte, len(preview.Items))
 	for index, item := range preview.Items {
-		evidence, err := s.buildCurationEvidence(ctx, curator, item)
+		evidence, err := s.buildPromotionEvidence(ctx, promoter, item)
 		if err != nil {
-			return curationBatchPreviewFailure(curationEvidenceErrorCode(err))
+			return promotionBatchPreviewFailure(promotionEvidenceErrorCode(err))
 		}
 		encoded, err := json.Marshal(evidence)
 		if err != nil {
-			return curationBatchPreviewFailure("curation_unavailable")
+			return promotionBatchPreviewFailure("promotion_unavailable")
 		}
 		hashes[index] = sha256.Sum256(encoded)
-		response.Items[index] = curationBatchItem{Preview: item, Evidence: evidence}
+		response.Items[index] = promotionBatchItem{Preview: item, Evidence: evidence}
 	}
 	tokenBytes := make([]byte, 16)
 	if _, err := rand.Read(tokenBytes); err != nil {
-		return curationBatchPreviewFailure("curation_unavailable")
+		return promotionBatchPreviewFailure("promotion_unavailable")
 	}
 	response.PreviewToken = hex.EncodeToString(tokenBytes)
-	s.curatorMu.Lock()
+	s.promoterMu.Lock()
 	if s.batches == nil {
-		s.batches = make(map[string]pendingBatchCuration)
+		s.batches = make(map[string]pendingBatchPromotion)
 	}
 	ids := make([]string, len(preview.Items))
 	for index, item := range preview.Items {
 		ids[index] = item.ProposalID
 	}
 	s.invalidatePendingLocked(ids)
-	s.batches[response.PreviewToken] = pendingBatchCuration{Preview: preview, EvidenceHashes: hashes}
-	s.curatorMu.Unlock()
-	return nil, curationBatchPreviewResponse{SchemaVersion: 1, Data: &response}, nil
+	s.batches[response.PreviewToken] = pendingBatchPromotion{Preview: preview, EvidenceHashes: hashes}
+	s.promoterMu.Unlock()
+	return nil, promotionBatchPreviewResponse{SchemaVersion: 1, Data: &response}, nil
 }
 
-func (s *Server) applyCurationBatch(ctx context.Context, _ *mcp.CallToolRequest, input applyCurationInput) (*mcp.CallToolResult, curationBatchApplyResponse, error) {
-	s.curatorMu.Lock()
+func (s *Server) applyPromotionBatch(ctx context.Context, _ *mcp.CallToolRequest, input applyPromotionInput) (*mcp.CallToolResult, promotionBatchApplyResponse, error) {
+	s.promoterMu.Lock()
 	pending, found := s.batches[input.PreviewToken]
 	delete(s.batches, input.PreviewToken)
-	curator := s.curator
-	s.curatorMu.Unlock()
-	if !found || curator == nil {
-		return curationBatchApplyFailure("invalid_preview")
+	promoter := s.promoter
+	s.promoterMu.Unlock()
+	if !found || promoter == nil {
+		return promotionBatchApplyFailure("invalid_preview")
 	}
-	result, err := curator.ApplyBatch(ctx, pending.Preview, func() (string, error) {
+	result, err := promoter.ApplyBatch(ctx, pending.Preview, func() (string, error) {
 		for index, preview := range pending.Preview.Items {
-			evidence, err := s.buildCurationEvidence(ctx, curator, preview)
+			evidence, err := s.buildPromotionEvidence(ctx, promoter, preview)
 			if err != nil {
-				return "", curation.ErrDrift
+				return "", promotion.ErrDrift
 			}
 			encoded, err := json.Marshal(evidence)
 			if err != nil || sha256.Sum256(encoded) != pending.EvidenceHashes[index] {
-				return "", curation.ErrDrift
+				return "", promotion.ErrDrift
 			}
 		}
 		encodedHashes, err := json.Marshal(pending.EvidenceHashes)
 		if err != nil {
-			return "", curation.ErrDrift
+			return "", promotion.ErrDrift
 		}
 		hash := sha256.Sum256(encodedHashes)
 		return "sha256:" + hex.EncodeToString(hash[:]), nil
 	})
 	if err != nil {
-		return curationBatchApplyFailure(curationErrorCode(err))
+		return promotionBatchApplyFailure(promotionErrorCode(err))
 	}
-	return nil, curationBatchApplyResponse{SchemaVersion: 1, Data: &result}, nil
+	return nil, promotionBatchApplyResponse{SchemaVersion: 1, Data: &result}, nil
 }
 
-func proposalIDs(preview curation.Preview) []string {
+func proposalIDs(preview promotion.Preview) []string {
 	return []string{preview.ProposalID}
 }
 
 // invalidatePendingLocked drops every pending single or batch token that
 // contains any of the given proposals. A newer preview supersedes older ones
-// for the same proposal. The caller must hold s.curatorMu.
+// for the same proposal. The caller must hold s.promoterMu.
 func (s *Server) invalidatePendingLocked(ids []string) {
 	shared := func(other ...string) bool {
 		for _, id := range other {
@@ -612,31 +612,31 @@ func (s *Server) invalidatePendingLocked(ids []string) {
 	}
 }
 
-func curationRequest(input previewCurationInput) curation.PreviewRequest {
-	return curation.PreviewRequest{
-		Operation: curation.Operation(input.Operation), ProposalID: input.ProposalID, TargetPath: input.TargetPath,
-		SectionID: input.SectionID, ContentHash: input.ContentHash, Heading: input.Heading, Replacement: input.Replacement, FoldInto: input.FoldInto, Reason: curation.DiscardReason(input.Reason),
+func promotionRequest(input previewPromotionInput) promotion.PreviewRequest {
+	return promotion.PreviewRequest{
+		Operation: promotion.Operation(input.Operation), ProposalID: input.ProposalID, TargetPath: input.TargetPath,
+		SectionID: input.SectionID, ContentHash: input.ContentHash, Heading: input.Heading, Replacement: input.Replacement, FoldInto: input.FoldInto, Reason: promotion.DiscardReason(input.Reason),
 	}
 }
 
-func (s *Server) buildCurationEvidence(ctx context.Context, curator *curation.Curator, preview curation.Preview) (curationEvidence, error) {
+func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion.Promoter, preview promotion.Preview) (promotionEvidence, error) {
 	query := preview.Title + " " + preview.Knowledge
 	canonicalCandidates, err := s.retriever.Retrieve(ctx, query, retrieval.Scope{}, 4096)
 	if err != nil {
-		return curationEvidence{}, err
+		return promotionEvidence{}, err
 	}
-	relatedProposals, err := curator.RelatedProposals(ctx, preview, query)
+	relatedProposals, err := promoter.RelatedProposals(ctx, preview, query)
 	if err != nil {
-		return curationEvidence{}, err
+		return promotionEvidence{}, err
 	}
-	if err := curator.RevalidatePreview(ctx, preview); err != nil {
-		return curationEvidence{}, err
+	if err := promoter.RevalidatePreview(ctx, preview); err != nil {
+		return promotionEvidence{}, err
 	}
 	references, err := s.references.Verify(ctx, preview.SourceReferences, preview.SourcePaths)
 	if err != nil {
-		return curationEvidence{}, err
+		return promotionEvidence{}, err
 	}
-	return curationEvidence{
+	return promotionEvidence{
 		CanonicalCandidates: canonicalCandidates,
 		RelatedProposals:    relatedProposals,
 		References:          references,
@@ -656,11 +656,11 @@ func (s *Server) closeInbox() {
 	}
 }
 
-func (s *Server) closeCurator() {
-	s.curatorMu.Lock()
-	defer s.curatorMu.Unlock()
-	if s.curator != nil {
-		_ = s.curator.Close()
+func (s *Server) closePromoter() {
+	s.promoterMu.Lock()
+	defer s.promoterMu.Unlock()
+	if s.promoter != nil {
+		_ = s.promoter.Close()
 	}
 }
 
@@ -678,18 +678,18 @@ func (s *Server) proposalInbox() (*inbox.Inbox, error) {
 	return proposalInbox, nil
 }
 
-func (s *Server) proposalCurator() (*curation.Curator, error) {
-	s.curatorMu.Lock()
-	defer s.curatorMu.Unlock()
-	if s.curator != nil {
-		return s.curator, nil
+func (s *Server) proposalPromoter() (*promotion.Promoter, error) {
+	s.promoterMu.Lock()
+	defer s.promoterMu.Unlock()
+	if s.promoter != nil {
+		return s.promoter, nil
 	}
-	curator, err := curation.New(s.cfg)
+	promoter, err := promotion.New(s.cfg)
 	if err != nil {
 		return nil, err
 	}
-	s.curator = curator
-	return curator, nil
+	s.promoter = promoter
+	return promoter, nil
 }
 
 func inboxFailure(code string) (*mcp.CallToolResult, inboxToolResponse, error) {
@@ -700,40 +700,40 @@ func proposalListFailure(code string) (*mcp.CallToolResult, proposalListResponse
 	return &mcp.CallToolResult{IsError: true}, proposalListResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
-func curationPreviewFailure(code string) (*mcp.CallToolResult, curationPreviewResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, curationPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+func promotionPreviewFailure(code string) (*mcp.CallToolResult, promotionPreviewResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, promotionPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
-func curationApplyFailure(code string) (*mcp.CallToolResult, curationApplyResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, curationApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+func promotionApplyFailure(code string) (*mcp.CallToolResult, promotionApplyResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, promotionApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
-func curationBatchPreviewFailure(code string) (*mcp.CallToolResult, curationBatchPreviewResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, curationBatchPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+func promotionBatchPreviewFailure(code string) (*mcp.CallToolResult, promotionBatchPreviewResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, promotionBatchPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
-func curationBatchApplyFailure(code string) (*mcp.CallToolResult, curationBatchApplyResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, curationBatchApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
+func promotionBatchApplyFailure(code string) (*mcp.CallToolResult, promotionBatchApplyResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, promotionBatchApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
-func curationErrorCode(err error) string {
+func promotionErrorCode(err error) string {
 	switch {
 	case errors.Is(err, inbox.ErrNotMain):
 		return "not_on_main"
 	case errors.Is(err, inbox.ErrInvalidProposal):
 		return "invalid_proposal"
-	case errors.Is(err, curation.ErrUnsupported):
+	case errors.Is(err, promotion.ErrUnsupported):
 		return "unsupported_action"
-	case errors.Is(err, curation.ErrLocked):
+	case errors.Is(err, promotion.ErrLocked):
 		return "git_index_locked"
-	case errors.Is(err, curation.ErrInvalidReason):
+	case errors.Is(err, promotion.ErrInvalidReason):
 		return "invalid_discard_reason"
-	case errors.Is(err, curation.ErrInvalidBatch):
-		return "invalid_curation_batch"
-	case errors.Is(err, curation.ErrRecovery):
-		return "curation_recovery_failed"
-	case errors.Is(err, inbox.ErrProposalDrift), errors.Is(err, curation.ErrDrift), errors.Is(err, memory.ErrDrift), errors.Is(err, memory.ErrTargetDirty), errors.Is(err, memory.ErrTargetExists):
-		return "curation_drift"
+	case errors.Is(err, promotion.ErrInvalidBatch):
+		return "invalid_promotion_batch"
+	case errors.Is(err, promotion.ErrRecovery):
+		return "promotion_recovery_failed"
+	case errors.Is(err, inbox.ErrProposalDrift), errors.Is(err, promotion.ErrDrift), errors.Is(err, memory.ErrDrift), errors.Is(err, memory.ErrTargetDirty), errors.Is(err, memory.ErrTargetExists):
+		return "promotion_drift"
 	case errors.Is(err, memory.ErrInvalidPath), errors.Is(err, memory.ErrInvalidSchema), errors.Is(err, memory.ErrInvalidID), errors.Is(err, memory.ErrPageNotEligible),
 		errors.Is(err, memory.ErrSectionExists), errors.Is(err, memory.ErrSectionNotFound), errors.Is(err, memory.ErrSectionNotLeaf):
 		return "invalid_target"
@@ -742,17 +742,17 @@ func curationErrorCode(err error) string {
 		if errors.As(err, &rejection) {
 			return rejection.Class + "_" + rejection.Reason
 		}
-		return "curation_failed"
+		return "promotion_failed"
 	}
 }
 
-func curationEvidenceErrorCode(err error) string {
+func promotionEvidenceErrorCode(err error) string {
 	switch {
 	case errors.Is(err, retrieval.ErrInvalidQuery), errors.Is(err, retrieval.ErrInvalidScope), errors.Is(err, retrieval.ErrInvalidBudget),
 		errors.Is(err, retrieval.ErrBudgetTooSmall), errors.Is(err, retrieval.ErrStaleHandle):
 		return retrieval.ErrorCode(err)
 	default:
-		return curationErrorCode(err)
+		return promotionErrorCode(err)
 	}
 }
 

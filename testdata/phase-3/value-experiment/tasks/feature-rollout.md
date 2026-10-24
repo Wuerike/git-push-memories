@@ -1,1 +1,0 @@
-Implement the current regional rollout in `policy.FeatureEnabled`. Preserve the exported API and fail closed for unknown regions. Use repository evidence and configured memory when useful. Do not ask which region is enabled.

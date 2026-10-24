@@ -1,1 +1,0 @@
-Implement priority parcel escalation in `dispatch.EscalationFor` according to the current operational policy represented by this repository. Preserve the exported API and the existing behavior for standard and unknown tiers. Add or update focused tests where useful, run the test suite, and leave the working tree with the implementation ready for review.

@@ -96,18 +96,18 @@ func (f *rewriteFixture) call(t *testing.T, name string, arguments map[string]an
 
 func (f *rewriteFixture) preview(t *testing.T, item map[string]any) string {
 	t.Helper()
-	result, token, _ := f.call(t, "memory_curate_preview", item)
+	result, token, _ := f.call(t, "memory_promote_preview", item)
 	if result.IsError || token == "" {
-		t.Fatalf("memory_curate_preview = %+v", result)
+		t.Fatalf("memory_promote_preview = %+v", result)
 	}
 	return token
 }
 
 func (f *rewriteFixture) batchPreview(t *testing.T, items ...map[string]any) string {
 	t.Helper()
-	result, token, _ := f.call(t, "memory_curate_batch_preview", map[string]any{"items": items})
+	result, token, _ := f.call(t, "memory_promote_batch_preview", map[string]any{"items": items})
 	if result.IsError || token == "" {
-		t.Fatalf("memory_curate_batch_preview = %+v", result)
+		t.Fatalf("memory_promote_batch_preview = %+v", result)
 	}
 	return token
 }
@@ -135,12 +135,12 @@ func (f *rewriteFixture) wantPage(t *testing.T, want string) {
 func TestBatchPreviewAcceptsRewriteAndFold(t *testing.T) {
 	f := newRewriteFixture(t)
 	parent := gitOutput(t, f.root, "rev-parse", "HEAD")
-	result, token, _ := f.call(t, "memory_curate_batch_preview", map[string]any{"items": []map[string]any{
+	result, token, _ := f.call(t, "memory_promote_batch_preview", map[string]any{"items": []map[string]any{
 		f.rewriteItem(f.proposal[0], rewriteReplacement),
 		{"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0]},
 	}})
 	if result.IsError || token == "" {
-		t.Fatalf("memory_curate_batch_preview = %+v", result)
+		t.Fatalf("memory_promote_batch_preview = %+v", result)
 	}
 	var preview struct {
 		Data struct {
@@ -156,9 +156,9 @@ func TestBatchPreviewAcceptsRewriteAndFold(t *testing.T) {
 		t.Fatalf("batch preview items = %+v", preview.Data.Items)
 	}
 	f.wantPage(t, rewriteBaselinePage)
-	applyResult, _, code := f.call(t, "memory_curate_batch_apply", map[string]any{"preview_token": token})
+	applyResult, _, code := f.call(t, "memory_promote_batch_apply", map[string]any{"preview_token": token})
 	if applyResult.IsError {
-		t.Fatalf("memory_curate_batch_apply = %+v, code %q", applyResult, code)
+		t.Fatalf("memory_promote_batch_apply = %+v, code %q", applyResult, code)
 	}
 	golden, err := os.ReadFile("../memory/testdata/page-rewrite/team.golden.md")
 	if err != nil {
@@ -180,10 +180,10 @@ func TestBatchPreviewAcceptsRewriteAndFold(t *testing.T) {
 
 func TestSinglePreviewRejectsFold(t *testing.T) {
 	f := newRewriteFixture(t)
-	result, token, code := f.call(t, "memory_curate_preview", map[string]any{
+	result, token, code := f.call(t, "memory_promote_preview", map[string]any{
 		"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0],
 	})
-	if !result.IsError || token != "" || code != "invalid_curation_batch" {
+	if !result.IsError || token != "" || code != "invalid_promotion_batch" {
 		t.Fatalf("single fold preview = %+v, code %q", result, code)
 	}
 }
@@ -193,9 +193,9 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		f := newRewriteFixture(t)
 		first := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		second := f.preview(t, f.rewriteItem(f.proposal[0], "# Time\n\n## Membros\n- Outra pessoa\n"))
-		f.wantInvalid(t, "memory_curate_apply", first)
+		f.wantInvalid(t, "memory_promote_apply", first)
 		f.wantPage(t, rewriteBaselinePage)
-		if result, _, code := f.call(t, "memory_curate_apply", map[string]any{"preview_token": second}); result.IsError {
+		if result, _, code := f.call(t, "memory_promote_apply", map[string]any{"preview_token": second}); result.IsError {
 			t.Fatalf("second apply = %+v, code %q", result, code)
 		}
 		f.wantPage(t, "# Time\n<!-- @id: time-camada-de-leitura -->\n\n## Membros\n<!-- @id: time-camada-de-leitura-membros -->\n- Outra pessoa\n")
@@ -204,7 +204,7 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		f := newRewriteFixture(t)
 		first := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		f.preview(t, map[string]any{"operation": "create_page", "proposal_id": f.proposal[1], "target_path": "memories/domains/guilherme.md"})
-		if result, _, code := f.call(t, "memory_curate_apply", map[string]any{"preview_token": first}); result.IsError {
+		if result, _, code := f.call(t, "memory_promote_apply", map[string]any{"preview_token": first}); result.IsError {
 			t.Fatalf("apply after unrelated preview = %+v, code %q", result, code)
 		}
 	})
@@ -213,8 +213,8 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		single := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		batch := f.batchPreview(t, f.rewriteItem(f.proposal[0], rewriteReplacement),
 			map[string]any{"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0]})
-		f.wantInvalid(t, "memory_curate_apply", single)
-		if result, _, code := f.call(t, "memory_curate_batch_apply", map[string]any{"preview_token": batch}); result.IsError {
+		f.wantInvalid(t, "memory_promote_apply", single)
+		if result, _, code := f.call(t, "memory_promote_batch_apply", map[string]any{"preview_token": batch}); result.IsError {
 			t.Fatalf("batch apply = %+v, code %q", result, code)
 		}
 	})
@@ -223,9 +223,9 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		batch := f.batchPreview(t, f.rewriteItem(f.proposal[0], rewriteReplacement),
 			map[string]any{"operation": "fold_proposal", "proposal_id": f.proposal[1], "fold_into": f.proposal[0]})
 		single := f.preview(t, map[string]any{"operation": "create_page", "proposal_id": f.proposal[1], "target_path": "memories/domains/guilherme.md"})
-		f.wantInvalid(t, "memory_curate_batch_apply", batch)
+		f.wantInvalid(t, "memory_promote_batch_apply", batch)
 		f.wantPage(t, rewriteBaselinePage)
-		if result, _, code := f.call(t, "memory_curate_apply", map[string]any{"preview_token": single}); result.IsError {
+		if result, _, code := f.call(t, "memory_promote_apply", map[string]any{"preview_token": single}); result.IsError {
 			t.Fatalf("single apply = %+v, code %q", result, code)
 		}
 	})
@@ -234,10 +234,10 @@ func TestNewPreviewInvalidatesOlderTokensForSameProposal(t *testing.T) {
 		first := f.preview(t, f.rewriteItem(f.proposal[0], rewriteReplacement))
 		bad := f.rewriteItem(f.proposal[0], rewriteReplacement)
 		bad["content_hash"] = strings.Repeat("0", 64)
-		if result, token, _ := f.call(t, "memory_curate_preview", bad); !result.IsError || token != "" {
+		if result, token, _ := f.call(t, "memory_promote_preview", bad); !result.IsError || token != "" {
 			t.Fatalf("stale preview = %+v", result)
 		}
-		if result, _, code := f.call(t, "memory_curate_apply", map[string]any{"preview_token": first}); result.IsError {
+		if result, _, code := f.call(t, "memory_promote_apply", map[string]any{"preview_token": first}); result.IsError {
 			t.Fatalf("apply after failing preview = %+v, code %q", result, code)
 		}
 	})
@@ -267,8 +267,8 @@ func TestBatchPreviewAcceptsCreatePageWithReplacementAndFold(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(rewriteBaselinePath))); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("preview created the page: %v", err)
 	}
-	if result, _, code := f.call(t, "memory_curate_batch_apply", map[string]any{"preview_token": token}); result.IsError {
-		t.Fatalf("memory_curate_batch_apply = %+v, code %q", result, code)
+	if result, _, code := f.call(t, "memory_promote_batch_apply", map[string]any{"preview_token": token}); result.IsError {
+		t.Fatalf("memory_promote_batch_apply = %+v, code %q", result, code)
 	}
 	golden, err := os.ReadFile("../memory/testdata/page-rewrite/team.golden.md")
 	if err != nil {

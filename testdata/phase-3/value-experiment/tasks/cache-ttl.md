@@ -1,1 +1,0 @@
-Implement the current TTL validity boundary in `policy.CacheEntryValid`. Preserve the exported API and negative-age behavior. Use repository evidence and configured memory when useful. Do not ask for the TTL value.
