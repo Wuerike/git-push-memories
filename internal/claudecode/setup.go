@@ -10,20 +10,27 @@ import (
 	"path/filepath"
 
 	claudeintegration "github.com/Wuerike/git-push-memories/integrations/claude-code"
-	"github.com/Wuerike/git-push-memories/internal/config"
 )
 
 const managedMarker = "<!-- managed-by: git-push-memories -->"
 
 type Result struct {
-	MemoryRoot       string
 	SkillPath        string
 	PromoteSkillPath string
 }
 
-func Setup(ctx context.Context, memoryRoot string) (Result, error) {
+// Preflight fails before any repository work when Claude Code is missing.
+func Preflight() error {
 	if _, err := exec.LookPath("claude"); err != nil {
-		return Result{}, errors.New("Claude Code is not installed or is not available in PATH")
+		return errors.New("Claude Code is not installed or is not available in PATH")
+	}
+	return nil
+}
+
+// Install registers the MCP server and installs the skills.
+func Install(ctx context.Context) (Result, error) {
+	if err := Preflight(); err != nil {
+		return Result{}, err
 	}
 	executable, err := os.Executable()
 	if err != nil {
@@ -47,10 +54,6 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if err := ensureSkillCanBeManaged(promoteSkillPath, claudeintegration.PromoteSkill, "/promote"); err != nil {
 		return Result{}, err
 	}
-	cfg, err := config.Save(memoryRoot)
-	if err != nil {
-		return Result{}, err
-	}
 	if err := installSkill(rememberPath, claudeintegration.RememberSkill); err != nil {
 		return Result{}, err
 	}
@@ -68,7 +71,7 @@ func Setup(ctx context.Context, memoryRoot string) (Result, error) {
 	if output, err := check.CombinedOutput(); err != nil {
 		return Result{}, fmt.Errorf("Claude Code MCP health check failed: %s", bytes.TrimSpace(output))
 	}
-	return Result{MemoryRoot: cfg.MemoryRoot, SkillPath: rememberPath, PromoteSkillPath: promoteSkillPath}, nil
+	return Result{SkillPath: rememberPath, PromoteSkillPath: promoteSkillPath}, nil
 }
 
 func rememberSkillPath() (string, error) {

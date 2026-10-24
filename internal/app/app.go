@@ -1,21 +1,28 @@
 package app
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
+	"strings"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/Wuerike/git-push-memories/internal/claudecode"
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
 	"github.com/Wuerike/git-push-memories/internal/protocol"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
+	"github.com/Wuerike/git-push-memories/internal/setup"
 )
 
 const usage = `Usage:
-  gpm setup <memory-root>
+  gpm setup <repository-url> [--categories a,b] [--yes]
   gpm mcp
   gpm retrieve <query> --budget-bytes <n>
   gpm version
@@ -36,7 +43,7 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		fmt.Fprintf(stdout, "gpm %s\n", version)
 		return 0
 	case "setup":
-		return runSetup(ctx, args[1:], stdout, stderr)
+		return runSetup(ctx, args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(ctx, args[1:], stdin, stdout, stderr, version)
 	case "retrieve":
@@ -47,18 +54,75 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 }
 
-func runSetup(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 1 || args[0] == "" {
-		fmt.Fprintln(stderr, "setup requires exactly one memory repository path")
+func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	if len(args) == 0 || args[0] == "" || strings.HasPrefix(args[0], "-") {
+		fmt.Fprintln(stderr, "setup requires the memory repository URL first")
 		return 2
 	}
-	result, err := claudecode.Setup(ctx, args[0])
+	url := args[0]
+	flags := flag.NewFlagSet("setup", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	categories := flags.String("categories", "", "comma-separated memory categories, used only when the repository is created")
+	yes := flags.Bool("yes", false, "run without prompts")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+		return 2
+	}
+	interactive := isTerminal(stdin)
+	if !interactive && !*yes {
+		fmt.Fprintln(stderr, "setup needs a terminal for prompts; pass --yes (and --categories for a new repository)")
+		return 2
+	}
+	if err := claudecode.Preflight(); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	prepared, err := setup.Prepare(ctx, setup.Options{URL: url, Categories: func() ([]string, error) {
+		if *categories != "" {
+			return splitCategories(*categories), nil
+		}
+		if *yes {
+			return nil, errors.New("--categories is required with --yes to initialize an empty repository")
+		}
+		fmt.Fprint(stdout, "Memory categories (comma-separated, e.g. domains,decision): ")
+		line, err := bufio.NewReader(stdin).ReadString('\n')
+		if err != nil && line == "" {
+			return nil, errors.New("memory categories are required")
+		}
+		return splitCategories(line), nil
+	}})
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "Configured memory at %s. Use /remember <fact> and /promote in any Claude Code session.\n", result.MemoryRoot)
+	if _, err := claudecode.Install(ctx); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	if err := config.Save(url); err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "Configured memory for %s. Use /remember <fact> and /promote in any Claude Code session.\n", prepared.Config.RepoURL)
 	return 0
+}
+
+func splitCategories(value string) []string {
+	var out []string
+	for _, part := range strings.Split(value, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+func isTerminal(reader io.Reader) bool {
+	file, ok := reader.(*os.File)
+	if !ok {
+		return false
+	}
+	_, err := unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
+	return err == nil
 }
 
 func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) int {

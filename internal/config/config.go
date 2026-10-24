@@ -2,30 +2,31 @@ package config
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/Wuerike/git-push-memories/internal/workspace"
 )
 
 const schemaVersion = 1
 
 type Config struct {
-	MemoryRoot       string   `json:"memory_root"`
-	StateRoot        string   `json:"-"`
-	MemoryCategories []string `json:"-"`
+	RepoURL          string
+	Paths            workspace.Paths
+	MemoryRoot       string // the read worktree: published main
+	StateRoot        string // per-repository state, also the lock root
+	MemoryCategories []string
 }
 
 type fileConfig struct {
 	SchemaVersion int    `json:"schema_version"`
-	MemoryRoot    string `json:"memory_root"`
+	RepoURL       string `json:"repo_url"`
 }
 
 type repositoryConfig struct {
@@ -55,52 +56,84 @@ func (config Config) IsMemoryPath(requested string) bool {
 
 var categoryPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
-func Load() (Config, error) {
+// StoredURL returns the configured repository URL, or "" when setup never ran.
+func StoredURL() (string, error) {
 	path, err := Path()
 	if err != nil {
-		return Config{}, errors.New("configuration path is unavailable")
+		return "", errors.New("configuration path is unavailable")
 	}
 	contents, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return Config{}, errors.New("git-push-memories is not configured; run setup first")
-		}
-		return Config{}, errors.New("configuration could not be read")
+		return "", errors.New("configuration could not be read")
 	}
 	var stored fileConfig
-	if err := json.Unmarshal(contents, &stored); err != nil || stored.SchemaVersion != schemaVersion {
-		return Config{}, errors.New("configuration is invalid")
+	if err := json.Unmarshal(contents, &stored); err != nil || stored.SchemaVersion != schemaVersion || stored.RepoURL == "" {
+		return "", errors.New("configuration is invalid")
 	}
-	return Resolve(stored.MemoryRoot)
+	return stored.RepoURL, nil
 }
 
-func Resolve(memoryRoot string) (Config, error) {
-	if memoryRoot == "" {
-		return Config{}, errors.New("memory root is required")
-	}
-	canonical, err := validateGitRoot("memory", memoryRoot)
+func Load() (Config, error) {
+	url, err := StoredURL()
 	if err != nil {
 		return Config{}, err
 	}
-	stateRoot, err := StatePath(canonical)
+	if url == "" {
+		return Config{}, errors.New("git-push-memories is not configured; run setup first")
+	}
+	return Resolve(url)
+}
+
+// Resolve derives every path from the repository URL and reads the categories from the read worktree.
+func Resolve(repoURL string) (Config, error) {
+	if repoURL == "" {
+		return Config{}, errors.New("repository URL is required")
+	}
+	paths, err := workspace.PathsFor(repoURL)
 	if err != nil {
 		return Config{}, errors.New("state root is unavailable")
 	}
-	if pathsOverlap(canonical, stateRoot) || insideGitWorktree(stateRoot) {
-		return Config{}, errors.New("state root must be outside Git worktrees")
-	}
-	categories, err := loadRepositoryConfig(canonical)
+	categories, err := LoadRepositoryConfig(paths.Read)
 	if err != nil {
+		if _, statErr := os.Stat(filepath.Join(paths.Read, ".git")); statErr != nil {
+			return Config{}, errors.New("memory repository is not prepared; run setup")
+		}
 		return Config{}, err
 	}
-	return Config{MemoryRoot: canonical, StateRoot: stateRoot, MemoryCategories: categories}, nil
+	return Config{RepoURL: repoURL, Paths: paths, MemoryRoot: paths.Read, StateRoot: paths.State, MemoryCategories: categories}, nil
 }
 
-func loadRepositoryConfig(root string) ([]string, error) {
+// Workspace opens the Git layer for this configuration.
+func (config Config) Workspace() *workspace.Workspace {
+	return &workspace.Workspace{URL: config.RepoURL, Paths: config.Paths}
+}
+
+// LoadRepositoryConfig reads and validates gpm.json under root.
+func LoadRepositoryConfig(root string) ([]string, error) {
 	contents, err := os.ReadFile(filepath.Join(root, "gpm.json"))
 	if err != nil {
 		return nil, errors.New("repository configuration is invalid")
 	}
+	return ParseRepositoryConfig(contents)
+}
+
+// RepositoryConfigJSON renders a valid gpm.json for the categories.
+func RepositoryConfigJSON(categories []string) ([]byte, error) {
+	payload, err := json.MarshalIndent(repositoryConfig{SchemaVersion: schemaVersion, MemoryCategories: categories}, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	payload = append(payload, '\n')
+	if _, err := ParseRepositoryConfig(payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func ParseRepositoryConfig(contents []byte) ([]string, error) {
 	var stored repositoryConfig
 	decoder := json.NewDecoder(bytes.NewReader(contents))
 	decoder.DisallowUnknownFields()
@@ -123,48 +156,44 @@ func loadRepositoryConfig(root string) ([]string, error) {
 	return append([]string(nil), stored.MemoryCategories...), nil
 }
 
-func Save(memoryRoot string) (Config, error) {
-	cfg, err := Resolve(memoryRoot)
-	if err != nil {
-		return Config{}, err
-	}
+func Save(repoURL string) error {
 	path, err := Path()
 	if err != nil {
-		return Config{}, errors.New("configuration path is unavailable")
+		return errors.New("configuration path is unavailable")
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return Config{}, errors.New("configuration directory could not be created")
+		return errors.New("configuration directory could not be created")
 	}
-	payload, err := json.MarshalIndent(fileConfig{SchemaVersion: schemaVersion, MemoryRoot: cfg.MemoryRoot}, "", "  ")
+	payload, err := json.MarshalIndent(fileConfig{SchemaVersion: schemaVersion, RepoURL: repoURL}, "", "  ")
 	if err != nil {
-		return Config{}, errors.New("configuration could not be encoded")
+		return errors.New("configuration could not be encoded")
 	}
 	payload = append(payload, '\n')
 	temporary, err := os.CreateTemp(filepath.Dir(path), ".config-*.tmp")
 	if err != nil {
-		return Config{}, errors.New("configuration could not be written")
+		return errors.New("configuration could not be written")
 	}
 	temporaryName := temporary.Name()
 	defer os.Remove(temporaryName)
 	if err := temporary.Chmod(0o600); err != nil {
 		temporary.Close()
-		return Config{}, errors.New("configuration could not be secured")
+		return errors.New("configuration could not be secured")
 	}
 	if _, err := temporary.Write(payload); err != nil {
 		temporary.Close()
-		return Config{}, errors.New("configuration could not be written")
+		return errors.New("configuration could not be written")
 	}
 	if err := temporary.Sync(); err != nil {
 		temporary.Close()
-		return Config{}, errors.New("configuration could not be synchronized")
+		return errors.New("configuration could not be synchronized")
 	}
 	if err := temporary.Close(); err != nil {
-		return Config{}, errors.New("configuration could not be written")
+		return errors.New("configuration could not be written")
 	}
 	if err := os.Rename(temporaryName, path); err != nil {
-		return Config{}, errors.New("configuration could not be installed")
+		return errors.New("configuration could not be installed")
 	}
-	return cfg, nil
+	return nil
 }
 
 func Path() (string, error) {
@@ -173,92 +202,4 @@ func Path() (string, error) {
 		return "", err
 	}
 	return filepath.Join(root, "git-push-memories", "config.json"), nil
-}
-
-func StatePath(memoryRoot string) (string, error) {
-	root := os.Getenv("XDG_STATE_HOME")
-	if root == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return "", err
-		}
-		root = filepath.Join(home, ".local", "state")
-	}
-	command := exec.Command("git", "--no-optional-locks", "-C", memoryRoot, "rev-list", "--max-parents=0", "HEAD")
-	command.Env = withoutGitEnvironment(os.Environ())
-	output, err := command.Output()
-	if err != nil || len(strings.TrimSpace(string(output))) == 0 {
-		return "", errors.New("memory repository identity is unavailable")
-	}
-	identity := fmt.Sprintf("%x", sha256.Sum256(bytes.TrimSpace(output)))[:16]
-	absolute, err := filepath.Abs(filepath.Join(root, "git-push-memories", identity))
-	if err != nil {
-		return "", err
-	}
-	return absolute, nil
-}
-
-func validateGitRoot(name, root string) (string, error) {
-	absolute, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("%s root is invalid", name)
-	}
-	canonical, err := filepath.EvalSymlinks(absolute)
-	if err != nil {
-		return "", fmt.Errorf("%s root is invalid", name)
-	}
-
-	command := exec.Command("git", "--no-optional-locks", "-C", canonical, "rev-parse", "--show-toplevel")
-	command.Env = withoutGitEnvironment(os.Environ())
-	output, err := command.Output()
-	if err != nil {
-		return "", fmt.Errorf("%s root is not a Git worktree root with a commit", name)
-	}
-	topLevel, err := filepath.EvalSymlinks(strings.TrimSpace(string(output)))
-	if err != nil || topLevel != canonical {
-		return "", fmt.Errorf("%s root is not a Git worktree root with a commit", name)
-	}
-	command = exec.Command("git", "--no-optional-locks", "-C", canonical, "rev-parse", "--verify", "HEAD")
-	command.Env = withoutGitEnvironment(os.Environ())
-	if err := command.Run(); err != nil {
-		return "", fmt.Errorf("%s root is not a Git worktree root with a commit", name)
-	}
-	return canonical, nil
-}
-
-func withoutGitEnvironment(environment []string) []string {
-	filtered := make([]string, 0, len(environment))
-	for _, entry := range environment {
-		if !strings.HasPrefix(entry, "GIT_") {
-			filtered = append(filtered, entry)
-		}
-	}
-	return filtered
-}
-
-func pathsOverlap(left, right string) bool {
-	return within(left, right) || within(right, left)
-}
-
-func within(parent, child string) bool {
-	relative, err := filepath.Rel(parent, child)
-	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
-}
-
-func insideGitWorktree(path string) bool {
-	existing := path
-	for {
-		if _, err := os.Stat(existing); err == nil {
-			break
-		}
-		parent := filepath.Dir(existing)
-		if parent == existing {
-			return false
-		}
-		existing = parent
-	}
-	command := exec.Command("git", "--no-optional-locks", "-C", existing, "rev-parse", "--is-inside-work-tree")
-	command.Env = withoutGitEnvironment(os.Environ())
-	output, err := command.Output()
-	return err == nil && strings.TrimSpace(string(output)) == "true"
 }

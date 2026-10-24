@@ -104,6 +104,12 @@ func (w *Workspace) Clone(ctx context.Context) error {
 	if _, err := git.Output(ctx, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*"); err != nil {
 		return err
 	}
+	// A bare clone copies the remote branches as local ones; only origin/* is meaningful here.
+	if heads, err := w.LocalBranches(ctx, ""); err == nil {
+		for _, head := range heads {
+			_, _ = git.Output(ctx, "update-ref", "-d", "refs/heads/"+head)
+		}
+	}
 	return w.Fetch(ctx)
 }
 
@@ -142,7 +148,12 @@ func (w *Workspace) EnsureWorktree(ctx context.Context, dir, branch, start strin
 		return nil
 	}
 	_, _ = w.Repo().Output(ctx, "worktree", "prune")
-	_, err := w.Repo().Output(ctx, "worktree", "add", "-B", branch, dir, start)
+	if w.RefExists(ctx, "refs/heads/"+branch) {
+		// Keep local commits that were never pushed.
+		_, err := w.Repo().Output(ctx, "worktree", "add", dir, branch)
+		return err
+	}
+	_, err := w.Repo().Output(ctx, "worktree", "add", "-b", branch, dir, start)
 	return err
 }
 
@@ -273,4 +284,62 @@ func (w *Workspace) Push(ctx context.Context, dir, branch string) error {
 		}
 	}
 	return err
+}
+
+// ShowFile returns the contents of path at ref in the bare clone.
+func (w *Workspace) ShowFile(ctx context.Context, ref, path string) ([]byte, error) {
+	out, err := w.Repo().run(ctx, nil, "show", ref+":"+path)
+	return []byte(out), err
+}
+
+// HasRemoteRefs reports whether any remote-tracking branch exists after a fetch.
+func (w *Workspace) HasRemoteRefs(ctx context.Context) bool {
+	out, err := w.Repo().Output(ctx, "for-each-ref", "--count=1", "refs/remotes/origin/")
+	return err == nil && out != ""
+}
+
+// CreateMain makes the first commit of main from files, using plumbing so no worktree is needed, and pushes it.
+func (w *Workspace) CreateMain(ctx context.Context, files map[string][]byte) error {
+	identity, err := w.identity(ctx)
+	if err != nil {
+		return err
+	}
+	git := w.Repo()
+	var entries strings.Builder
+	for name, contents := range files {
+		blob, err := git.run(ctx, contents, "hash-object", "-w", "--stdin")
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(&entries, "100644 blob %s\t%s\n", blob, name)
+	}
+	tree, err := git.run(ctx, []byte(entries.String()), "mktree")
+	if err != nil {
+		return err
+	}
+	commit, err := git.Output(ctx, append(identity, "commit-tree", tree, "-m", "chore: initialize memory repository")...)
+	if err != nil {
+		return err
+	}
+	if _, err := git.Output(ctx, "update-ref", "refs/heads/"+MainBranch, commit); err != nil {
+		return err
+	}
+	if _, err := git.Net(ctx, "push", "origin", "refs/heads/"+MainBranch+":refs/heads/"+MainBranch); err != nil {
+		if w.Fetch(ctx) != nil {
+			return ErrNetwork
+		}
+		return ErrPermission
+	}
+	return w.Fetch(ctx)
+}
+
+// CheckIdentity fails unless Git has user.name and user.email configured.
+func CheckIdentity(ctx context.Context) error {
+	git := Git{Dir: os.TempDir()}
+	for _, key := range []string{"user.name", "user.email"} {
+		if value, err := git.Output(ctx, "config", key); err != nil || value == "" {
+			return errors.New("Git identity is required: set user.name and user.email")
+		}
+	}
+	return nil
 }
