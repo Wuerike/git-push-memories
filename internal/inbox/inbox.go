@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -19,7 +18,7 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
-	"golang.org/x/sys/unix"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
 )
 
 type Action string
@@ -33,8 +32,7 @@ const (
 var (
 	ErrInvalidProposal = errors.New("invalid proposal")
 	ErrProposalDrift   = errors.New("proposal drifted")
-	ErrNotMain         = errors.New("memory repository must be on main")
-	ErrIndexLocked     = errors.New("Git index is locked")
+	ErrWrongBranch     = errors.New("memory worktree is not on the expected branch")
 )
 
 type Request struct {
@@ -64,9 +62,12 @@ type Inbox struct {
 	memoryRoot *os.File
 	rootPath   string
 	stateRoot  string
+	branch     string
+	workspace  *workspace.Workspace // nil: read-only
 }
 
-func New(memoryRoot, stateRoot string) (*Inbox, error) {
+// New opens a read-only inbox over a worktree that must be on branch.
+func New(memoryRoot, stateRoot, branch string) (*Inbox, error) {
 	canonical, err := filepath.EvalSymlinks(memoryRoot)
 	if err != nil {
 		return nil, fmt.Errorf("invalid memory root")
@@ -85,23 +86,46 @@ func New(memoryRoot, stateRoot string) (*Inbox, error) {
 		_ = root.Close()
 		return nil, fmt.Errorf("state root is required")
 	}
-	return &Inbox{memoryRoot: root, rootPath: canonical, stateRoot: stateAbsolute}, nil
+	return &Inbox{memoryRoot: root, rootPath: canonical, stateRoot: stateAbsolute, branch: branch}, nil
+}
+
+// NewWriter opens an inbox that can Add and Publish through ws.
+func NewWriter(ws *workspace.Workspace, memoryRoot, branch string) (*Inbox, error) {
+	opened, err := New(memoryRoot, ws.Paths.State, branch)
+	if err != nil {
+		return nil, err
+	}
+	opened.workspace = ws
+	return opened, nil
 }
 
 func (inbox *Inbox) Close() error {
 	return inbox.memoryRoot.Close()
 }
 
+// Add writes the proposal on the inbox branch and commits it, touching only its own path.
+// The commit stays local until Publish. A byte-identical existing proposal is returned with Duplicate set.
 func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) {
 	normalized, err := validate(request)
 	if err != nil {
 		return Proposal{}, err
 	}
+	if inbox.workspace == nil {
+		return Proposal{}, errors.New("inbox is read-only")
+	}
 	var proposal Proposal
 	err = inbox.withLock(ctx, func() error {
-		branch, err := inbox.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
-		if err != nil || branch != "main" {
-			return ErrNotMain
+		if err := inbox.checkBranch(ctx); err != nil {
+			return err
+		}
+		if err := workspace.Normalize(ctx, inbox.rootPath); err != nil {
+			return err
+		}
+		// Deduplicate against what was already sent; offline, the local view is all there is.
+		if err := inbox.workspace.Fetch(ctx); err == nil && inbox.workspace.RefExists(ctx, "refs/remotes/origin/"+inbox.branch) {
+			if err := inbox.workspace.Merge(ctx, inbox.rootPath, "origin/"+inbox.branch); err != nil {
+				return err
+			}
 		}
 		schemaVersion := 1
 		if len(normalized.SourceReferences) > 0 {
@@ -160,9 +184,9 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 		if err != nil {
 			return fmt.Errorf("create proposal file")
 		}
-		published := false
+		committed := false
 		defer func() {
-			if !published {
+			if !committed {
 				_ = root.Remove(proposal.Path)
 			}
 		}()
@@ -170,73 +194,16 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 			_ = file.Close()
 			return fmt.Errorf("write proposal file")
 		}
-		if err := file.Sync(); err != nil {
-			_ = file.Close()
-			return fmt.Errorf("sync proposal file")
-		}
 		if err := file.Close(); err != nil {
 			return fmt.Errorf("close proposal file")
 		}
-		parent, err := inbox.gitText(ctx, nil, "rev-parse", "HEAD")
-		if err != nil {
-			return fmt.Errorf("read proposal parent")
+		if err := inbox.workspace.Commit(ctx, inbox.rootPath, "Add memory proposal: "+proposal.Title, proposal.Path); err != nil {
+			return fmt.Errorf("commit proposal: %w", err)
 		}
-		gitDirectory, err := inbox.gitPath(ctx, "rev-parse", "--absolute-git-dir")
-		if err != nil {
-			return fmt.Errorf("resolve Git directory")
-		}
-		indexPath, err := inbox.gitPath(ctx, "rev-parse", "--path-format=absolute", "--git-path", "index")
-		if err != nil || !within(indexPath, gitDirectory) {
-			return fmt.Errorf("resolve Git index")
-		}
-		indexLockPath := indexPath + ".lock"
-		indexLock, err := os.OpenFile(indexLockPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if errors.Is(err, os.ErrExist) {
-			return ErrIndexLocked
-		}
-		if err != nil {
-			return fmt.Errorf("acquire Git index lock")
-		}
-		lockInstalled := false
-		defer func() {
-			_ = indexLock.Close()
-			if !lockInstalled {
-				_ = os.Remove(indexLockPath)
-			}
-		}()
-		originalIndex, indexMode, err := readRegularFile(indexPath)
-		if err != nil {
-			return fmt.Errorf("read Git index")
-		}
-		if err := indexLock.Chmod(indexMode.Perm()); err != nil {
-			return fmt.Errorf("set Git index lock mode")
-		}
-
-		blob, err := inbox.gitText(ctx, contents, "hash-object", "-w", "--stdin")
-		if err != nil || blob == "" {
-			return fmt.Errorf("write proposal blob")
-		}
-		commitIndex, err := temporaryIndex(inbox.stateRoot)
-		if err != nil {
-			return err
-		}
-		defer os.Remove(commitIndex)
-		commitEnvironment := map[string]string{"GIT_INDEX_FILE": commitIndex}
-		if _, err := inbox.gitInputEnv(ctx, commitEnvironment, nil, "read-tree", parent); err != nil {
-			return fmt.Errorf("initialize proposal tree")
-		}
-		cacheInfo := "100644," + blob + "," + proposal.Path
-		if _, err := inbox.gitInputEnv(ctx, commitEnvironment, nil, "update-index", "--add", "--cacheinfo", cacheInfo); err != nil {
-			return fmt.Errorf("update proposal tree")
-		}
-		tree, err := inbox.gitTextEnv(ctx, commitEnvironment, nil, "write-tree")
-		if err != nil || tree == "" {
-			return fmt.Errorf("write proposal tree")
-		}
-		message := []byte("Add memory proposal: " + proposal.Title + "\n")
-		commit, err := inbox.gitText(ctx, message, "commit-tree", tree, "-p", parent)
+		committed = true
+		commit, err := inbox.gitText(ctx, nil, "rev-parse", "HEAD")
 		if err != nil || commit == "" {
-			return fmt.Errorf("write proposal commit")
+			return fmt.Errorf("read proposal commit")
 		}
 		changed, err := inbox.gitInput(ctx, nil, "diff-tree", "--no-commit-id", "--name-only", "-r", "-z", commit)
 		if err != nil || !bytes.Equal(changed, []byte(proposal.Path+"\x00")) {
@@ -246,58 +213,47 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 		if err != nil || !bytes.Equal(stored, contents) {
 			return fmt.Errorf("verify proposal contents")
 		}
-
-		finalIndex, err := temporaryIndex(inbox.stateRoot)
-		if err != nil {
-			return err
-		}
-		defer os.Remove(finalIndex)
-		if err := os.WriteFile(finalIndex, originalIndex, indexMode.Perm()); err != nil {
-			return fmt.Errorf("copy Git index")
-		}
-		finalEnvironment := map[string]string{"GIT_INDEX_FILE": finalIndex}
-		if _, err := inbox.gitInputEnv(ctx, finalEnvironment, nil, "update-index", "--add", "--cacheinfo", cacheInfo); err != nil {
-			return fmt.Errorf("reconcile Git index")
-		}
-		finalBytes, _, err := readRegularFile(finalIndex)
-		if err != nil {
-			return fmt.Errorf("read reconciled Git index")
-		}
-		if _, err := indexLock.Write(finalBytes); err != nil {
-			return fmt.Errorf("write Git index lock")
-		}
-		if err := indexLock.Sync(); err != nil {
-			return fmt.Errorf("sync Git index lock")
-		}
-		if err := indexLock.Close(); err != nil {
-			return fmt.Errorf("close Git index lock")
-		}
-		branch, err = inbox.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
-		confirmedHead, headErr := inbox.gitText(ctx, nil, "rev-parse", "HEAD")
-		if err != nil || branch != "main" {
-			return ErrNotMain
-		}
-		if headErr != nil || confirmedHead != parent {
-			return fmt.Errorf("memory repository HEAD changed")
-		}
-		if _, err := inbox.gitInput(ctx, nil, "update-ref", "refs/heads/main", commit, parent); err != nil {
-			publishedHead, verifyErr := inbox.gitText(context.Background(), nil, "rev-parse", "refs/heads/main")
-			if verifyErr != nil || publishedHead != commit {
-				return fmt.Errorf("memory repository HEAD changed")
-			}
-		}
 		proposal.Commit = commit
-		published = true
-		if err := os.Rename(indexLockPath, indexPath); err == nil {
-			lockInstalled = true
-			_ = syncDirectory(gitDirectory)
-		}
 		return nil
 	})
 	if err != nil {
 		return Proposal{}, err
 	}
 	return proposal, nil
+}
+
+// Publish sends local proposal commits to the remote. pushed is false when nothing was sent
+// because the network failed; the commits stay local and the next call retries.
+func (inbox *Inbox) Publish(ctx context.Context) (pushed bool, err error) {
+	if inbox.workspace == nil {
+		return false, errors.New("inbox is read-only")
+	}
+	err = inbox.withLock(ctx, func() error {
+		if err := inbox.checkBranch(ctx); err != nil {
+			return err
+		}
+		if err := workspace.Normalize(ctx, inbox.rootPath); err != nil {
+			return err
+		}
+		err := inbox.workspace.Push(ctx, inbox.rootPath, inbox.branch)
+		if errors.Is(err, workspace.ErrNetwork) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		pushed = true
+		return nil
+	})
+	return pushed, err
+}
+
+func (inbox *Inbox) checkBranch(ctx context.Context) error {
+	branch, err := inbox.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if err != nil || branch != inbox.branch {
+		return ErrWrongBranch
+	}
+	return nil
 }
 
 func validate(request Request) (Request, error) {
@@ -465,17 +421,6 @@ func (inbox *Inbox) gitInputEnv(ctx context.Context, extraEnvironment map[string
 	return command.Output()
 }
 
-func (inbox *Inbox) gitPath(ctx context.Context, arguments ...string) (string, error) {
-	value, err := inbox.gitText(ctx, nil, arguments...)
-	if err != nil {
-		return "", err
-	}
-	if !filepath.IsAbs(value) {
-		value = filepath.Join(inbox.rootPath, value)
-	}
-	return filepath.Clean(value), nil
-}
-
 func gitEnvironment(extra map[string]string) []string {
 	environment := make([]string, 0, len(os.Environ())+len(extra))
 	for _, entry := range os.Environ() {
@@ -487,50 +432,4 @@ func gitEnvironment(extra map[string]string) []string {
 		environment = append(environment, key+"="+value)
 	}
 	return environment
-}
-
-func temporaryIndex(directory string) (string, error) {
-	file, err := os.CreateTemp(directory, ".git-push-memories-index-*.tmp")
-	if err != nil {
-		return "", fmt.Errorf("create temporary Git index")
-	}
-	name := file.Name()
-	if err := file.Close(); err != nil {
-		_ = os.Remove(name)
-		return "", fmt.Errorf("close temporary Git index")
-	}
-	return name, nil
-}
-
-func readRegularFile(filePath string) ([]byte, os.FileMode, error) {
-	fileDescriptor, err := unix.Open(filePath, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-	if err != nil {
-		return nil, 0, err
-	}
-	file := os.NewFile(uintptr(fileDescriptor), filePath)
-	if file == nil {
-		_ = unix.Close(fileDescriptor)
-		return nil, 0, errors.New("open regular file")
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() {
-		return nil, 0, errors.New("not a regular file")
-	}
-	contents, err := io.ReadAll(file)
-	return contents, info.Mode(), err
-}
-
-func within(candidate, root string) bool {
-	relative, err := filepath.Rel(root, candidate)
-	return err == nil && (relative == "." || (relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))))
-}
-
-func syncDirectory(directory string) error {
-	handle, err := os.Open(directory)
-	if err != nil {
-		return err
-	}
-	defer handle.Close()
-	return handle.Sync()
 }

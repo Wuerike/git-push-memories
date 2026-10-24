@@ -172,8 +172,9 @@ type Promoter struct {
 	fault      func(string) error
 }
 
-func New(cfg config.Config) (*Promoter, error) {
-	rootPath, err := filepath.EvalSymlinks(cfg.MemoryRoot)
+// New opens a promoter over the worktree at root, which must be on branch.
+func New(cfg config.Config, rootDir, branch string) (*Promoter, error) {
+	rootPath, err := filepath.EvalSymlinks(rootDir)
 	if err != nil {
 		return nil, fmt.Errorf("invalid memory root")
 	}
@@ -181,7 +182,7 @@ func New(cfg config.Config) (*Promoter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid memory root")
 	}
-	proposalInbox, err := inbox.New(rootPath, cfg.StateRoot)
+	proposalInbox, err := inbox.New(rootPath, cfg.StateRoot, branch)
 	if err != nil {
 		_ = root.Close()
 		return nil, err

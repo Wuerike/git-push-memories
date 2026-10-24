@@ -11,22 +11,14 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/reference"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
+	wt "github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 )
 
-func TestAddCommitsOneMarkdownProposalOnMain(t *testing.T) {
-	root := newInboxRoot(t)
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("staged\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "add", "unrelated.txt")
+func TestAddCommitsOneMarkdownProposalOnProposalsBranch(t *testing.T) {
+	box, root, _ := newBox(t)
 	parent := gitOutput(t, root, "rev-parse", "HEAD")
 
-	box, err := inbox.New(root, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = box.Close() })
 	proposal, err := box.Add(context.Background(), inbox.Request{
 		Title:           "Card transactions from authorizer",
 		SuggestedAction: inbox.ActionUpdate,
@@ -66,21 +58,13 @@ Card transactions can originate from the authorizer adapter.
 	if string(contents) != want {
 		t.Fatalf("proposal Markdown mismatch\ngot:\n%s\nwant:\n%s", contents, want)
 	}
-	if staged := gitOutput(t, root, "diff", "--cached", "--name-only"); staged != "unrelated.txt" {
-		t.Fatalf("unrelated staging after Add() = %q", staged)
-	}
 	if status := gitOutput(t, root, "status", "--short", "--", proposal.Path); status != "" {
 		t.Fatalf("proposal path is not clean after commit: %q", status)
 	}
 }
 
 func TestAddCommitsAndReadsStructuredReferenceProposalV2(t *testing.T) {
-	root := newInboxRoot(t)
-	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer box.Close()
+	box, root, _ := newBox(t)
 	source := reference.Reference{
 		Repository: "git-lineage-sha256:" + strings.Repeat("a", 64), Revision: strings.Repeat("b", 40),
 		Path: "services/checkout/config.yaml", ContentHash: "sha256:" + strings.Repeat("c", 64),
@@ -125,7 +109,7 @@ Checkout uses committed configuration.
 }
 
 func TestListRejectsMalformedPersistedProposalV2(t *testing.T) {
-	root := newInboxRoot(t)
+	box, root, _ := newBox(t)
 	if err := os.Mkdir(filepath.Join(root, "proposals"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -136,23 +120,13 @@ func TestListRejectsMalformedPersistedProposalV2(t *testing.T) {
 	}
 	runGit(t, root, "add", proposalPath)
 	runGit(t, root, "commit", "--quiet", "-m", "malformed proposal")
-	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer box.Close()
 	if _, err := box.List(context.Background()); !errors.Is(err, inbox.ErrInvalidProposal) {
 		t.Fatalf("List() error = %v, want ErrInvalidProposal", err)
 	}
 }
 
 func TestAddReturnsExistingExactProposalWithoutPublishingDuplicate(t *testing.T) {
-	root := newInboxRoot(t)
-	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer box.Close()
+	box, root, _ := newBox(t)
 	request := inbox.Request{
 		Title: "Checkout timeout", SuggestedAction: inbox.ActionUpdate, Target: "memories/domains/checkout-api.md",
 		Knowledge: "Checkout requests time out after five seconds.\r\n", SourcePaths: []string{"services/checkout/config.yaml"},
@@ -192,15 +166,9 @@ func TestAddReturnsExistingExactProposalWithoutPublishingDuplicate(t *testing.T)
 	}
 }
 
-func TestConcurrentSessionsCommitDistinctProposalsOnLatestMain(t *testing.T) {
-	root := newInboxRoot(t)
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	first, err := inbox.New(root, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer first.Close()
-	second, err := inbox.New(root, stateRoot)
+func TestConcurrentSessionsCommitDistinctProposals(t *testing.T) {
+	first, root, m := newBox(t)
+	second, err := inbox.NewWriter(m.Config.Workspace(), root, "proposals")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,14 +216,8 @@ func TestConcurrentSessionsCommitDistinctProposalsOnLatestMain(t *testing.T) {
 }
 
 func TestConcurrentSessionsDeduplicateIdenticalProposal(t *testing.T) {
-	root := newInboxRoot(t)
-	stateRoot := filepath.Join(t.TempDir(), "state")
-	first, err := inbox.New(root, stateRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer first.Close()
-	second, err := inbox.New(root, stateRoot)
+	first, root, m := newBox(t)
+	second, err := inbox.NewWriter(m.Config.Workspace(), root, "proposals")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,35 +252,35 @@ func TestConcurrentSessionsDeduplicateIdenticalProposal(t *testing.T) {
 	}
 }
 
-func TestAddRequiresExactMainBranch(t *testing.T) {
-	root := newInboxRoot(t)
+func TestAddRequiresExpectedBranch(t *testing.T) {
+	box, root, _ := newBox(t)
 	runGit(t, root, "switch", "--quiet", "-c", "feature")
-	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer box.Close()
-	_, err = box.Add(context.Background(), inbox.Request{Title: "Fact", SuggestedAction: inbox.ActionCreate, Knowledge: "Knowledge.", SourcePaths: []string{}})
-	if !errors.Is(err, inbox.ErrNotMain) {
-		t.Fatalf("Add() error = %v, want ErrNotMain", err)
+	_, err := box.Add(context.Background(), inbox.Request{Title: "Fact", SuggestedAction: inbox.ActionCreate, Knowledge: "Knowledge.", SourcePaths: []string{}})
+	if !errors.Is(err, inbox.ErrWrongBranch) {
+		t.Fatalf("Add() error = %v, want ErrWrongBranch", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "proposals")); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("non-main Add() created proposals: %v", err)
+		t.Fatalf("wrong-branch Add() created proposals: %v", err)
 	}
 }
 
-func TestAddDoesNotRunGitHooks(t *testing.T) {
-	root := newInboxRoot(t)
-	hookMarker := filepath.Join(root, "hook-ran")
-	hookPath := filepath.Join(root, ".git", "hooks", "post-commit")
-	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\ntouch \""+hookMarker+"\"\n"), 0o755); err != nil {
-		t.Fatal(err)
+func TestAddIgnoresPersonalGitConfiguration(t *testing.T) {
+	box, _, _ := newBox(t)
+	hookMarker := filepath.Join(t.TempDir(), "hook-ran")
+	hooks := t.TempDir()
+	for _, name := range []string{"pre-commit", "commit-msg", "post-commit"} {
+		if err := os.WriteFile(filepath.Join(hooks, name), []byte("#!/bin/sh\ntouch \""+hookMarker+"\"\nexit 1\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
-	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
+	home := os.Getenv("HOME")
+	config := "[core]\n\thooksPath = " + hooks + "\n[commit]\n\tgpgsign = true\n"
+	f, err := os.OpenFile(filepath.Join(home, ".gitconfig"), os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer box.Close()
+	f.WriteString(config)
+	f.Close()
 	if _, err := box.Add(context.Background(), inbox.Request{Title: "Fact", SuggestedAction: inbox.ActionCreate, Knowledge: "Knowledge.", SourcePaths: []string{}}); err != nil {
 		t.Fatal(err)
 	}
@@ -327,46 +289,15 @@ func TestAddDoesNotRunGitHooks(t *testing.T) {
 	}
 }
 
-func TestAddReportsExistingGitIndexLockWithoutCommit(t *testing.T) {
-	root := newInboxRoot(t)
-	parent := gitOutput(t, root, "rev-parse", "HEAD")
-	lockPath := filepath.Join(root, ".git", "index.lock")
-	if err := os.WriteFile(lockPath, []byte("other process"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	defer os.Remove(lockPath)
-	box, err := inbox.New(root, filepath.Join(t.TempDir(), "state"))
+func newBox(t *testing.T) (*inbox.Inbox, string, *wt.Managed) {
+	t.Helper()
+	m := wt.Setup(t, nil)
+	box, err := inbox.NewWriter(m.Config.Workspace(), m.Config.Paths.Proposals, "proposals")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer box.Close()
-	_, err = box.Add(context.Background(), inbox.Request{Title: "Fact", SuggestedAction: inbox.ActionCreate, Knowledge: "Knowledge.", SourcePaths: []string{}})
-	if !errors.Is(err, inbox.ErrIndexLocked) {
-		t.Fatalf("Add() error = %v, want ErrIndexLocked", err)
-	}
-	if head := gitOutput(t, root, "rev-parse", "HEAD"); head != parent {
-		t.Fatalf("failed Add() changed HEAD from %s to %s", parent, head)
-	}
-	if matches, err := filepath.Glob(filepath.Join(root, "proposals", "*.md")); err != nil || len(matches) != 0 {
-		t.Fatalf("failed Add() retained proposals %v: %v", matches, err)
-	}
-}
-
-func newInboxRoot(t *testing.T) string {
-	t.Helper()
-	root := filepath.Join(t.TempDir(), "memory")
-	if err := os.Mkdir(root, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "init", "--quiet", "--initial-branch=main")
-	runGit(t, root, "config", "user.name", "Test")
-	runGit(t, root, "config", "user.email", "test@example.com")
-	if err := os.WriteFile(filepath.Join(root, "gpm.json"), []byte("{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\", \"decision\"]\n}\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, root, "add", "gpm.json")
-	runGit(t, root, "commit", "--quiet", "-m", "initial")
-	return root
+	t.Cleanup(func() { _ = box.Close() })
+	return box, m.Config.Paths.Proposals, m
 }
 
 func runGit(t *testing.T, root string, arguments ...string) {
@@ -390,4 +321,63 @@ func gitOutput(t *testing.T, root string, arguments ...string) string {
 func gitSucceeds(root string, arguments ...string) bool {
 	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
 	return command.Run() == nil
+}
+
+func TestAddRefusesDirtyWorktree(t *testing.T) {
+	box, root, _ := newBox(t)
+	if err := os.WriteFile(filepath.Join(root, "stray.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := box.Add(context.Background(), inbox.Request{Title: "Fact", SuggestedAction: inbox.ActionCreate, Knowledge: "Knowledge.", SourcePaths: []string{}})
+	if !errors.Is(err, workspace.ErrDirty) {
+		t.Fatalf("Add() error = %v, want ErrDirty", err)
+	}
+}
+
+func TestPublishSendsProposalsAndDrainsPendingAfterOutage(t *testing.T) {
+	box, root, m := newBox(t)
+	ctx := context.Background()
+	request := func(title string) inbox.Request {
+		return inbox.Request{Title: title, SuggestedAction: inbox.ActionCreate, Knowledge: "A durable fact.", SourcePaths: []string{}}
+	}
+	first, err := box.Add(ctx, request("First"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pushed, err := box.Publish(ctx); err != nil || !pushed {
+		t.Fatalf("Publish() = %v, %v", pushed, err)
+	}
+	if got := gitOutput(t, m.Remote, "ls-tree", "--name-only", "proposals:proposals"); got != strings.TrimPrefix(first.Path, "proposals/") {
+		t.Fatalf("remote proposals = %q", got)
+	}
+
+	if err := os.Rename(m.Remote, m.Remote+".down"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := box.Add(ctx, request("Second"))
+	if err != nil {
+		t.Fatalf("offline Add() = %v", err)
+	}
+	if pushed, err := box.Publish(ctx); err != nil || pushed {
+		t.Fatalf("offline Publish() = %v, %v; want kept local", pushed, err)
+	}
+	if err := os.Rename(m.Remote+".down", m.Remote); err != nil {
+		t.Fatal(err)
+	}
+	third, err := box.Add(ctx, request("Third"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pushed, err := box.Publish(ctx); err != nil || !pushed {
+		t.Fatalf("online Publish() = %v, %v", pushed, err)
+	}
+	remote := gitOutput(t, m.Remote, "ls-tree", "--name-only", "proposals:proposals")
+	for _, proposal := range []inbox.Proposal{first, second, third} {
+		if !strings.Contains(remote, strings.TrimPrefix(proposal.Path, "proposals/")) {
+			t.Fatalf("remote lacks %s: %q", proposal.Path, remote)
+		}
+	}
+	if head := gitOutput(t, root, "rev-parse", "HEAD"); head != gitOutput(t, m.Remote, "rev-parse", "proposals") {
+		t.Fatal("local proposals and remote diverge")
+	}
 }

@@ -27,9 +27,8 @@ type Snapshot struct {
 }
 
 func (inbox *Inbox) List(ctx context.Context) ([]Snapshot, error) {
-	branch, err := inbox.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != "main" {
-		return nil, ErrNotMain
+	if err := inbox.checkBranch(ctx); err != nil {
+		return nil, err
 	}
 	head, err := inbox.gitText(ctx, nil, "rev-parse", "--verify", "HEAD")
 	if err != nil {
@@ -91,9 +90,8 @@ func (inbox *Inbox) Read(ctx context.Context, id string) (Snapshot, error) {
 }
 
 func (inbox *Inbox) Confirm(ctx context.Context, expected Snapshot) error {
-	branch, err := inbox.gitText(ctx, nil, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil || branch != "main" {
-		return ErrNotMain
+	if err := inbox.checkBranch(ctx); err != nil {
+		return err
 	}
 	head, err := inbox.gitText(ctx, nil, "rev-parse", "--verify", "HEAD")
 	if err != nil || head != expected.Head {

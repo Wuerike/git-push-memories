@@ -75,7 +75,7 @@ Regras do lote: targets canonicos distintos (exceto folds), preview de uso unico
 
 ## 5. Restricoes que o usuario sente
 
-- **Branch**: `memory_propose`, `memory_proposal_list` e toda curadoria exigem o checkout do repositorio de memoria exatamente em `main` (erro `not_on_main`). Busca e leitura nao exigem.
+- **Branch**: `memory_propose`, `memory_proposal_list` e toda curadoria operam no worktree `proposals` gerenciado (erro `wrong_branch` se alterado por fora). Busca e leitura usam o worktree `read` (`main` publicada).
 - **Staging alheio preservado**: commits usam plumbing Git (`commit-tree` + `update-ref` com compare-and-swap), tocam so os paths necessarios e **nao executam hooks de commit**. Com `index.lock` ativo, a operacao falha (`git_index_locked`).
 - **Concorrencia**: locks serializam sessoes no mesmo clone. Entre clones, conflito (push non-fast-forward) e resolvido com Git.
 - **Recovery**: curadoria interrompida converge para o estado anterior ao `update-ref` ou para o commit completo depois dele; lock de outro processo nunca e removido.

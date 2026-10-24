@@ -20,6 +20,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
 	"golang.org/x/sys/unix"
 )
 
@@ -72,7 +73,7 @@ func Recover(ctx context.Context, cfg config.Config) (BatchResult, error) {
 	} else if err != nil {
 		return BatchResult{}, ErrRecovery
 	}
-	promoter, err := New(cfg)
+	promoter, err := New(cfg, cfg.Paths.Proposals, workspace.ProposalsBranch)
 	if err != nil {
 		return BatchResult{}, err
 	}

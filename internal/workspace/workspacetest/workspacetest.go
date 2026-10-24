@@ -3,11 +3,15 @@
 package workspacetest
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/setup"
 )
 
 // Env isolates HOME, XDG_STATE_HOME and the Git configuration for one test.
@@ -101,4 +105,37 @@ func (gh *GH) SetPR(t *testing.T, state, mergeOID string) {
 	}
 	os.WriteFile(filepath.Join(gh.dir, "state"), []byte(state), 0o644)
 	os.WriteFile(filepath.Join(gh.dir, "oid"), []byte(mergeOID), 0o644)
+}
+
+// Managed is a fully set-up repository: a bare remote seeded with main, and the
+// managed clone with read and proposals worktrees.
+type Managed struct {
+	Remote string
+	Config config.Config
+}
+
+// Setup seeds main with gpm.json (categories domains and decision) plus files, and runs setup against it.
+func Setup(t *testing.T, files map[string]string) *Managed {
+	t.Helper()
+	Env(t)
+	remote := Remote(t)
+	seed := map[string]string{"gpm.json": "{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\", \"decision\"]\n}\n"}
+	for name, contents := range files {
+		seed[name] = contents
+	}
+	Seed(t, remote, "main", seed)
+	prepared, err := setup.Prepare(context.Background(), setup.Options{URL: remote})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Save(remote); err != nil {
+		t.Fatal(err)
+	}
+	return &Managed{Remote: remote, Config: prepared.Config}
+}
+
+// PublishMain commits files to the remote main, as a merged release PR would.
+func (m *Managed) PublishMain(t *testing.T, files map[string]string) {
+	t.Helper()
+	Seed(t, m.Remote, "main", files)
 }

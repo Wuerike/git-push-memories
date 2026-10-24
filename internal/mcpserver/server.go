@@ -18,6 +18,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/promotion"
 	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -74,7 +75,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_propose",
-		Description: "Add and commit one reviewable Markdown proposal on main, or return an existing byte-identical proposal without publishing a duplicate.",
+		Description: "Add one reviewable Markdown proposal on the proposals branch and send it to the shared repository, or return an existing byte-identical proposal without adding a duplicate. pushed=false means it is committed locally and will be sent on the next call.",
 	}, server.addProposal)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_search",
@@ -183,7 +184,9 @@ type expandReferenceInput struct {
 	BudgetBytes int                 `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the encoded excerpt"`
 }
 
-type listProposalsInput struct{}
+type listProposalsInput struct {
+	Source string `json:"source,omitempty" jsonschema:"where to list from: proposals (default, the shared inbox) or release (the open release, only for /promote)"`
+}
 
 type previewPromotionInput struct {
 	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, discard_proposal, or keep_pending; fold_proposal is accepted only by memory_promote_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
@@ -261,6 +264,8 @@ type promotionBatchApplyResponse struct {
 type inboxToolResponse struct {
 	SchemaVersion int             `json:"schema_version"`
 	Data          *inbox.Proposal `json:"data,omitempty"`
+	Pushed        bool            `json:"pushed"`
+	Message       string          `json:"message,omitempty"`
 	Error         *toolError      `json:"error,omitempty"`
 }
 
@@ -383,15 +388,26 @@ func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input 
 		Knowledge: allowed.Knowledge(), SourcePaths: allowed.SourcePaths(), SourceReferences: allowed.SourceReferences(),
 	})
 	if err != nil {
-		if errors.Is(err, inbox.ErrNotMain) {
-			return inboxFailure("not_on_main")
+		if errors.Is(err, inbox.ErrWrongBranch) {
+			return inboxFailure("wrong_branch")
 		}
-		if errors.Is(err, inbox.ErrIndexLocked) {
-			return inboxFailure("git_index_locked")
+		if errors.Is(err, workspace.ErrDirty) {
+			return inboxFailure("worktree_dirty")
 		}
 		return inboxFailure("proposal_failed")
 	}
-	return nil, inboxToolResponse{SchemaVersion: 1, Data: &stored}, nil
+	pushed, err := proposalInbox.Publish(ctx)
+	switch {
+	case errors.Is(err, workspace.ErrPermission):
+		return inboxFailure("push_denied")
+	case err != nil:
+		return inboxFailure("push_failed")
+	}
+	response := inboxToolResponse{SchemaVersion: 1, Data: &stored, Pushed: pushed}
+	if !pushed {
+		response.Message = "The proposal is committed locally and will be sent to the shared repository on the next /remember."
+	}
+	return nil, response, nil
 }
 
 func (s *Server) snapshotReferences(ctx context.Context, _ *mcp.CallToolRequest, input snapshotReferencesInput) (*mcp.CallToolResult, referenceSnapshotResponse, error) {
@@ -678,7 +694,7 @@ func (s *Server) proposalInbox() (*inbox.Inbox, error) {
 	if s.inbox != nil {
 		return s.inbox, nil
 	}
-	proposalInbox, err := inbox.New(s.cfg.MemoryRoot, s.stateRoot)
+	proposalInbox, err := inbox.NewWriter(s.cfg.Workspace(), s.cfg.Paths.Proposals, workspace.ProposalsBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -692,7 +708,7 @@ func (s *Server) proposalPromoter() (*promotion.Promoter, error) {
 	if s.promoter != nil {
 		return s.promoter, nil
 	}
-	promoter, err := promotion.New(s.cfg)
+	promoter, err := promotion.New(s.cfg, s.cfg.Paths.Proposals, workspace.ProposalsBranch)
 	if err != nil {
 		return nil, err
 	}
@@ -726,8 +742,8 @@ func promotionBatchApplyFailure(code string) (*mcp.CallToolResult, promotionBatc
 
 func promotionErrorCode(err error) string {
 	switch {
-	case errors.Is(err, inbox.ErrNotMain):
-		return "not_on_main"
+	case errors.Is(err, inbox.ErrWrongBranch):
+		return "wrong_branch"
 	case errors.Is(err, inbox.ErrInvalidProposal):
 		return "invalid_proposal"
 	case errors.Is(err, promotion.ErrUnsupported):
