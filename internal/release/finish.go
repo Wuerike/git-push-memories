@@ -191,13 +191,15 @@ func (m *Manager) finalizeIfMerged(ctx context.Context, marker Marker) (bool, er
 	return outcome == Finalized, nil
 }
 
-// checkNotMerged refuses to abort a release whose PR was already merged.
+// checkNotMerged refuses to abort a release whose PR was already merged. The PR is looked up by
+// branch name because the forge may have deleted the branch on merge. Without gh the check is only
+// skipped for a release that was never sent for review.
 func (m *Manager) checkNotMerged(ctx context.Context, marker Marker) error {
-	if !m.ws.RefExists(ctx, "refs/remotes/origin/"+marker.ReleaseBranch) {
-		return nil // never sent for review, so there is no PR to lose
-	}
 	client, err := m.forge(ctx)
 	if err != nil {
+		if !m.ws.RefExists(ctx, "refs/remotes/origin/"+marker.ReleaseBranch) {
+			return nil
+		}
 		return fmt.Errorf("cannot confirm that the release PR is not merged: %w", err)
 	}
 	pr, err := client.PRFind(ctx, marker.ReleaseBranch)

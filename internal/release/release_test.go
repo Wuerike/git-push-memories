@@ -331,3 +331,16 @@ func TestClosedPullRequestGetsANewOneOnSubmit(t *testing.T) {
 		t.Fatalf("Submit() after close = %q, %v (first %q)", second, err, first)
 	}
 }
+
+func TestAbortRefusesMergedPullRequestAfterForgeDeletedBranch(t *testing.T) {
+	ctx := context.Background()
+	m, gh, manager, status := consolidated(t)
+	if _, err := manager.Submit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	gh.SetPR(t, "MERGED", merge(t, m, status, "squash"))
+	wt.Git(t, m.Remote, "branch", "-D", status.Marker.ReleaseBranch) // "delete head branch on merge"
+	if err := manager.Abort(ctx); !errors.Is(err, release.ErrMerged) {
+		t.Fatalf("Abort() = %v, want ErrMerged", err)
+	}
+}
