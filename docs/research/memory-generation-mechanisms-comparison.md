@@ -140,15 +140,15 @@ Consequências prováveis:
 
 ### Fontes primárias
 
-- [`integrations/claude-code/skills/remember/SKILL.md`](../integrations/claude-code/skills/remember/SKILL.md#L10-L34)
-- [`internal/mcpserver/server.go`](../internal/mcpserver/server.go#L51-L62)
-- [`internal/mcpserver/server.go`](../internal/mcpserver/server.go#L87-L149)
-- [`internal/retrieval/retrieval.go`](../internal/retrieval/retrieval.go#L47-L134)
-- [`internal/retrieval/retrieval.go`](../internal/retrieval/retrieval.go#L136-L164)
-- [`internal/intake/guard.go`](../internal/intake/guard.go#L21-L33)
-- [`internal/intake/guard.go`](../internal/intake/guard.go#L56-L127)
-- [`internal/inbox/inbox.go`](../internal/inbox/inbox.go#L90-L115)
-- [`internal/inbox/inbox.go`](../internal/inbox/inbox.go#L180-L265)
+- [`integrations/claude-code/skills/remember/SKILL.md`](../../integrations/claude-code/skills/remember/SKILL.md#L10-L34)
+- [`internal/mcpserver/server.go`](../../internal/mcpserver/server.go#L51-L62)
+- [`internal/mcpserver/server.go`](../../internal/mcpserver/server.go#L87-L149)
+- [`internal/retrieval/retrieval.go`](../../internal/retrieval/retrieval.go#L47-L134)
+- [`internal/retrieval/retrieval.go`](../../internal/retrieval/retrieval.go#L136-L164)
+- [`internal/intake/guard.go`](../../internal/intake/guard.go#L21-L33)
+- [`internal/intake/guard.go`](../../internal/intake/guard.go#L56-L127)
+- [`internal/inbox/inbox.go`](../../internal/inbox/inbox.go#L90-L115)
+- [`internal/inbox/inbox.go`](../../internal/inbox/inbox.go#L180-L265)
 
 ## Basic Memory
 
