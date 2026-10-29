@@ -102,10 +102,6 @@ Checkout uses committed configuration.
 	if err != nil || len(listed) != 1 || listed[0].Proposal.SchemaVersion != 2 || len(listed[0].Proposal.SourceReferences) != 1 || listed[0].Proposal.SourceReferences[0] != source {
 		t.Fatalf("List() = %+v, %v", listed, err)
 	}
-	duplicate, err := box.Add(context.Background(), request)
-	if err != nil || !duplicate.Duplicate || duplicate.ID != proposal.ID {
-		t.Fatalf("duplicate Add() = %+v, %v", duplicate, err)
-	}
 }
 
 func TestListRejectsMalformedPersistedProposalV2(t *testing.T) {
@@ -122,47 +118,6 @@ func TestListRejectsMalformedPersistedProposalV2(t *testing.T) {
 	runGit(t, root, "commit", "--quiet", "-m", "malformed proposal")
 	if _, err := box.List(context.Background()); !errors.Is(err, inbox.ErrInvalidProposal) {
 		t.Fatalf("List() error = %v, want ErrInvalidProposal", err)
-	}
-}
-
-func TestAddReturnsExistingExactProposalWithoutPublishingDuplicate(t *testing.T) {
-	box, root, _ := newBox(t)
-	request := inbox.Request{
-		Title: "Checkout timeout", SuggestedAction: inbox.ActionUpdate, Target: "memories/domains/checkout-api.md",
-		Knowledge: "Checkout requests time out after five seconds.\r\n", SourcePaths: []string{"services/checkout/config.yaml"},
-	}
-	first, err := box.Add(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	head := gitOutput(t, root, "rev-parse", "HEAD")
-	second, err := box.Add(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Duplicate || !second.Duplicate {
-		t.Fatalf("duplicate flags = first %v, second %v", first.Duplicate, second.Duplicate)
-	}
-	if second.ID != first.ID || second.Path != first.Path || second.Commit != first.Commit {
-		t.Fatalf("duplicate result = %+v, first = %+v", second, first)
-	}
-	if current := gitOutput(t, root, "rev-parse", "HEAD"); current != head {
-		t.Fatalf("duplicate Add() advanced HEAD from %s to %s", head, current)
-	}
-	listed, err := box.List(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(listed) != 1 || listed[0].Proposal.ID != first.ID {
-		t.Fatalf("proposals after duplicate Add() = %+v", listed)
-	}
-	request.Knowledge = "Checkout requests time out after exactly five seconds."
-	distinct, err := box.Add(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if distinct.Duplicate || distinct.ID == first.ID {
-		t.Fatalf("nearby but non-identical proposal was deduplicated: %+v", distinct)
 	}
 }
 
@@ -212,43 +167,6 @@ func TestConcurrentSessionsCommitDistinctProposals(t *testing.T) {
 	}
 	if !gitSucceeds(root, "merge-base", "--is-ancestor", left.proposal.Commit, right.proposal.Commit) && !gitSucceeds(root, "merge-base", "--is-ancestor", right.proposal.Commit, left.proposal.Commit) {
 		t.Fatalf("proposal commits are not linear: %s, %s", left.proposal.Commit, right.proposal.Commit)
-	}
-}
-
-func TestConcurrentSessionsDeduplicateIdenticalProposal(t *testing.T) {
-	first, root, m := newBox(t)
-	second, err := inbox.NewWriter(m.Config.Workspace(), root, "proposals")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer second.Close()
-	request := inbox.Request{Title: "Same fact", SuggestedAction: inbox.ActionCreate, Knowledge: "One exact durable fact.", SourcePaths: []string{}}
-	start := make(chan struct{})
-	results := make(chan struct {
-		proposal inbox.Proposal
-		err      error
-	}, 2)
-	for _, box := range []*inbox.Inbox{first, second} {
-		go func() {
-			<-start
-			proposal, err := box.Add(context.Background(), request)
-			results <- struct {
-				proposal inbox.Proposal
-				err      error
-			}{proposal, err}
-		}()
-	}
-	close(start)
-	left, right := <-results, <-results
-	if left.err != nil || right.err != nil {
-		t.Fatalf("concurrent Add() errors = %v, %v", left.err, right.err)
-	}
-	if left.proposal.ID != right.proposal.ID || left.proposal.Duplicate == right.proposal.Duplicate {
-		t.Fatalf("concurrent duplicate results = %+v, %+v", left.proposal, right.proposal)
-	}
-	listed, err := first.List(context.Background())
-	if err != nil || len(listed) != 1 {
-		t.Fatalf("proposals after concurrent duplicate = %+v, %v", listed, err)
 	}
 }
 

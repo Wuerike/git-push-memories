@@ -77,7 +77,6 @@ type e2eEvidence struct {
 	CanonicalOperations []string `json:"canonical_operations"`
 	SetupInitialized    bool     `json:"setup_initialized_empty_remote"`
 	ProposalsPublished  bool     `json:"proposals_published"`
-	DuplicateRecognized bool     `json:"duplicate_recognized"`
 	ContradictionShown  bool     `json:"contradiction_shown"`
 	PrivacyRejected     bool     `json:"privacy_rejected"`
 	MarkerContentFree   bool     `json:"marker_content_free"`
@@ -202,11 +201,6 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 		"source_paths": []string{}, "source_references": []reference.Reference{snapshot.References[0], mismatch},
 	}
 	createA := propose(t, ctx, sessionA, createAArgs)
-	headBeforeDuplicate := gitOutput(t, ctx, realGit, paths.Proposals, environment, "rev-parse", "HEAD")
-	duplicate := propose(t, ctx, sessionA, createAArgs)
-	if !duplicate.Duplicate || duplicate.ID != createA.ID || gitOutput(t, ctx, realGit, paths.Proposals, environment, "rev-parse", "HEAD") != headBeforeDuplicate {
-		t.Fatal("exact duplicate created another proposal or commit")
-	}
 	createB := propose(t, ctx, sessionA, map[string]any{
 		"title": "Legacy cleanup", "suggested_action": "create", "knowledge": legacyCleanupFact,
 		"source_paths": []string{"jobs/legacy-cleanup.yaml"},
@@ -564,7 +558,7 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 		ReleaseBranch: releaseBranch, CreateCommit: createResult.Commit, RecoveredCommit: interruptedCommit, PullRequest: submit.PullRequest,
 		ReferenceStatuses:   []string{"verified", "mismatch", "legacy_unverified", "unavailable"},
 		CanonicalOperations: []string{"create_page", "create_section", "replace_section", "remove_section", "remove_page", "discard_proposal"},
-		SetupInitialized:    true, ProposalsPublished: true, DuplicateRecognized: true, ContradictionShown: true, PrivacyRejected: true, MarkerContentFree: true,
+		SetupInitialized:    true, ProposalsPublished: true, ContradictionShown: true, PrivacyRejected: true, MarkerContentFree: true,
 		RecoveryConverged: true, BaselineRecovered: true, PullRequestMerged: true, FinalFactRecovered: true, SecondUserReadOnly: true,
 	})
 }

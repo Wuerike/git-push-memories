@@ -36,7 +36,7 @@ Em qualquer sessao do Claude Code:
 /remember <fato>
 ```
 
-O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. Fontes commitadas passam por `memory_reference_snapshot`; somente repository lineage, revisao completa, path relativo e hash do blob entram na proposta v2, nunca o root local. A proposta e commitada na `proposals` e enviada ao remote; sem rede, fica local e segue no proximo `/remember`. Uma proposta byte-identica existente e retornada com `duplicate: true`.
+O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. Fontes commitadas passam por `memory_reference_snapshot`; somente repository lineage, revisao completa, path relativo e hash do blob entram na proposta v2, nunca o root local. A proposta e commitada na `proposals` e enviada ao remote; sem rede, fica local e segue no proximo `/remember`.
 
 Para consolidar as propostas pendentes em memoria canonica:
 

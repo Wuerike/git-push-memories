@@ -187,23 +187,6 @@ func TestMemoryProposeKeepsProposalLocalWhenPushFails(t *testing.T) {
 	}
 }
 
-func TestMemoryProposeReturnsExistingExactDuplicateWithoutNewCommit(t *testing.T) {
-	e := newEnv(t, nil)
-	arguments := map[string]any{
-		"title": "Checkout timeout", "suggested_action": "update", "target": checkoutPath,
-		"knowledge": "Checkout requests time out after five seconds.", "source_paths": []string{"services/checkout/config.yaml"},
-	}
-	first := e.propose(t, arguments)
-	head := commitHeads(t, e.proposalsRoot())
-	duplicate := decodeInboxResponse(t, e.ok(t, "memory_propose", arguments)).Data
-	if duplicate == nil || !duplicate.Duplicate || duplicate.ID != first.ID || duplicate.Path != first.Path || duplicate.Commit != first.Commit {
-		t.Fatalf("duplicate response = %+v, first = %+v", duplicate, first)
-	}
-	if current := commitHeads(t, e.proposalsRoot()); current != head {
-		t.Fatalf("duplicate proposal advanced HEAD from %s to %s", head, current)
-	}
-}
-
 func TestReferenceSnapshotFlowsIntoProposalAndVerifiedPreviewEvidence(t *testing.T) {
 	sourceRoot := filepath.Join(t.TempDir(), "source")
 	if err := os.Mkdir(sourceRoot, 0o755); err != nil {

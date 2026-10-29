@@ -55,7 +55,6 @@ type Proposal struct {
 	Knowledge        string                `json:"knowledge"`
 	SourcePaths      []string              `json:"source_paths"`
 	SourceReferences []reference.Reference `json:"source_references,omitempty"`
-	Duplicate        bool                  `json:"duplicate,omitempty"`
 }
 
 type Inbox struct {
@@ -104,7 +103,7 @@ func (inbox *Inbox) Close() error {
 }
 
 // Add writes the proposal on the inbox branch and commits it, touching only its own path.
-// The commit stays local until Publish. A byte-identical existing proposal is returned with Duplicate set.
+// The commit stays local until Publish.
 func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) {
 	normalized, err := validate(request)
 	if err != nil {
@@ -121,7 +120,7 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 		if err := workspace.Normalize(ctx, inbox.rootPath); err != nil {
 			return err
 		}
-		// Deduplicate against what was already sent; offline, the local view is all there is.
+		// Start from what was already sent so the later push fast-forwards; offline, the local view is all there is.
 		if err := inbox.workspace.Fetch(ctx); err == nil && inbox.workspace.RefExists(ctx, "refs/remotes/origin/"+inbox.branch) {
 			if err := inbox.workspace.Merge(ctx, inbox.rootPath, "origin/"+inbox.branch); err != nil {
 				return err
@@ -130,31 +129,6 @@ func (inbox *Inbox) Add(ctx context.Context, request Request) (Proposal, error) 
 		schemaVersion := 1
 		if len(normalized.SourceReferences) > 0 {
 			schemaVersion = 2
-		}
-		candidate := Proposal{
-			SchemaVersion: schemaVersion, Title: normalized.Title, SuggestedAction: normalized.SuggestedAction, Target: normalized.Target,
-			Knowledge: normalized.Knowledge, SourcePaths: append([]string(nil), normalized.SourcePaths...), SourceReferences: append([]reference.Reference(nil), normalized.SourceReferences...),
-		}
-		candidateContents := render(candidate)
-		existing, err := inbox.List(ctx)
-		if err != nil {
-			return err
-		}
-		for _, snapshot := range existing {
-			if !bytes.Equal(snapshot.Contents, candidateContents) {
-				continue
-			}
-			if err := inbox.Confirm(ctx, snapshot); err != nil {
-				return err
-			}
-			commit, err := inbox.gitText(ctx, nil, "log", "--format=%H", "--diff-filter=A", "--max-count=1", "--", snapshot.Proposal.Path)
-			if err != nil || commit == "" {
-				return ErrInvalidProposal
-			}
-			proposal = snapshot.Proposal
-			proposal.Commit = commit
-			proposal.Duplicate = true
-			return nil
 		}
 		id, err := identifier()
 		if err != nil {

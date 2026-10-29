@@ -42,8 +42,8 @@ Ambos so rodam quando invocados pela pessoa e exigem confirmacao explicita antes
 
 | Comando | O que acontece | Efeito |
 |---|---|---|
-| `/remember <fato>` | Interpreta o fato, pesquisa a memoria e as propostas pendentes, sugere `create`, `update` ou `remove` e mostra os campos exatos. Apos confirmar, chama `memory_propose`. | Um commit na `proposals` que adiciona `proposals/<id>-<slug>.md`, enviado ao remote (`pushed`). Sem rede, fica local e e reenviado no proximo `/remember`. Proposta identica reaproveita a existente. A memoria canonica nao muda. |
-| `/promote` | Abre (ou retoma) o release, agrupa **todas** as propostas por assunto/pagina e as consolida em lotes de ate 16, com plano, diff e evidencias; ao zerar, envia para revisao. | Um commit por lote na `release` (memoria + remocao das propostas); push da branch e PR para a `main`. Merge e revisao sao humanos (squash recomendado). |
+| `/remember <fato>` | Interpreta o fato, pesquisa a memoria e as propostas pendentes para sugerir alvo e acao (`create`, `update` ou `remove`) e avisar de propostas ja pendentes sobre o mesmo assunto, e mostra os campos exatos. A busca e orientacao, nao deteccao de duplicidade ou contradicao. Apos confirmar, chama `memory_propose`. | Um commit na `proposals` que adiciona `proposals/<id>-<slug>.md`, enviado ao remote (`pushed`). Sem rede, fica local e e reenviado no proximo `/remember`. A memoria canonica nao muda. |
+| `/promote` | Abre (ou retoma) o release, agrupa **todas** as propostas por assunto/pagina, classifica cada candidato canonico, fato da pagina e proposta relacionada como `equivalent`, `contradictory`, `related` ou `unrelated` e as consolida em lotes de ate 16, com plano, diff e evidencias; ao zerar, envia para revisao. | Um commit por lote na `release` (memoria + remocao das propostas); push da branch e PR para a `main`. Merge e revisao sao humanos (squash recomendado). |
 
 Decisoes possiveis em `/promote`:
 
@@ -55,6 +55,8 @@ Decisoes possiveis em `/promote`:
 | `remove_section`, `remove_page` | Remove secao folha; pagina so se for a forma gerada com uma unica secao `Overview`. Sem cascata. |
 | `fold_proposal` | Absorve proposta extra em um `rewrite_page` ou `create_page` com pagina completa do mesmo lote. |
 | `discard_proposal` | Remove so a proposta e registra motivo fechado (`not_relevant`, `incorrect`, `sensitive`, `wrong_target`, `superseded`, `duplicate`). |
+
+Duplicidade e contradicao sao tratadas aqui, por decisao de design: a consolidacao e o unico ponto em que todas as propostas e a pagina canonica completa aparecem juntas. O agente classifica e resolve com `fold_proposal` ou `discard_proposal` (`duplicate`, `superseded`); a pessoa confirma cada lote e revisa o PR. O inbox pode conter propostas repetidas ou conflitantes sem dano, pois nada nele e memoria canonica.
 
 Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Regras do lote: targets canonicos distintos (exceto folds), preview de uso unico, e qualquer mudanca de `HEAD`, conteudo ou integridade de referencia invalida o preview.
 
@@ -79,6 +81,7 @@ Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Reg
 - **Concorrencia**: locks serializam sessoes na mesma maquina; entre maquinas, o marcador `release.lock.json` enviado a `proposals` e o lock do release.
 - **Recovery**: uma promocao interrompida converge para o estado anterior ao avanco da `release` ou para o commit completo; lock de outro processo nunca e removido. Falha de recovery desabilita so o `/promote`.
 - **Privacidade (fail-closed)**: o payload da proposta e validado antes de qualquer arquivo ou objeto Git. Bloqueia chaves, tokens, autorizacao, e-mail, telefone, CPF e referencias de sessao.
+- **Duplicidade e contradicao**: a classificacao e feita pelo agente seguindo a skill, sem verificacao em codigo; a qualidade depende do agente e da revisao humana (confirmacao de cada lote e PR).
 - **Fontes**: `source_paths` (v1) aparecem como `legacy_unverified`; `source_references` (v2) sao `verified` somente com o checkout local vinculado. Integridade nao prova que a fonte sustenta o fato.
 - **GitHub**: o `/promote` exige `gh` instalado e autenticado; todos os comandos levam `-R owner/repo`.
 
@@ -86,7 +89,6 @@ Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Reg
 
 Existe, mas com limite conhecido.
 
-- **Duplicidade e contradicao**: so ha dedupe byte a byte e evidencia assistida pela pessoa; nao ha deteccao semantica.
 - **Suporte das fontes**: a integridade da referencia e deterministica; se a fonte sustenta o fato (`supports`, `contradicts`, `unclear`) e julgamento humano.
 - **Validacao por agentes**: o `/promote` guia o agente com preview e evidencias, mas nao ha criterios automaticos para aceitar, rejeitar ou pedir revisao.
 - **Busca**: textual, sem ranking semantico.

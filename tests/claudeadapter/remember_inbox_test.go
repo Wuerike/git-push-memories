@@ -201,9 +201,6 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 			t.Fatalf("skill grants removed tool %q", removed)
 		}
 	}
-	if !strings.Contains(string(contents), "If `duplicate` is true") || !strings.Contains(string(contents), "no new file or commit was created") {
-		t.Fatal("remember skill does not explain exact proposal deduplication")
-	}
 	for _, contract := range []string{"never invent or edit repository IDs", "source_paths: []", "`supports`, `contradicts`, or `unclear`", "local root is transient", "Never copy source excerpts"} {
 		if !strings.Contains(string(contents), contract) {
 			t.Fatalf("remember skill is missing reference contract %q", contract)

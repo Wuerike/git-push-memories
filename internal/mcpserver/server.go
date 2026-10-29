@@ -79,7 +79,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_propose",
-		Description: "Add one reviewable Markdown proposal on the proposals branch and send it to the shared repository, or return an existing byte-identical proposal without adding a duplicate. pushed=false means it is committed locally and will be sent on the next call.",
+		Description: "Add one reviewable Markdown proposal on the proposals branch and send it to the shared repository. pushed=false means it is committed locally and will be sent on the next call.",
 	}, server.addProposal)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_search",

@@ -95,7 +95,7 @@ Para começar a usar o GPM, a pessoa cria um repositório vazio no GitHub e roda
 
 ## `/remember`
 
-1. Faz `fetch` da `proposals`, para que a deduplicação byte-idêntica veja o que já foi enviado.
+1. Faz `fetch` da `proposals`, para que o push seja fast-forward em relação ao que já foi enviado.
 2. Cria a proposta em `proposals/<id>-<slug>.md` no worktree `proposals` e faz um commit path-scoped.
 3. Faz push. Em caso de rejeição, faz `fetch` e `merge --no-edit origin/proposals` (nunca `pull`, que obedece ao `pull.rebase` da pessoa) e tenta de novo. Cada proposta é um arquivo único, então conflitos não são esperados. Se houver conflito, faz `merge --abort`, mantém a proposta commitada localmente e informa o erro.
 4. Se o push falhar por falta de rede, a proposta permanece commitada localmente e é enviada na próxima chamada.
