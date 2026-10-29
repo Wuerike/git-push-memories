@@ -1,6 +1,6 @@
-# Estado das funcionalidades
+# Funcionalidades
 
-Descreve o que a implementacao atual expoe ao mundo externo e o que cada acao altera. O fluxo completo esta em [workflow.md](workflow.md).
+Descreve o que a implementacao atual expoe ao mundo externo e o que cada acao altera, e lista o que ainda e parcial ou nao foi iniciado. O fluxo completo esta em [workflow.md](workflow.md).
 
 ## Modelo em uma tela
 
@@ -82,15 +82,32 @@ Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Reg
 - **Fontes**: `source_paths` (v1) aparecem como `legacy_unverified`; `source_references` (v2) sao `verified` somente com o checkout local vinculado. Integridade nao prova que a fonte sustenta o fato.
 - **GitHub**: o `/promote` exige `gh` instalado e autenticado; todos os comandos levam `-R owner/repo`.
 
-## 6. O que nao existe
+## 6. Parcial
+
+Existe, mas com limite conhecido.
+
+- **Duplicidade e contradicao**: so ha dedupe byte a byte e evidencia assistida pela pessoa; nao ha deteccao semantica.
+- **Suporte das fontes**: a integridade da referencia e deterministica; se a fonte sustenta o fato (`supports`, `contradicts`, `unclear`) e julgamento humano.
+- **Validacao por agentes**: o `/promote` guia o agente com preview e evidencias, mas nao ha criterios automaticos para aceitar, rejeitar ou pedir revisao.
+- **Busca**: textual, sem ranking semantico.
+- **Release sem dono**: `--resume` e `--abort` valem para qualquer pessoa.
+- **Forge**: so GitHub (via `gh`), e so o `/promote` o exige.
+- **Plataformas**: so Linux (`amd64` e `arm64`).
+- **Escopo de uso**: um repositorio de memoria por pessoa; validado com um desenvolvedor.
+
+## 7. Nao iniciado
 
 - Captura automatica por hook de sessao.
-- Busca semantica, vetorial ou indice persistente.
-- Deteccao semantica completa de duplicidade ou contradicao (so dedupe byte a byte e evidencia assistida).
-- Proprietario do release: `--resume` e `--abort` valem para qualquer pessoa.
-- Tratamento de entrada maliciosa em `proposals/`, correcao do PR aberto pelo gpm e versao minima de `git`/`gh` (adiados; ver `.local/implementation-plan.md`, D9).
+- Busca semantica, vetorial ou indice persistente (ex.: SQLite).
+- Integracoes com Copilot CLI e OpenCode.
+- Suporte a macOS, Windows e a outros forges (ex.: GitLab).
+- Adiar uma proposta: o release so termina com `proposals/` vazia.
+- Tratamento de entrada maliciosa em `proposals/`.
+- Correcao do PR aberto pelo gpm.
+- Versao minima de `git` e `gh`.
+- Metricas de relevancia, correcao e custo de manutencao.
 
-## 7. Verificacao
+## 8. Verificacao
 
 ```bash
 make verify          # go test, go test -race, go vet, go build
