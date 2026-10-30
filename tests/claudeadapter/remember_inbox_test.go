@@ -25,7 +25,7 @@ import (
 
 const populatedPage = "# Checkout API\n<!-- @id: checkout-api -->\n\n## Operation\n<!-- @id: checkout-api-operation -->\nTimeout is three seconds.\n"
 
-func TestRememberContractSearchesThenCommitsAndPushesConfirmedProposal(t *testing.T) {
+func TestRememberContractSearchesThenCommitsConfirmedProposalToRemote(t *testing.T) {
 	managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": populatedPage})
 	proposals := managed.Config.Paths.Proposals
 	parent := wt.Git(t, proposals, "rev-parse", "HEAD")
@@ -54,26 +54,20 @@ func TestRememberContractSearchesThenCommitsAndPushesConfirmedProposal(t *testin
 	proposalResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name: "memory_propose",
 		Arguments: map[string]any{
-			"title": "Update checkout timeout", "suggested_action": "update", "target": "memories/domains/checkout-api.md",
-			"knowledge": "The checkout timeout is five seconds.", "source_paths": []string{},
+			"title":   "Update checkout timeout",
+			"content": "# Update checkout timeout\n\nUpdate memories/domains/checkout-api.md: the checkout timeout is five seconds.",
 		},
 	})
 	if err != nil || proposalResult.IsError {
 		t.Fatalf("confirmed proposal = %+v, %v", proposalResult, err)
 	}
 	proposal := decodeProposal(t, proposalResult)
-	head := wt.Git(t, proposals, "rev-parse", "HEAD")
-	if proposal.ID == "" || proposal.Commit != head || wt.Git(t, proposals, "rev-parse", "HEAD^") != parent {
+	head := wt.Git(t, managed.Remote, "rev-parse", "proposals")
+	if proposal.ID == "" || proposal.Commit != head || wt.Git(t, managed.Remote, "rev-parse", "proposals^") != parent {
 		t.Fatalf("proposal = %+v", proposal)
 	}
-	if branch := wt.Git(t, proposals, "symbolic-ref", "--short", "HEAD"); branch != workspace.ProposalsBranch {
-		t.Fatalf("proposal was written on %q", branch)
-	}
-	if changed := wt.Git(t, proposals, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"); changed != proposal.Path {
+	if changed := wt.Git(t, managed.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", head); changed != proposal.Path {
 		t.Fatalf("proposal commit changed %q", changed)
-	}
-	if remote := wt.Git(t, managed.Remote, "rev-parse", "proposals"); remote != head {
-		t.Fatalf("remote proposals = %s, want the pushed commit %s", remote, head)
 	}
 	if main := wt.Git(t, managed.Remote, "log", "--format=%s", "main"); strings.Contains(main, "proposal") || strings.Count(main, "\n") != 0 {
 		t.Fatalf("remember changed main: %q", main)
@@ -191,7 +185,7 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 		t.Fatal("invalid skill frontmatter")
 	}
 	frontmatter := string(contents)[:frontmatterEnd+4]
-	for _, tool := range []string{"memory_search", "memory_expand", "memory_reference_snapshot", "memory_reference_expand", "memory_propose"} {
+	for _, tool := range []string{"memory_search", "memory_expand", "memory_propose"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)
 		}
@@ -201,9 +195,9 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 			t.Fatalf("skill grants removed tool %q", removed)
 		}
 	}
-	for _, contract := range []string{"never invent or edit repository IDs", "source_paths: []", "`supports`, `contradicts`, or `unclear`", "local root is transient", "Never copy source excerpts"} {
+	for _, contract := range []string{"two fields", "`title`", "`content`", "Keys, tokens, passwords"} {
 		if !strings.Contains(string(contents), contract) {
-			t.Fatalf("remember skill is missing reference contract %q", contract)
+			t.Fatalf("remember skill is missing proposal contract %q", contract)
 		}
 	}
 }

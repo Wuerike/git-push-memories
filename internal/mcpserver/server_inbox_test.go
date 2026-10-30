@@ -7,26 +7,20 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wuerike/git-push-memories/internal/inbox"
-	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type previewData struct {
-	PreviewToken string   `json:"preview_token"`
-	ProposalID   string   `json:"proposal_id"`
-	Title        string   `json:"title"`
-	Operation    string   `json:"operation"`
-	SectionID    string   `json:"section_id"`
-	TargetPath   string   `json:"target_path"`
-	Reason       string   `json:"reason"`
-	SourcePaths  []string `json:"source_paths"`
-	Diff         string   `json:"diff"`
-	Evidence     struct {
-		References []reference.Evidence `json:"references"`
-	} `json:"evidence"`
+	PreviewToken string `json:"preview_token"`
+	ProposalID   string `json:"proposal_id"`
+	Title        string `json:"title"`
+	Operation    string `json:"operation"`
+	SectionID    string `json:"section_id"`
+	TargetPath   string `json:"target_path"`
+	Reason       string `json:"reason"`
+	Diff         string `json:"diff"`
 }
 
 func decodePreview(t *testing.T, result *mcp.CallToolResult) previewData {
@@ -122,218 +116,62 @@ func TestReadToolsRejectUnavailableOrUnknownSource(t *testing.T) {
 	}
 }
 
-func TestMemoryProposeCommitsMarkdownAndPushesToProposals(t *testing.T) {
+func TestMemoryProposeCommitsMarkdownToRemoteProposals(t *testing.T) {
 	e := newEnv(t, nil)
-	root := e.proposalsRoot()
-	parent := commitHeads(t, root)
+	parent := gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals")
 
 	result := e.ok(t, "memory_propose", map[string]any{
-		"title":            "Card transactions from authorizer",
-		"suggested_action": "update",
-		"target":           "memories/domains/charge-entity-payment-methods.md",
-		"knowledge":        "Card transactions can originate from the authorizer adapter.",
-		"source_paths":     []string{"adapters/authorizer/config.yaml"},
+		"title":   "Card transactions from authorizer",
+		"content": "Card transactions can originate from the authorizer adapter.",
 	})
 	response := decodeInboxResponse(t, result)
-	if response.Data == nil || response.Data.ID == "" || response.Data.SuggestedAction != inbox.ActionUpdate || !response.Pushed || response.Message != "" {
+	if response.Data == nil || response.Data.ID == "" {
 		t.Fatalf("memory_propose response = %+v", response)
 	}
-	current := commitHeads(t, root)
-	if response.Data.Commit != current || gitOutput(t, root, "rev-parse", "HEAD^") != parent {
-		t.Fatalf("memory_propose commit = %q, HEAD = %q", response.Data.Commit, current)
+	remote := gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals")
+	if response.Data.Commit != remote || gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals^") != parent {
+		t.Fatalf("memory_propose commit = %q, remote = %q", response.Data.Commit, remote)
 	}
-	if changed := gitOutput(t, root, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"); changed != response.Data.Path {
+	if changed := gitOutput(t, e.m.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", remote); changed != response.Data.Path {
 		t.Fatalf("memory_propose changed %q, want %q", changed, response.Data.Path)
-	}
-	if pushed := gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals"); pushed != current {
-		t.Fatalf("remote proposals = %s, want %s", pushed, current)
 	}
 	if main := gitOutput(t, e.m.Remote, "ls-tree", "-r", "--name-only", "main"); strings.Contains(main, "proposals/") {
 		t.Fatalf("proposal reached main: %q", main)
 	}
-	if branches := gitOutput(t, e.m.Config.Paths.Repo, "for-each-ref", "--format=%(refname)", "refs/heads/gpm/proposal/"); branches != "" {
-		t.Fatalf("memory_propose created legacy branches: %q", branches)
+	if status := gitOutput(t, e.proposalsRoot(), "status", "--porcelain"); status != "" {
+		t.Fatalf("memory_propose left the local worktree dirty: %s", status)
 	}
 }
 
-func TestMemoryProposeKeepsProposalLocalWhenPushFails(t *testing.T) {
+func TestMemoryProposeReportsApiFailuresWithoutWriting(t *testing.T) {
 	e := newEnv(t, nil)
-	if err := os.Rename(e.m.Remote, e.m.Remote+".offline"); err != nil {
-		t.Fatal(err)
-	}
-	response := decodeInboxResponse(t, e.ok(t, "memory_propose", map[string]any{
-		"title": "Offline fact", "suggested_action": "create", "knowledge": "Knowledge.", "source_paths": []string{},
-	}))
-	if response.Data == nil || response.Pushed || response.Message == "" {
-		t.Fatalf("offline propose = %+v", response)
-	}
-	if commit := gitOutput(t, e.proposalsRoot(), "rev-parse", "HEAD"); commit != response.Data.Commit {
-		t.Fatalf("local HEAD = %s, proposal commit = %s", commit, response.Data.Commit)
-	}
-	if err := os.Rename(e.m.Remote+".offline", e.m.Remote); err != nil {
-		t.Fatal(err)
-	}
-	next := decodeInboxResponse(t, e.ok(t, "memory_propose", map[string]any{
-		"title": "Online fact", "suggested_action": "create", "knowledge": "Other knowledge.", "source_paths": []string{},
-	}))
-	if !next.Pushed {
-		t.Fatalf("propose after recovery = %+v", next)
-	}
-	if pushed := gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals"); pushed != next.Data.Commit {
-		t.Fatalf("remote proposals = %s, want both proposals up to %s", pushed, next.Data.Commit)
-	}
-	if !strings.Contains(gitOutput(t, e.m.Remote, "ls-tree", "-r", "--name-only", "proposals"), response.Data.Path) {
-		t.Fatalf("offline proposal %s was not sent with the next call", response.Data.Path)
-	}
-}
-
-func TestReferenceSnapshotFlowsIntoProposalAndVerifiedPreviewEvidence(t *testing.T) {
-	sourceRoot := filepath.Join(t.TempDir(), "source")
-	if err := os.Mkdir(sourceRoot, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, sourceRoot, "init", "--quiet", "--initial-branch=main")
-	runGit(t, sourceRoot, "config", "user.name", "Test")
-	runGit(t, sourceRoot, "config", "user.email", "test@example.invalid")
-	if err := os.MkdirAll(filepath.Join(sourceRoot, "services", "checkout"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(sourceRoot, "services", "checkout", "config.yaml"), []byte("timeout: 5s\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runGit(t, sourceRoot, "add", ".")
-	runGit(t, sourceRoot, "commit", "--quiet", "-m", "source")
-
-	e := newEnv(t, nil)
-	snapshotResult := e.ok(t, "memory_reference_snapshot", map[string]any{
-		"repository_root": sourceRoot, "source_paths": []string{"services/checkout/config.yaml"},
-	})
-	var snapshot struct {
-		Data reference.Snapshot `json:"data"`
-	}
-	decodeStructured(t, snapshotResult, &snapshot)
-	if len(snapshot.Data.References) != 1 || snapshot.Data.References[0].Revision != gitOutput(t, sourceRoot, "rev-parse", "HEAD") {
-		t.Fatalf("reference snapshot = %+v", snapshot.Data)
-	}
-	expandResult := e.ok(t, "memory_reference_expand", map[string]any{
-		"reference": snapshot.Data.References[0], "start_line": 1, "budget_bytes": 2048,
-	})
-	var expanded struct {
-		Data reference.Excerpt `json:"data"`
-	}
-	decodeStructured(t, expandResult, &expanded)
-	if expanded.Data.Content != "timeout: 5s\n" || expanded.Data.StartLine != 1 || expanded.Data.Truncated {
-		t.Fatalf("reference excerpt = %+v", expanded.Data)
-	}
-	proposal := e.propose(t, map[string]any{
-		"title": "Checkout source", "suggested_action": "create", "knowledge": "Checkout timeout comes from committed configuration.",
-		"source_paths": []string{}, "source_references": snapshot.Data.References,
-	})
-	if proposal.SchemaVersion != 2 || len(proposal.SourceReferences) != 1 {
-		t.Fatalf("structured proposal = %+v", proposal)
-	}
-	mismatchedReference := snapshot.Data.References[0]
-	mismatchedReference.ContentHash = "sha256:" + strings.Repeat("0", 64)
-	mismatchProposal := e.propose(t, map[string]any{
-		"title": "Divergent checkout source", "suggested_action": "create", "knowledge": "This proposal carries a divergent source hash.",
-		"source_paths": []string{}, "source_references": []reference.Reference{mismatchedReference},
-	})
-	release := e.openRelease(t)
-
-	preview := func(current *env, id, target string) (reference.Evidence, string) {
-		data := decodePreview(t, current.ok(t, "memory_promote_preview", map[string]any{
-			"operation": "create_page", "proposal_id": id, "target_path": target,
-		}))
-		if len(data.Evidence.References) != 1 {
-			t.Fatalf("reference evidence = %+v", data.Evidence.References)
+	before := gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals")
+	for failure, code := range map[string]string{"connection refused": "proposal_failed", "Forbidden (HTTP 403)": "push_denied"} {
+		t.Setenv("GPM_FAKE_API_FAIL", failure)
+		result := e.call(t, "memory_propose", map[string]any{"title": "Fact", "content": "Knowledge."})
+		response := decodeInboxResponse(t, result)
+		if !result.IsError || response.Error == nil || response.Error.Code != code {
+			t.Fatalf("propose with %q = %+v, want %s", failure, response, code)
 		}
-		return data.Evidence.References[0], data.PreviewToken
 	}
-	verified, _ := preview(e, proposal.ID, "memories/domains/checkout-source.md")
-	if verified.Integrity.Status != reference.IntegrityVerified || verified.SemanticSupport != reference.SemanticNotAssessed {
-		t.Fatalf("verified evidence = %+v", verified)
-	}
-	mismatch, _ := preview(e, mismatchProposal.ID, "memories/domains/divergent-checkout-source.md")
-	if mismatch.Integrity.Status != reference.IntegrityMismatch || mismatch.Integrity.Reason != "content_hash_mismatch" || mismatch.SemanticSupport != reference.SemanticNotAssessed {
-		t.Fatalf("mismatch evidence = %+v", mismatch)
-	}
-	e.stop()
-
-	fresh := &env{m: e.m}
-	fresh.session, fresh.stop = startServer(t, e.m)
-	defer fresh.stop()
-	unavailable, unavailableToken := preview(fresh, proposal.ID, "memories/domains/checkout-source.md")
-	if unavailable.Integrity.Status != reference.IntegrityUnavailable || unavailable.Integrity.Reason != "repository_unavailable" {
-		t.Fatalf("fresh-process evidence = %+v", unavailable)
-	}
-	fresh.ok(t, "memory_reference_snapshot", map[string]any{
-		"repository_root": sourceRoot, "revision": snapshot.Data.Revision, "source_paths": []string{"services/checkout/config.yaml"},
-	})
-	applyResult := fresh.call(t, "memory_promote_apply", map[string]any{"preview_token": unavailableToken})
-	if !applyResult.IsError || errorCode(t, applyResult) != "promotion_drift" {
-		t.Fatalf("apply after reference status drift = %+v", applyResult)
-	}
-	if exists(release, "memories/domains/checkout-source.md") {
-		t.Fatal("reference status drift created memory")
-	}
-	if !exists(release, proposal.Path) {
-		t.Fatal("reference status drift consumed proposal")
+	if gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals") != before {
+		t.Fatal("a failed memory_propose changed the remote")
 	}
 }
 
-func TestMemoryProposeRejectsSensitiveKnowledgeWithoutCommit(t *testing.T) {
+func TestProposalListRefreshesFromRemote(t *testing.T) {
 	e := newEnv(t, nil)
-	head := commitHeads(t, e.proposalsRoot())
-	result := e.call(t, "memory_propose", map[string]any{
-		"title": "Unsafe fact", "suggested_action": "create", "knowledge": "password=super-secret", "source_paths": []string{},
-	})
-	response := decodeInboxResponse(t, result)
-	if !result.IsError || response.Error == nil || response.Error.Code != "privacy_sensitive_content" {
-		t.Fatalf("sensitive result = %+v, response = %+v", result, response)
-	}
-	if current := commitHeads(t, e.proposalsRoot()); current != head {
-		t.Fatalf("rejected proposal moved proposals HEAD from %s to %s", head, current)
-	}
-}
-
-func TestMemoryProposeRejectsTargetOutsideConfiguredCategories(t *testing.T) {
-	e := newEnv(t, nil)
-	head := commitHeads(t, e.proposalsRoot())
-	result := e.call(t, "memory_propose", map[string]any{
-		"title": "Fact", "suggested_action": "update", "target": "memories/notes/fact.md", "knowledge": "Knowledge.", "source_paths": []string{},
-	})
-	response := decodeInboxResponse(t, result)
-	if !result.IsError || response.Error == nil || response.Error.Code != "schema_invalid_target" {
-		t.Fatalf("unconfigured target result = %+v, response = %+v", result, response)
-	}
-	if current := commitHeads(t, e.proposalsRoot()); current != head {
-		t.Fatalf("rejected target moved proposals HEAD from %s to %s", head, current)
-	}
-}
-
-func TestMemoryProposeRequiresProposalsBranch(t *testing.T) {
-	e := newEnv(t, nil)
-	runGit(t, e.proposalsRoot(), "switch", "--quiet", "-c", "feature")
-	result := e.call(t, "memory_propose", map[string]any{"title": "Fact", "suggested_action": "create", "knowledge": "Knowledge.", "source_paths": []string{}})
-	response := decodeInboxResponse(t, result)
-	if !result.IsError || response.Error == nil || response.Error.Code != "wrong_branch" {
-		t.Fatalf("wrong-branch result = %+v, response = %+v", result, response)
-	}
-}
-
-func TestMemoryProposeReportsDirtyWorktree(t *testing.T) {
-	e := newEnv(t, nil)
-	writeFile(t, e.proposalsRoot(), "stray.txt", "left by someone\n")
-	result := e.call(t, "memory_propose", map[string]any{"title": "Fact", "suggested_action": "create", "knowledge": "Knowledge.", "source_paths": []string{}})
-	response := decodeInboxResponse(t, result)
-	if !result.IsError || response.Error == nil || response.Error.Code != "worktree_dirty" {
-		t.Fatalf("dirty worktree result = %+v, response = %+v", result, response)
+	e.propose(t, map[string]any{"title": "Fact", "content": "Knowledge."})
+	var listed listedProposals
+	decodeStructured(t, e.ok(t, "memory_proposal_list", map[string]any{}), &listed)
+	if len(listed.Data.Proposals) != 1 {
+		t.Fatalf("memory_proposal_list = %+v, want the proposal just pushed", listed.Data.Proposals)
 	}
 }
 
 func TestPromoteToolsRequireAnOpenRelease(t *testing.T) {
 	e := newEnv(t, nil)
-	proposal := e.propose(t, map[string]any{"title": "Fact", "suggested_action": "create", "knowledge": "Knowledge.", "source_paths": []string{}})
+	proposal := e.propose(t, map[string]any{"title": "Fact", "content": "Knowledge."})
 	for name, arguments := range map[string]map[string]any{
 		"memory_promote_preview":       {"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "duplicate"},
 		"memory_promote_batch_preview": {"items": []map[string]any{{"operation": "discard_proposal", "proposal_id": proposal.ID, "reason": "duplicate"}}},
@@ -353,9 +191,8 @@ type listedProposals struct {
 	Data struct {
 		Categories []string `json:"categories"`
 		Proposals  []struct {
-			ID              string `json:"id"`
-			Title           string `json:"title"`
-			SuggestedAction string `json:"suggested_action"`
+			ID    string `json:"id"`
+			Title string `json:"title"`
 		} `json:"proposals"`
 	} `json:"data"`
 }
@@ -363,15 +200,13 @@ type listedProposals struct {
 func TestPromoteCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	e := newEnv(t, nil)
 	proposal := e.propose(t, map[string]any{
-		"title":            "Parcel dispatch retry policy",
-		"suggested_action": "create",
-		"knowledge":        "Parcel dispatch retries use exponential backoff and stop after three failures.",
-		"source_paths":     []string{"services/parcel/dispatch.go"},
+		"title":   "Parcel dispatch retry policy",
+		"content": "Parcel dispatch retries use exponential backoff and stop after three failures.",
 	})
 
 	var listed listedProposals
 	decodeStructured(t, e.ok(t, "memory_proposal_list", map[string]any{}), &listed)
-	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposal.ID || listed.Data.Proposals[0].Title != proposal.Title || listed.Data.Proposals[0].SuggestedAction != "create" {
+	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposal.ID {
 		t.Fatalf("listed proposals = %+v", listed.Data.Proposals)
 	}
 	if strings.Join(listed.Data.Categories, ",") != "domains,decision" {
@@ -390,14 +225,8 @@ func TestPromoteCreatePreviewAndApplyPublishesCanonicalMemory(t *testing.T) {
 	preview := decodePreview(t, e.ok(t, "memory_promote_preview", map[string]any{
 		"operation": "create_page", "proposal_id": proposal.ID, "target_path": target,
 	}))
-	if preview.PreviewToken == "" || preview.ProposalID != proposal.ID || preview.Title != proposal.Title || preview.TargetPath != target {
+	if preview.PreviewToken == "" || preview.ProposalID != proposal.ID || preview.TargetPath != target {
 		t.Fatalf("preview = %+v", preview)
-	}
-	if len(preview.SourcePaths) != 1 || preview.SourcePaths[0] != "services/parcel/dispatch.go" {
-		t.Fatalf("preview sources = %v", preview.SourcePaths)
-	}
-	if references := preview.Evidence.References; len(references) != 1 || references[0].LegacyPath != "services/parcel/dispatch.go" || references[0].Integrity.Status != reference.IntegrityLegacyUnverified {
-		t.Fatalf("legacy reference evidence = %+v", references)
 	}
 	if !strings.Contains(preview.Diff, "+++ b/"+target) || !strings.Contains(preview.Diff, "--- a/"+proposal.Path) || !strings.Contains(preview.Diff, "+++ /dev/null") {
 		t.Fatalf("preview diff = %s", preview.Diff)
@@ -444,8 +273,7 @@ func TestPromoteCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T
 	target := checkoutPath
 	publishExecutable(t, e.m, target)
 	proposal := e.propose(t, map[string]any{
-		"title": "Checkout retry policy", "suggested_action": "create",
-		"knowledge": "Checkout retries stop after three failures.", "source_paths": []string{"services/checkout/retry.go"},
+		"title": "Checkout retry policy", "content": "Checkout retries stop after three failures.",
 	})
 	release := e.openRelease(t)
 
@@ -495,7 +323,7 @@ func TestPromoteCreateSectionUpdatesExistingPageAndConsumesProposal(t *testing.T
 func TestPromoteCreateSectionRejectsExistingHeadingWithoutWriting(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	proposal := e.propose(t, map[string]any{
-		"title": "Duplicate operation", "suggested_action": "create", "knowledge": "Another operation description.", "source_paths": []string{},
+		"title": "Duplicate operation", "content": "Another operation description.",
 	})
 	release := e.openRelease(t)
 	head := commitHeads(t, release)
@@ -522,8 +350,7 @@ func TestPromoteReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.
 	target := checkoutPath
 	publishExecutable(t, e.m, target)
 	proposal := e.propose(t, map[string]any{
-		"title": "Update checkout operation", "suggested_action": "update", "target": checkoutPath,
-		"knowledge": "The checkout timeout is five seconds.", "source_paths": []string{"services/checkout/config.yaml"},
+		"title": "Update checkout operation", "content": "The checkout timeout is five seconds.",
 	})
 	release := e.openRelease(t)
 	searchBefore := e.search(t, "release", "checkout timeout team-b")
@@ -588,7 +415,7 @@ func TestPromoteReplaceSectionUpdatesCurrentStateAndConsumesProposal(t *testing.
 func TestPromoteReplaceSectionRejectsNonLeafTargetWithoutWriting(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	proposal := e.propose(t, map[string]any{
-		"title": "Rewrite checkout page", "suggested_action": "update", "target": checkoutPath, "knowledge": "Replacement.", "source_paths": []string{},
+		"title": "Rewrite checkout page", "content": "Replacement.",
 	})
 	release := e.openRelease(t)
 	head := commitHeads(t, release)
@@ -614,8 +441,7 @@ func TestPromoteReplaceSectionRejectsNonLeafTargetWithoutWriting(t *testing.T) {
 func TestPromoteReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	proposal := e.propose(t, map[string]any{
-		"title": "Update checkout timeout", "suggested_action": "update", "target": checkoutPath,
-		"knowledge": "The checkout timeout is five seconds.", "source_paths": []string{},
+		"title": "Update checkout timeout", "content": "The checkout timeout is five seconds.",
 	})
 	release := e.openRelease(t)
 	head := commitHeads(t, release)
@@ -639,27 +465,6 @@ func TestPromoteReplaceSectionRejectsStaleContentHashWithoutWriting(t *testing.T
 	}
 }
 
-func TestPromoteReplaceSectionRejectsCreateProposal(t *testing.T) {
-	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
-	proposal := e.propose(t, map[string]any{
-		"title": "New checkout fact", "suggested_action": "create", "knowledge": "New fact.", "source_paths": []string{},
-	})
-	release := e.openRelease(t)
-	result := e.call(t, "memory_promote_preview", map[string]any{
-		"operation": "replace_section", "proposal_id": proposal.ID, "target_path": checkoutPath, "section_id": "checkout-api-operation",
-		"content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000", "replacement": "New fact.\n",
-	})
-	if !result.IsError || errorCode(t, result) != "unsupported_action" {
-		t.Fatalf("wrong-action preview = %+v, code %q", result, errorCode(t, result))
-	}
-	if page := readFile(t, release, checkoutPath); page != memoryPage {
-		t.Fatalf("wrong-action preview changed page: %q", page)
-	}
-	if !exists(release, proposal.Path) {
-		t.Fatal("wrong-action preview removed proposal")
-	}
-}
-
 func TestPromoteRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: removableMemoryPage})
 	main := e.search(t, "", "operation timeout seconds")
@@ -668,8 +473,7 @@ func TestPromoteRemoveSectionDeletesLeafAndConsumesProposal(t *testing.T) {
 	}
 	handle := main.Items[0].Handle
 	proposal := e.propose(t, map[string]any{
-		"title": "Remove obsolete checkout timeout", "suggested_action": "remove", "target": handle.Path,
-		"knowledge": "The checkout timeout section is obsolete and must be removed.", "source_paths": []string{},
+		"title": "Remove obsolete checkout timeout", "content": "The checkout timeout section is obsolete and must be removed.",
 	})
 	release := e.openRelease(t)
 
@@ -721,8 +525,7 @@ func TestPromoteRemovePageDeletesEligiblePageAndConsumesProposal(t *testing.T) {
 	}
 	handle := found.Items[0].Handle
 	proposal := e.propose(t, map[string]any{
-		"title": "Remove retired retry policy", "suggested_action": "remove", "target": handle.Path,
-		"knowledge": "The legacy retry policy page is obsolete and must be removed.", "source_paths": []string{},
+		"title": "Remove retired retry policy", "content": "The legacy retry policy page is obsolete and must be removed.",
 	})
 	release := e.openRelease(t)
 
@@ -765,8 +568,7 @@ func TestPromoteRemovePageRejectsIneligiblePageWithoutWriting(t *testing.T) {
 	}
 	handle := found.Items[0].Handle
 	proposal := e.propose(t, map[string]any{
-		"title": "Remove checkout page", "suggested_action": "remove", "target": handle.Path,
-		"knowledge": "The selected checkout timeout is obsolete.", "source_paths": []string{},
+		"title": "Remove checkout page", "content": "The selected checkout timeout is obsolete.",
 	})
 	release := e.openRelease(t)
 	head := commitHeads(t, release)
@@ -794,8 +596,7 @@ func TestPromoteRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T)
 	found := e.search(t, "", "operation timeout seconds")
 	handle := found.Items[0].Handle
 	proposal := e.propose(t, map[string]any{
-		"title": "Remove checkout timeout", "suggested_action": "remove", "target": handle.Path,
-		"knowledge": "The checkout timeout is obsolete.", "source_paths": []string{},
+		"title": "Remove checkout timeout", "content": "The checkout timeout is obsolete.",
 	})
 	release := e.openRelease(t)
 	token := e.previewToken(t, map[string]any{
@@ -829,8 +630,7 @@ func TestPromoteRemoveSectionRejectsApplyTimeDriftAndConsumesToken(t *testing.T)
 func TestPromoteDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	proposal := e.propose(t, map[string]any{
-		"title": "Add incorrect checkout note", "suggested_action": "create",
-		"knowledge": "This knowledge was found to be incorrect.", "source_paths": []string{},
+		"title": "Add incorrect checkout note", "content": "This knowledge was found to be incorrect.",
 	})
 	release := e.openRelease(t)
 
@@ -868,8 +668,7 @@ func TestPromoteDiscardProposalRecordsReasonWithoutChangingMemory(t *testing.T) 
 func TestPromoteDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	proposal := e.propose(t, map[string]any{
-		"title": "Questionable checkout note", "suggested_action": "update", "target": checkoutPath,
-		"knowledge": "This note requires a promotion decision.", "source_paths": []string{},
+		"title": "Questionable checkout note", "content": "This note requires a promotion decision.",
 	})
 	release := e.openRelease(t)
 	head := commitHeads(t, release)
@@ -895,7 +694,7 @@ func TestPromoteDiscardRejectsUnknownReasonAndPreviewCancellationKeepsProposal(t
 func TestProposalListIsReadOnly(t *testing.T) {
 	const proposalID = "0123456789abcdef0123456789abcdef"
 	e := newEnv(t, map[string]string{
-		"proposals/" + proposalID + "-retry-policy.md": "---\nschema_version: 1\nsuggested_action: \"create\"\nsource_paths: []\n---\n\n# Retry policy\n\nRetries stop after three failures.\n",
+		"proposals/" + proposalID + "-retry-policy.md": "Retries stop after three failures.",
 	})
 	head := commitHeads(t, e.proposalsRoot())
 
@@ -903,14 +702,13 @@ func TestProposalListIsReadOnly(t *testing.T) {
 	var listed struct {
 		Data struct {
 			Proposals []struct {
-				ID          string   `json:"id"`
-				Knowledge   string   `json:"knowledge"`
-				SourcePaths []string `json:"source_paths"`
+				ID      string `json:"id"`
+				Content string `json:"content"`
 			} `json:"proposals"`
 		} `json:"data"`
 	}
 	decodeStructured(t, result, &listed)
-	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposalID || listed.Data.Proposals[0].Knowledge != "Retries stop after three failures.\n" || len(listed.Data.Proposals[0].SourcePaths) != 0 {
+	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposalID || listed.Data.Proposals[0].Content != "Retries stop after three failures." {
 		t.Fatalf("listed proposals = %+v", listed.Data.Proposals)
 	}
 	if current := commitHeads(t, e.proposalsRoot()); current != head {
@@ -921,36 +719,16 @@ func TestProposalListIsReadOnly(t *testing.T) {
 	}
 }
 
-func TestProposalListRejectsSensitiveCommittedProposalBeforeDisclosure(t *testing.T) {
-	const proposalID = "0123456789abcdef0123456789abcdef"
-	e := newEnv(t, map[string]string{
-		"proposals/" + proposalID + "-unsafe-fact.md": "---\nschema_version: 1\nsuggested_action: \"create\"\nsource_paths: []\n---\n\n# Unsafe fact\n\npassword=super-secret\n",
-	})
-	result := e.call(t, "memory_proposal_list", map[string]any{})
-	var decoded struct {
-		Data  any `json:"data"`
-		Error *struct {
-			Code string `json:"code"`
-		} `json:"error"`
-	}
-	decodeStructured(t, result, &decoded)
-	if !result.IsError || decoded.Data != nil || decoded.Error == nil || decoded.Error.Code != "privacy_sensitive_content" {
-		t.Fatalf("sensitive proposal list = %+v, response = %+v", result, decoded)
-	}
-}
-
 func TestPromotePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	related := e.propose(t, map[string]any{
-		"title": "Alternative checkout timeout", "suggested_action": "update", "target": checkoutPath,
-		"knowledge": "Checkout timeout may be five seconds.", "source_paths": []string{},
+		"title": "Alternative checkout timeout", "content": "Checkout timeout may be five seconds.",
 	})
 	e.propose(t, map[string]any{
-		"title": "Storage allocation", "suggested_action": "create", "knowledge": "Partitions follow geography.", "source_paths": []string{},
+		"title": "Storage allocation", "content": "Partitions follow geography.",
 	})
 	proposal := e.propose(t, map[string]any{
-		"title": "Checkout timeout ownership", "suggested_action": "create",
-		"knowledge": "Checkout timeout is maintained by team-b.", "source_paths": []string{},
+		"title": "Checkout timeout ownership", "content": "Checkout timeout is maintained by team-b.",
 	})
 	release := e.openRelease(t)
 	head := commitHeads(t, release)
@@ -963,10 +741,10 @@ func TestPromotePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T
 				CanonicalCandidates retrieval.ContextBundle `json:"canonical_candidates"`
 				RelatedProposals    struct {
 					Items []struct {
-						ID        string `json:"id"`
-						Title     string `json:"title"`
-						Knowledge string `json:"knowledge"`
-						Score     int    `json:"score"`
+						ID      string `json:"id"`
+						Title   string `json:"title"`
+						Content string `json:"content"`
+						Score   int    `json:"score"`
 					} `json:"items"`
 					Truncated bool `json:"truncated"`
 				} `json:"related_proposals"`
@@ -978,7 +756,7 @@ func TestPromotePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T
 		t.Fatalf("canonical candidates = %+v", candidates)
 	}
 	proposals := preview.Data.Evidence.RelatedProposals
-	if len(proposals.Items) != 1 || proposals.Items[0].ID != related.ID || proposals.Items[0].Title != related.Title || proposals.Items[0].Knowledge != related.Knowledge || proposals.Items[0].Score == 0 || proposals.Truncated {
+	if len(proposals.Items) != 1 || proposals.Items[0].ID != related.ID || strings.TrimSpace(proposals.Items[0].Content) != strings.TrimSpace(related.Content) || proposals.Items[0].Score == 0 || proposals.Truncated {
 		t.Fatalf("related proposals = %+v", proposals)
 	}
 	if current := commitHeads(t, release); current != head {
@@ -988,8 +766,8 @@ func TestPromotePreviewSeparatesCanonicalAndRelatedProposalEvidence(t *testing.T
 
 func TestPromoteEvidenceCandidatesComeFromTheRelease(t *testing.T) {
 	e := newEnv(t, nil)
-	first := e.propose(t, map[string]any{"title": "Ledger settlement window", "suggested_action": "create", "knowledge": "Ledger settlement window closes at midnight.", "source_paths": []string{}})
-	second := e.propose(t, map[string]any{"title": "Ledger settlement owner", "suggested_action": "create", "knowledge": "Ledger settlement window is owned by finance.", "source_paths": []string{}})
+	first := e.propose(t, map[string]any{"title": "Ledger settlement window", "content": "Ledger settlement window closes at midnight."})
+	second := e.propose(t, map[string]any{"title": "Ledger settlement owner", "content": "Ledger settlement window is owned by finance."})
 	e.openRelease(t)
 	token := e.previewToken(t, map[string]any{"operation": "create_page", "proposal_id": first.ID, "target_path": "memories/domains/ledger-settlement.md"})
 	e.ok(t, "memory_promote_apply", map[string]any{"preview_token": token})
@@ -1014,8 +792,7 @@ func TestPromoteEvidenceCandidatesComeFromTheRelease(t *testing.T) {
 func TestPromoteApplyRejectsDriftInReviewedEvidence(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 	proposal := e.propose(t, map[string]any{
-		"title": "Checkout timeout note", "suggested_action": "create",
-		"knowledge": "Checkout timeout documentation belongs to operations.", "source_paths": []string{},
+		"title": "Checkout timeout note", "content": "Checkout timeout documentation belongs to operations.",
 	})
 	release := e.openRelease(t)
 	result := e.ok(t, "memory_promote_preview", map[string]any{
@@ -1053,7 +830,7 @@ func TestPromoteApplyRejectsDriftInReviewedEvidence(t *testing.T) {
 func TestPromoteApplyRejectsDriftAndConsumesPreviewToken(t *testing.T) {
 	e := newEnv(t, nil)
 	proposal := e.propose(t, map[string]any{
-		"title": "Retry policy", "suggested_action": "create", "knowledge": "Retries stop after three failures.", "source_paths": []string{},
+		"title": "Retry policy", "content": "Retries stop after three failures.",
 	})
 	release := e.openRelease(t)
 	token := e.previewToken(t, map[string]any{
@@ -1095,7 +872,7 @@ func TestPromoteBatchPreviewAndApplyUsesOneCommit(t *testing.T) {
 	proposalIDs := make([]string, 2)
 	for index, title := range []string{"First batch memory", "Second batch memory"} {
 		proposalIDs[index] = e.propose(t, map[string]any{
-			"title": title, "suggested_action": "create", "knowledge": title + " is current.", "source_paths": []string{"source.go"},
+			"title": title, "content": title + " is current.",
 		}).ID
 	}
 	release := e.openRelease(t)
@@ -1172,7 +949,7 @@ func TestReleaseOpenStatusConsolidateAndSubmit(t *testing.T) {
 	}
 	ids := make([]string, 2)
 	for index, title := range []string{"Settlement window", "Settlement owner"} {
-		ids[index] = e.propose(t, map[string]any{"title": title, "suggested_action": "create", "knowledge": title + " is current.", "source_paths": []string{}}).ID
+		ids[index] = e.propose(t, map[string]any{"title": title, "content": title + " is current."}).ID
 	}
 
 	result, opened := e.releaseTool(t, "memory_promote_open")
@@ -1250,12 +1027,10 @@ func TestReleaseOpenStatusConsolidateAndSubmit(t *testing.T) {
 func TestReleaseSourceKeepsHashesAndHandlesConsistentAcrossBatches(t *testing.T) {
 	e := newEnv(t, map[string]string{rewriteBaselinePath: rewriteBaselinePage})
 	rewrite := e.propose(t, map[string]any{
-		"title": "Wuerike é do time da camada de leitura", "suggested_action": "update", "target": rewriteBaselinePath,
-		"knowledge": "Wuerike faz parte do time da camada de leitura.", "source_paths": []string{},
+		"title": "Wuerike é do time da camada de leitura", "content": "Wuerike faz parte do time da camada de leitura.",
 	})
 	later := e.propose(t, map[string]any{
-		"title": "Membros trabalham com recuperação", "suggested_action": "update", "target": rewriteBaselinePath,
-		"knowledge": "Os membros do time trabalham com recuperação.", "source_paths": []string{},
+		"title": "Membros trabalham com recuperação", "content": "Os membros do time trabalham com recuperação.",
 	})
 	release := e.openRelease(t)
 
@@ -1319,7 +1094,7 @@ func TestStartupRecoveryFailureOnlyBlocksPromotion(t *testing.T) {
 	if search := e.search(t, "", "checkout timeout team"); search == nil || len(search.Items) != 1 {
 		t.Fatalf("search after failed recovery = %+v", search)
 	}
-	e.propose(t, map[string]any{"title": "Another fact", "suggested_action": "create", "knowledge": "Another fact.", "source_paths": []string{}})
+	e.propose(t, map[string]any{"title": "Another fact", "content": "Another fact."})
 	var listed listedProposals
 	decodeStructured(t, e.ok(t, "memory_proposal_list", map[string]any{}), &listed)
 	if len(listed.Data.Proposals) != 2 {

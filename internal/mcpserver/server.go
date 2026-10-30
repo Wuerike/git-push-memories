@@ -14,10 +14,8 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/forge/github"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
-	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/promotion"
-	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/workspace"
@@ -27,7 +25,6 @@ import (
 type Server struct {
 	inner      *mcp.Server
 	retriever  *retrieval.Retriever
-	guard      *intake.Guard
 	cfg        config.Config
 	stateRoot  string
 	inbox      *inbox.Inbox
@@ -37,7 +34,6 @@ type Server struct {
 	promoterMu sync.Mutex
 	previews   map[string]pendingPromotion
 	batches    map[string]pendingBatchPromotion
-	references *reference.Verifier
 	pages      *memory.Repository
 	pagesMu    sync.Mutex
 }
@@ -60,18 +56,11 @@ func New(cfg config.Config, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	guard, err := intake.New()
-	if err != nil {
-		_ = retriever.Close()
-		return nil, err
-	}
 	server := &Server{
-		retriever:  retriever,
-		guard:      guard,
-		references: reference.New(),
-		cfg:        cfg,
-		releases:   release.New(cfg),
-		stateRoot:  cfg.StateRoot,
+		retriever: retriever,
+		cfg:       cfg,
+		releases:  release.New(cfg),
+		stateRoot: cfg.StateRoot,
 		inner: mcp.NewServer(&mcp.Implementation{
 			Name:    "git-push-memories",
 			Version: version,
@@ -79,7 +68,7 @@ func New(cfg config.Config, version string) (*Server, error) {
 	}
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_propose",
-		Description: "Add one reviewable Markdown proposal on the proposals branch and send it to the shared repository. pushed=false means it is committed locally and will be sent on the next call.",
+		Description: "Add one reviewable Markdown proposal to the proposals branch of the shared repository through GitHub, in a single call that either succeeds or changes nothing.",
 	}, server.addProposal)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_search",
@@ -93,14 +82,6 @@ func New(cfg config.Config, version string) (*Server, error) {
 		Name:        "memory_page_read",
 		Description: "Read one whole canonical memory page with its content hash, or fail with budget_too_small; never returns a truncated page.",
 	}, server.readPage)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_reference_snapshot",
-		Description: "Snapshot immutable references to committed blobs in one explicit local Git repository without persisting its local root.",
-	}, server.snapshotReferences)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_reference_expand",
-		Description: "Read a bounded line range from the exact committed UTF-8 blob identified by a verified source reference without persisting content.",
-	}, server.expandReference)
 	mcp.AddTool(server.inner, &mcp.Tool{
 		Name:        "memory_proposal_list",
 		Description: "List committed Markdown proposals and configured memory categories for explicit human promotion.",
@@ -138,7 +119,6 @@ func New(cfg config.Config, version string) (*Server, error) {
 
 func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	defer s.retriever.Close()
-	defer s.closeInbox()
 	defer s.closePages()
 	// A failed recovery must not take /remember and search down; it only blocks /promote.
 	if root, branch, ok := s.releases.Active(ctx); ok {
@@ -185,24 +165,8 @@ type pageReadResponse struct {
 }
 
 type addProposalInput struct {
-	Title            string                `json:"title" jsonschema:"concise human-readable proposal title"`
-	SuggestedAction  string                `json:"suggested_action" jsonschema:"suggested promotion action: create, update, or remove"`
-	Target           string                `json:"target,omitempty" jsonschema:"optional canonical relative memory target"`
-	Knowledge        string                `json:"knowledge" jsonschema:"knowledge for a future promoter to evaluate"`
-	SourcePaths      []string              `json:"source_paths" jsonschema:"unverified canonical relative source references supporting the proposal"`
-	SourceReferences []reference.Reference `json:"source_references,omitempty" jsonschema:"immutable references returned by memory_reference_snapshot; source_paths must be empty"`
-}
-
-type snapshotReferencesInput struct {
-	RepositoryRoot string   `json:"repository_root" jsonschema:"absolute local Git worktree root used transiently and never persisted"`
-	Revision       string   `json:"revision,omitempty" jsonschema:"optional full commit object ID; defaults to HEAD"`
-	SourcePaths    []string `json:"source_paths" jsonschema:"one to sixteen canonical repository-relative blob paths"`
-}
-
-type expandReferenceInput struct {
-	Reference   reference.Reference `json:"reference" jsonschema:"source reference returned by memory_reference_snapshot"`
-	StartLine   int                 `json:"start_line" jsonschema:"one-based first line to return"`
-	BudgetBytes int                 `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the encoded excerpt"`
+	Title   string `json:"title" jsonschema:"concise human-readable proposal title; only names the file and the commit"`
+	Content string `json:"content" jsonschema:"free Markdown for a future promoter to evaluate: the fact, its context, the suggested action (create, update or remove) and target page, and its origin if it matters"`
 }
 
 type listProposalsInput struct {
@@ -249,7 +213,6 @@ type promotionBatchPreview struct {
 type promotionEvidence struct {
 	CanonicalCandidates retrieval.ContextBundle    `json:"canonical_candidates"`
 	RelatedProposals    promotion.RelatedProposals `json:"related_proposals"`
-	References          []reference.Evidence       `json:"references"`
 }
 
 type proposalListResponse struct {
@@ -285,21 +248,7 @@ type promotionBatchApplyResponse struct {
 type inboxToolResponse struct {
 	SchemaVersion int             `json:"schema_version"`
 	Data          *inbox.Proposal `json:"data,omitempty"`
-	Pushed        bool            `json:"pushed"`
-	Message       string          `json:"message,omitempty"`
 	Error         *toolError      `json:"error,omitempty"`
-}
-
-type referenceSnapshotResponse struct {
-	SchemaVersion int                 `json:"schema_version"`
-	Data          *reference.Snapshot `json:"data,omitempty"`
-	Error         *toolError          `json:"error,omitempty"`
-}
-
-type referenceExpandResponse struct {
-	SchemaVersion int                `json:"schema_version"`
-	Data          *reference.Excerpt `json:"data,omitempty"`
-	Error         *toolError         `json:"error,omitempty"`
 }
 
 type toolError struct {
@@ -448,83 +397,22 @@ func (s *Server) closePages() {
 }
 
 func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input addProposalInput) (*mcp.CallToolResult, inboxToolResponse, error) {
-	raw, err := json.Marshal(input)
-	if err != nil {
-		return inboxFailure("invalid_candidate")
-	}
-	allowed, err := s.guard.InspectProposal(intake.NewProposalCandidate(raw))
-	if err != nil {
-		var rejection intake.Rejection
-		if errors.As(err, &rejection) {
-			return inboxFailure(rejection.Class + "_" + rejection.Reason)
-		}
-		return inboxFailure("candidate_rejected")
-	}
-	if allowed.Target() != "" && !s.cfg.IsMemoryPath(allowed.Target()) {
-		return inboxFailure("schema_invalid_target")
-	}
 	proposalInbox, err := s.proposalInbox()
 	if err != nil {
 		return inboxFailure("proposal_unavailable")
 	}
-	stored, err := proposalInbox.Add(ctx, inbox.Request{
-		Title: allowed.Title(), SuggestedAction: inbox.Action(allowed.SuggestedAction()), Target: allowed.Target(),
-		Knowledge: allowed.Knowledge(), SourcePaths: allowed.SourcePaths(), SourceReferences: allowed.SourceReferences(),
-	})
-	if err != nil {
-		if errors.Is(err, inbox.ErrWrongBranch) {
-			return inboxFailure("wrong_branch")
-		}
-		if errors.Is(err, workspace.ErrDirty) {
-			return inboxFailure("worktree_dirty")
-		}
-		return inboxFailure("proposal_failed")
-	}
-	pushed, err := proposalInbox.Publish(ctx)
+	stored, err := proposalInbox.Add(ctx, inbox.Request{Title: input.Title, Content: input.Content})
 	switch {
+	case errors.Is(err, inbox.ErrInvalidProposal):
+		return inboxFailure("invalid_proposal")
+	case errors.Is(err, github.ErrUnavailable), errors.Is(err, github.ErrNotGitHub):
+		return inboxFailure("gh_unavailable")
 	case errors.Is(err, workspace.ErrPermission):
 		return inboxFailure("push_denied")
 	case err != nil:
-		return inboxFailure("push_failed")
+		return inboxFailure("proposal_failed")
 	}
-	response := inboxToolResponse{SchemaVersion: 1, Data: &stored, Pushed: pushed}
-	if !pushed {
-		response.Message = "The proposal is committed locally and will be sent to the shared repository on the next /remember."
-	}
-	return nil, response, nil
-}
-
-func (s *Server) snapshotReferences(ctx context.Context, _ *mcp.CallToolRequest, input snapshotReferencesInput) (*mcp.CallToolResult, referenceSnapshotResponse, error) {
-	snapshot, err := s.references.Snapshot(ctx, input.RepositoryRoot, input.Revision, input.SourcePaths)
-	if err != nil {
-		code := "invalid_reference"
-		if errors.Is(err, reference.ErrInvalidRoot) {
-			code = "invalid_repository_root"
-		}
-		return &mcp.CallToolResult{IsError: true}, referenceSnapshotResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-	}
-	return nil, referenceSnapshotResponse{SchemaVersion: 1, Data: &snapshot}, nil
-}
-
-func (s *Server) expandReference(ctx context.Context, _ *mcp.CallToolRequest, input expandReferenceInput) (*mcp.CallToolResult, referenceExpandResponse, error) {
-	excerpt, err := s.references.Expand(ctx, input.Reference, input.StartLine, input.BudgetBytes)
-	if err != nil {
-		code := "reference_expand_failed"
-		switch {
-		case errors.Is(err, reference.ErrIntegrityUnavailable):
-			code = "reference_unavailable"
-		case errors.Is(err, reference.ErrIntegrityMismatch):
-			code = "reference_mismatch"
-		case errors.Is(err, reference.ErrInvalidRange):
-			code = "invalid_reference_range"
-		case errors.Is(err, reference.ErrBudgetTooSmall):
-			code = "budget_too_small"
-		case errors.Is(err, reference.ErrNonTextBlob):
-			code = "reference_not_text"
-		}
-		return &mcp.CallToolResult{IsError: true}, referenceExpandResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-	}
-	return nil, referenceExpandResponse{SchemaVersion: 1, Data: &excerpt}, nil
+	return nil, inboxToolResponse{SchemaVersion: 1, Data: &stored}, nil
 }
 
 func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, input listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
@@ -532,6 +420,10 @@ func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, inpu
 	var err error
 	switch input.Source {
 	case "", "proposals":
+		// Best effort: a failed refresh lists what was last seen.
+		if proposalInbox, inboxErr := s.proposalInbox(); inboxErr == nil {
+			_ = proposalInbox.Refresh(ctx)
+		}
 		promoter, err = promotion.New(s.cfg, s.cfg.Paths.Proposals, workspace.ProposalsBranch)
 	case "release":
 		promoter, err = s.releasePromoter(ctx)
@@ -747,7 +639,7 @@ func promotionRequest(input previewPromotionInput) promotion.PreviewRequest {
 }
 
 func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion.Promoter, preview promotion.Preview) (promotionEvidence, error) {
-	query := preview.Title + " " + preview.Knowledge
+	query := preview.Title + " " + preview.Content
 	retriever, closeRetriever, err := s.retrieverFor(ctx, "release")
 	if err != nil {
 		return promotionEvidence{}, err
@@ -764,14 +656,9 @@ func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion
 	if err := promoter.RevalidatePreview(ctx, preview); err != nil {
 		return promotionEvidence{}, err
 	}
-	references, err := s.references.Verify(ctx, preview.SourceReferences, preview.SourcePaths)
-	if err != nil {
-		return promotionEvidence{}, err
-	}
 	return promotionEvidence{
 		CanonicalCandidates: canonicalCandidates,
 		RelatedProposals:    relatedProposals,
-		References:          references,
 	}, nil
 }
 
@@ -783,14 +670,6 @@ func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expan
 	defer closeRetriever()
 	bundle, err := retriever.Expand(ctx, input.Handle, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
-}
-
-func (s *Server) closeInbox() {
-	s.inboxMu.Lock()
-	defer s.inboxMu.Unlock()
-	if s.inbox != nil {
-		_ = s.inbox.Close()
-	}
 }
 
 func (s *Server) proposalInbox() (*inbox.Inbox, error) {
@@ -876,10 +755,6 @@ func promotionErrorCode(err error) string {
 		errors.Is(err, memory.ErrSectionExists), errors.Is(err, memory.ErrSectionNotFound), errors.Is(err, memory.ErrSectionNotLeaf):
 		return "invalid_target"
 	default:
-		var rejection intake.Rejection
-		if errors.As(err, &rejection) {
-			return rejection.Class + "_" + rejection.Reason
-		}
 		return "promotion_failed"
 	}
 }

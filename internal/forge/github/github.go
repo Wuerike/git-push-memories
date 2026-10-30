@@ -5,6 +5,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,8 @@ var (
 	ErrNotGitHub     = errors.New("the repository URL is not a GitHub repository")
 	ErrUnavailable   = errors.New("gh is not installed or not authenticated: run `gh auth login`")
 	ErrCommandFailed = errors.New("gh command failed")
+	ErrPermission    = errors.New("the GitHub account cannot write to the repository")
+	ErrConflict      = errors.New("the branch moved while writing")
 )
 
 var Timeout = 60 * time.Second
@@ -58,6 +61,10 @@ type PR struct {
 }
 
 func (client Client) run(ctx context.Context, arguments ...string) (string, error) {
+	return client.runInput(ctx, nil, arguments...)
+}
+
+func (client Client) runInput(ctx context.Context, input []byte, arguments ...string) (string, error) {
 	if _, err := exec.LookPath("gh"); err != nil {
 		return "", ErrUnavailable
 	}
@@ -65,10 +72,20 @@ func (client Client) run(ctx context.Context, arguments ...string) (string, erro
 	defer cancel()
 	command := exec.CommandContext(ctx, "gh", arguments...)
 	command.Env = append(os.Environ(), "GH_PROMPT_DISABLED=1", "GH_NO_UPDATE_NOTIFIER=1")
+	if input != nil {
+		command.Stdin = bytes.NewReader(input)
+	}
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
-		return "", fmt.Errorf("%w: %s", ErrCommandFailed, strings.TrimSpace(stderr.String()))
+		message := strings.TrimSpace(stderr.String())
+		switch {
+		case strings.Contains(message, "HTTP 409"):
+			return "", fmt.Errorf("%w: %s", ErrConflict, message)
+		case strings.Contains(message, "HTTP 401"), strings.Contains(message, "HTTP 403"), strings.Contains(message, "HTTP 404"):
+			return "", fmt.Errorf("%w: %s", ErrPermission, message)
+		}
+		return "", fmt.Errorf("%w: %s", ErrCommandFailed, message)
 	}
 	return strings.TrimSpace(stdout.String()), nil
 }
@@ -119,4 +136,31 @@ func (client Client) PRView(ctx context.Context, number int) (*PR, error) {
 		return nil, fmt.Errorf("%w: unreadable pr view", ErrCommandFailed)
 	}
 	return &pr, nil
+}
+
+// CreateFile commits a new file to branch through the contents API and returns the commit SHA. The
+// branch moving under a concurrent writer (HTTP 409) is retried, since every proposal is a distinct path.
+func (client Client) CreateFile(ctx context.Context, branch, path, message string, contents []byte) (string, error) {
+	body, err := json.Marshal(map[string]string{"message": message, "branch": branch, "content": base64.StdEncoding.EncodeToString(contents)})
+	if err != nil {
+		return "", err
+	}
+	for attempt := 0; ; attempt++ {
+		out, err := client.runInput(ctx, body, "api", "-X", "PUT", "repos/"+client.Repo+"/contents/"+path, "--input", "-")
+		if errors.Is(err, ErrConflict) && attempt < 4 {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		var created struct {
+			Commit struct {
+				SHA string `json:"sha"`
+			} `json:"commit"`
+		}
+		if json.Unmarshal([]byte(out), &created) != nil || created.Commit.SHA == "" {
+			return "", fmt.Errorf("%w: unreadable contents response", ErrCommandFailed)
+		}
+		return created.Commit.SHA, nil
+	}
 }

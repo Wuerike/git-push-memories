@@ -22,7 +22,7 @@ func TestPromoteSkillGrantsOnlyPromotionToolsAndConfirmsExactPreview(t *testing.
 		t.Fatal("invalid skill frontmatter")
 	}
 	frontmatter := text[:frontmatterEnd+4]
-	for _, tool := range []string{"memory_promote_open", "memory_promote_status", "memory_promote_submit", "memory_page_read", "memory_proposal_list", "memory_search", "memory_expand", "memory_reference_snapshot", "memory_reference_expand", "memory_promote_preview", "memory_promote_apply", "memory_promote_batch_preview", "memory_promote_batch_apply"} {
+	for _, tool := range []string{"memory_promote_open", "memory_promote_status", "memory_promote_submit", "memory_page_read", "memory_proposal_list", "memory_search", "memory_expand", "memory_promote_preview", "memory_promote_apply", "memory_promote_batch_preview", "memory_promote_batch_apply"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)
 		}
@@ -60,11 +60,6 @@ func TestPromoteSkillGrantsOnlyPromotionToolsAndConfirmsExactPreview(t *testing.
 	for _, contract := range []string{"`equivalent`, `contradictory`, `related`, or `unrelated`", "ask the user to choose the resolution", "canonical candidate and related proposal", "limited evidence"} {
 		if !strings.Contains(text, contract) {
 			t.Fatalf("skill is missing classification contract %q", contract)
-		}
-	}
-	for _, contract := range []string{"legacy path verified", "proves only local repository, revision, blob path and content hash", "`supports`, `contradicts`, or `unclear`", "`unavailable`, `mismatch`, and `legacy_unverified`"} {
-		if !strings.Contains(text, contract) {
-			t.Fatalf("skill is missing reference evidence contract %q", contract)
 		}
 	}
 	for _, contract := range []string{"batches of at most sixteen proposals", "distinct target paths", "memory_promote_batch_preview` exactly once", "memory_promote_batch_apply` exactly once"} {

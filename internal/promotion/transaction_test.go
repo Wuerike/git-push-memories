@@ -349,7 +349,6 @@ func addProposals(t *testing.T, m *workspacetest.Managed, requests []inbox.Reque
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer box.Close()
 	proposals := make([]inbox.Proposal, 0, len(requests))
 	for _, request := range requests {
 		proposal, err := box.Add(context.Background(), request)
@@ -357,9 +356,6 @@ func addProposals(t *testing.T, m *workspacetest.Managed, requests []inbox.Reque
 			t.Fatal(err)
 		}
 		proposals = append(proposals, proposal)
-	}
-	if pushed, err := box.Publish(context.Background()); err != nil || !pushed {
-		t.Fatalf("Publish() = %v, %v", pushed, err)
 	}
 	return proposals
 }
@@ -388,8 +384,8 @@ func newBatchPromoter(t *testing.T, seed map[string]string, requests []inbox.Req
 func newBatchFixture(t *testing.T) batchFixture {
 	t.Helper()
 	fixture, proposals := newBatchPromoter(t, nil, []inbox.Request{
-		{Title: "First memory", SuggestedAction: inbox.ActionCreate, Knowledge: "First current fact.", SourcePaths: []string{"source/first.go"}},
-		{Title: "Second memory", SuggestedAction: inbox.ActionCreate, Knowledge: "Second current fact.", SourcePaths: []string{"source/second.go"}},
+		{Title: "First memory", Content: "First current fact."},
+		{Title: "Second memory", Content: "Second current fact."},
 	})
 	preview, err := fixture.promoter.PreviewBatch(context.Background(), []PreviewRequest{
 		{Operation: OperationCreatePage, ProposalID: proposals[0].ID, TargetPath: "memories/domains/first.md"},

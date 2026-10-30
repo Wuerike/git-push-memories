@@ -17,7 +17,6 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/promotion"
-	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/workspace"
@@ -46,12 +45,11 @@ type toolError struct {
 type previewEvidence struct {
 	CanonicalCandidates retrieval.ContextBundle    `json:"canonical_candidates"`
 	RelatedProposals    promotion.RelatedProposals `json:"related_proposals"`
-	References          []reference.Evidence       `json:"references"`
 }
 
 type batchPreviewItem struct {
 	ProposalID string          `json:"proposal_id"`
-	Knowledge  string          `json:"knowledge"`
+	Content    string          `json:"content"`
 	Evidence   previewEvidence `json:"evidence"`
 }
 
@@ -73,12 +71,10 @@ type e2eEvidence struct {
 	CreateCommit        string   `json:"create_commit"`
 	RecoveredCommit     string   `json:"recovered_commit"`
 	PullRequest         string   `json:"pull_request"`
-	ReferenceStatuses   []string `json:"reference_statuses"`
 	CanonicalOperations []string `json:"canonical_operations"`
 	SetupInitialized    bool     `json:"setup_initialized_empty_remote"`
 	ProposalsPublished  bool     `json:"proposals_published"`
 	ContradictionShown  bool     `json:"contradiction_shown"`
-	PrivacyRejected     bool     `json:"privacy_rejected"`
 	MarkerContentFree   bool     `json:"marker_content_free"`
 	RecoveryConverged   bool     `json:"recovery_converged"`
 	BaselineRecovered   bool     `json:"baseline_recovered"`
@@ -125,6 +121,7 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	gh := wt.FakeGH(t)
 	runRoot := t.TempDir()
 	remote := wt.Remote(t)
+	t.Setenv("GPM_FAKE_REMOTE", remote)
 	sourceRoot := filepath.Join(runRoot, "source")
 	seedRepository(t, realGit, sourceRoot, map[string]string{
 		"services/checkout/config.yaml": "timeout: 3s\nmarker: " + privateSourceMarker + "\n",
@@ -162,72 +159,27 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 		t.Fatal("setup created a release worktree")
 	}
 
-	// /remember: a rejected secret writes nothing; accepted proposals are committed on proposals and pushed.
-	objectsBeforePrivacy := gitOutput(t, ctx, realGit, remote, environment, "count-objects", "-v")
-	proposalsBefore := gitOutput(t, ctx, realGit, paths.Proposals, environment, "rev-parse", "HEAD")
+	// /remember: proposals are committed on proposals and pushed.
 	sessionA := connectMCP(t, ctx, binary, environment, "e2e-a")
-	privacyResult, err := sessionA.CallTool(ctx, &mcp.CallToolParams{Name: "memory_propose", Arguments: map[string]any{
-		"title": "Rejected secret", "suggested_action": "create", "knowledge": rejectedSecret, "source_paths": []string{},
-	}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	privacy := decodeTool[json.RawMessage](t, privacyResult)
-	if !privacyResult.IsError || privacy.Error == nil || privacy.Error.Code != "privacy_sensitive_content" ||
-		gitOutput(t, ctx, realGit, paths.Proposals, environment, "rev-parse", "HEAD") != proposalsBefore ||
-		gitOutput(t, ctx, realGit, remote, environment, "count-objects", "-v") != objectsBeforePrivacy {
-		t.Fatal("privacy rejection wrote state or returned the wrong status")
-	}
 
-	snapshotResult := callTool(t, ctx, sessionA, "memory_reference_snapshot", map[string]any{
-		"repository_root": sourceRoot, "source_paths": []string{"services/checkout/config.yaml"},
-	})
-	snapshot := requireData(t, decodeTool[reference.Snapshot](t, snapshotResult))
-	if len(snapshot.References) != 1 {
-		t.Fatal("source snapshot omitted its reference")
-	}
-	expandResult := callTool(t, ctx, sessionA, "memory_reference_expand", map[string]any{
-		"reference": snapshot.References[0], "start_line": 1, "budget_bytes": 2048,
-	})
-	excerpt := requireData(t, decodeTool[reference.Excerpt](t, expandResult))
-	if !strings.Contains(excerpt.Content, privateSourceMarker) {
-		t.Fatal("source expansion did not inspect the committed bytes")
-	}
-	mismatch := snapshot.References[0]
-	mismatch.ContentHash = "sha256:" + strings.Repeat("0", 64)
-
-	createAArgs := map[string]any{
-		"title": "Checkout policy", "suggested_action": "create", "knowledge": initialCheckoutFact,
-		"source_paths": []string{}, "source_references": []reference.Reference{snapshot.References[0], mismatch},
-	}
-	createA := propose(t, ctx, sessionA, createAArgs)
-	createB := propose(t, ctx, sessionA, map[string]any{
-		"title": "Legacy cleanup", "suggested_action": "create", "knowledge": legacyCleanupFact,
-		"source_paths": []string{"jobs/legacy-cleanup.yaml"},
-	})
+	createA := propose(t, ctx, sessionA, map[string]any{"title": "Checkout policy", "content": "Create: " + initialCheckoutFact})
+	createB := propose(t, ctx, sessionA, map[string]any{"title": "Legacy cleanup", "content": "Create: " + legacyCleanupFact})
 	createSection := propose(t, ctx, sessionA, map[string]any{
-		"title": "Temporary checkout detail", "suggested_action": "create", "target": "memories/domains/checkout-policy.md",
-		"knowledge": "Temporary migration detail remains active.", "source_paths": []string{},
+		"title": "Temporary checkout detail", "content": "Create in memories/domains/checkout-policy.md: Temporary migration detail remains active.",
 	})
 	removeSection := propose(t, ctx, sessionA, map[string]any{
-		"title": "Remove temporary checkout detail", "suggested_action": "remove", "target": "memories/domains/checkout-policy.md",
-		"knowledge": "Temporary migration detail is retired.", "source_paths": []string{},
+		"title": "Remove temporary checkout detail", "content": "Remove from memories/domains/checkout-policy.md: Temporary migration detail is retired.",
 	})
 	updateA := propose(t, ctx, sessionA, map[string]any{
-		"title": "Checkout timeout changed", "suggested_action": "update", "target": "memories/domains/checkout-policy.md",
-		"knowledge": updatedCheckoutFact, "source_paths": []string{"services/checkout/config.yaml"},
+		"title": "Checkout timeout changed", "content": "Update memories/domains/checkout-policy.md: " + updatedCheckoutFact,
 	})
 	removeB := propose(t, ctx, sessionA, map[string]any{
-		"title": "Retire legacy cleanup", "suggested_action": "remove", "target": "memories/domains/legacy-cleanup.md",
-		"knowledge": "Legacy cleanup is retired.", "source_paths": []string{},
+		"title": "Retire legacy cleanup", "content": "Remove memories/domains/legacy-cleanup.md: Legacy cleanup is retired.",
 	})
-	discard := propose(t, ctx, sessionA, map[string]any{
-		"title": "Duplicate checkout timeout", "suggested_action": "create", "knowledge": "Checkout requests time out after three seconds.",
-		"source_paths": []string{}, "source_references": []reference.Reference{snapshot.References[0]},
-	})
+	discard := propose(t, ctx, sessionA, map[string]any{"title": "Duplicate checkout timeout", "content": "Create: Checkout requests time out after three seconds."})
 	proposalIDs := []string{createA.ID, createB.ID, createSection.ID, removeSection.ID, updateA.ID, removeB.ID, discard.ID}
-	if gitOutput(t, ctx, realGit, remote, environment, "rev-parse", "proposals") != gitOutput(t, ctx, realGit, paths.Proposals, environment, "rev-parse", "HEAD") {
-		t.Fatal("remembered proposals were not pushed to the remote proposals branch")
+	if gitOutput(t, ctx, realGit, remote, environment, "rev-parse", "proposals") != discard.Commit {
+		t.Fatal("remembered proposals were not committed to the remote proposals branch")
 	}
 	if got := len(proposalFiles(t, ctx, realGit, remote, environment, "proposals")); got != len(proposalIDs) {
 		t.Fatalf("remote proposals branch holds %d proposals, want %d", got, len(proposalIDs))
@@ -268,8 +220,6 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	if len(createPreview.Items) != 2 {
 		t.Fatal("create batch preview omitted decisions")
 	}
-	assertReferenceStatuses(t, createPreview.Items[0].Evidence.References, reference.IntegrityVerified, reference.IntegrityMismatch)
-	assertReferenceStatuses(t, createPreview.Items[1].Evidence.References, reference.IntegrityLegacyUnverified)
 	createApplyResult := callTool(t, ctx, sessionA, "memory_promote_batch_apply", map[string]any{"preview_token": createPreview.PreviewToken})
 	createResult := requireData(t, decodeTool[promotion.BatchResult](t, createApplyResult))
 	assertCommitPaths(t, ctx, realGit, releaseRoot, environment, createResult.Commit, []string{
@@ -360,11 +310,9 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	if len(decisionPreview.Items) != 3 {
 		t.Fatal("decision batch preview omitted decisions")
 	}
-	if !bundleContains(decisionPreview.Items[0].Evidence.CanonicalCandidates, "three seconds") || !relatedContains(decisionPreview.Items[0].Evidence.RelatedProposals, discard.ID) || !strings.Contains(decisionPreview.Items[0].Knowledge, "nine seconds") {
+	if !bundleContains(decisionPreview.Items[0].Evidence.CanonicalCandidates, "three seconds") || !relatedContains(decisionPreview.Items[0].Evidence.RelatedProposals, discard.ID) || !strings.Contains(decisionPreview.Items[0].Content, "nine seconds") {
 		t.Fatal("contradictory current and proposed facts were not observable together")
 	}
-	assertReferenceStatuses(t, decisionPreview.Items[0].Evidence.References, reference.IntegrityLegacyUnverified)
-	assertReferenceStatuses(t, decisionPreview.Items[2].Evidence.References, reference.IntegrityUnavailable)
 	for _, expectedPath := range []string{checkoutHandle.Path, cleanupHandle.Path, updateA.Path, removeB.Path, discard.Path} {
 		if !strings.Contains(decisionPreview.Diff, expectedPath) {
 			t.Fatalf("decision diff omitted %s", expectedPath)
@@ -556,9 +504,8 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	writeEvidence(t, e2eEvidence{
 		SchemaVersion: 1, ProductRevision: gitOutput(t, ctx, realGit, repositoryRoot, os.Environ(), "rev-parse", "HEAD"), GoVersion: runtime.Version(),
 		ReleaseBranch: releaseBranch, CreateCommit: createResult.Commit, RecoveredCommit: interruptedCommit, PullRequest: submit.PullRequest,
-		ReferenceStatuses:   []string{"verified", "mismatch", "legacy_unverified", "unavailable"},
 		CanonicalOperations: []string{"create_page", "create_section", "replace_section", "remove_section", "remove_page", "discard_proposal"},
-		SetupInitialized:    true, ProposalsPublished: true, ContradictionShown: true, PrivacyRejected: true, MarkerContentFree: true,
+		SetupInitialized:    true, ProposalsPublished: true, ContradictionShown: true, MarkerContentFree: true,
 		RecoveryConverged: true, BaselineRecovered: true, PullRequestMerged: true, FinalFactRecovered: true, SecondUserReadOnly: true,
 	})
 }
@@ -667,20 +614,6 @@ func searchOne(t *testing.T, ctx context.Context, session *mcp.ClientSession, qu
 		t.Fatalf("memory_search(%q) returned %d items", query, len(bundle.Items))
 	}
 	return bundle.Items[0].Handle
-}
-
-func assertReferenceStatuses(t *testing.T, evidence []reference.Evidence, statuses ...reference.IntegrityStatus) {
-	t.Helper()
-	got := make([]reference.IntegrityStatus, len(evidence))
-	for index, item := range evidence {
-		got[index] = item.Integrity.Status
-		if item.SemanticSupport != reference.SemanticNotAssessed {
-			t.Fatal("reference verifier asserted semantic support")
-		}
-	}
-	if !slices.Equal(got, statuses) {
-		t.Fatalf("reference statuses = %v, want %v", got, statuses)
-	}
 }
 
 func assertCommitPaths(t *testing.T, ctx context.Context, git, root string, environment []string, commit string, expected []string) {
@@ -794,6 +727,8 @@ func gpmEnvironment(t *testing.T, root, toolsRoot, realGit, crashArm, remoteAtte
 		"CLAUDE_CONFIG_DIR=" + claudeRoot,
 		"GIT_CONFIG_NOSYSTEM=1",
 		"GIT_SSH_COMMAND=/bin/false",
+		"GPM_FAKE_REMOTE=" + os.Getenv("GPM_FAKE_REMOTE"),
+		"GPM_FAKE_GH_DIR=" + os.Getenv("GPM_FAKE_GH_DIR"),
 		"GPM_E2E_REAL_GIT=" + realGit,
 		"GPM_E2E_CRASH_ARM=" + crashArm,
 		"GPM_E2E_REMOTE_ATTEMPT_LOG=" + remoteAttemptLog,

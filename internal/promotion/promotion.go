@@ -16,9 +16,7 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
-	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
-	"github.com/Wuerike/git-push-memories/internal/reference"
 	"github.com/Wuerike/git-push-memories/internal/repolock"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/unifieddiff"
@@ -28,7 +26,7 @@ import (
 var (
 	ErrDrift         = errors.New("promotion preview drifted")
 	ErrLocked        = errors.New("Git index is locked")
-	ErrUnsupported   = errors.New("proposal action is not supported by this promotion phase")
+	ErrUnsupported   = errors.New("operation is not supported")
 	ErrInvalidReason = errors.New("invalid discard reason")
 	ErrInvalidBatch  = errors.New("invalid promotion batch")
 	ErrRecovery      = errors.New("promotion transaction recovery failed")
@@ -59,14 +57,10 @@ const (
 )
 
 type Summary struct {
-	ID               string                `json:"id"`
-	Path             string                `json:"path"`
-	Title            string                `json:"title"`
-	SuggestedAction  inbox.Action          `json:"suggested_action"`
-	Target           string                `json:"target,omitempty"`
-	Knowledge        string                `json:"knowledge"`
-	SourcePaths      []string              `json:"source_paths"`
-	SourceReferences []reference.Reference `json:"source_references,omitempty"`
+	ID      string `json:"id"`
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
 }
 
 type List struct {
@@ -75,14 +69,12 @@ type List struct {
 }
 
 type RelatedProposal struct {
-	ID                 string       `json:"id"`
-	Path               string       `json:"path"`
-	Title              string       `json:"title"`
-	SuggestedAction    inbox.Action `json:"suggested_action"`
-	Target             string       `json:"target,omitempty"`
-	Knowledge          string       `json:"knowledge"`
-	KnowledgeTruncated bool         `json:"knowledge_truncated,omitempty"`
-	Score              int          `json:"score"`
+	ID               string `json:"id"`
+	Path             string `json:"path"`
+	Title            string `json:"title"`
+	Content          string `json:"content"`
+	ContentTruncated bool   `json:"content_truncated,omitempty"`
+	Score            int    `json:"score"`
 }
 
 type RelatedProposals struct {
@@ -109,22 +101,19 @@ type PreviewRequest struct {
 }
 
 type Preview struct {
-	Operation        Operation             `json:"operation"`
-	ProposalID       string                `json:"proposal_id"`
-	ProposalPath     string                `json:"proposal_path"`
-	Title            string                `json:"title"`
-	Action           inbox.Action          `json:"suggested_action"`
-	Knowledge        string                `json:"knowledge"`
-	SourcePaths      []string              `json:"source_paths"`
-	SourceReferences []reference.Reference `json:"source_references,omitempty"`
-	TargetPath       string                `json:"target_path,omitempty"`
-	SectionID        string                `json:"section_id,omitempty"`
-	ContentHash      string                `json:"content_hash,omitempty"`
-	Heading          string                `json:"heading,omitempty"`
-	Replacement      string                `json:"replacement,omitempty"`
-	Reason           DiscardReason         `json:"reason,omitempty"`
-	FoldInto         string                `json:"fold_into,omitempty"`
-	Diff             string                `json:"diff"`
+	Operation    Operation     `json:"operation"`
+	ProposalID   string        `json:"proposal_id"`
+	ProposalPath string        `json:"proposal_path"`
+	Title        string        `json:"title"`
+	Content      string        `json:"content"`
+	TargetPath   string        `json:"target_path,omitempty"`
+	SectionID    string        `json:"section_id,omitempty"`
+	ContentHash  string        `json:"content_hash,omitempty"`
+	Heading      string        `json:"heading,omitempty"`
+	Replacement  string        `json:"replacement,omitempty"`
+	Reason       DiscardReason `json:"reason,omitempty"`
+	FoldInto     string        `json:"fold_into,omitempty"`
+	Diff         string        `json:"diff"`
 
 	head          string
 	gitMode       string
@@ -168,7 +157,6 @@ type Promoter struct {
 	inbox      *inbox.Inbox
 	repository *memory.Repository
 	branch     string // short name of the branch the worktree must be on
-	guard      *intake.Guard
 	fault      func(string) error
 }
 
@@ -189,29 +177,17 @@ func New(cfg config.Config, rootDir, branch string) (*Promoter, error) {
 	}
 	repository, err := memory.Open(rootPath)
 	if err != nil {
-		_ = proposalInbox.Close()
 		_ = root.Close()
 		return nil, err
 	}
-	guard, err := intake.New()
-	if err != nil {
-		_ = repository.Close()
-		_ = proposalInbox.Close()
-		_ = root.Close()
-		return nil, err
-	}
-	return &Promoter{cfg: cfg, root: root, rootPath: rootPath, inbox: proposalInbox, repository: repository, branch: branch, guard: guard}, nil
+	return &Promoter{cfg: cfg, root: root, rootPath: rootPath, inbox: proposalInbox, repository: repository, branch: branch}, nil
 }
 
 func (promoter *Promoter) Close() error {
 	repositoryErr := promoter.repository.Close()
-	inboxErr := promoter.inbox.Close()
 	rootErr := promoter.root.Close()
 	if repositoryErr != nil {
 		return repositoryErr
-	}
-	if inboxErr != nil {
-		return inboxErr
 	}
 	return rootErr
 }
@@ -224,13 +200,7 @@ func (promoter *Promoter) List(ctx context.Context) (List, error) {
 	result := List{Categories: append([]string(nil), promoter.cfg.MemoryCategories...), Proposals: make([]Summary, len(snapshots))}
 	for index, snapshot := range snapshots {
 		proposal := snapshot.Proposal
-		if err := promoter.inspect(proposal); err != nil {
-			return List{}, err
-		}
-		result.Proposals[index] = Summary{
-			ID: proposal.ID, Path: proposal.Path, Title: proposal.Title, SuggestedAction: proposal.SuggestedAction, Target: proposal.Target,
-			Knowledge: proposal.Knowledge, SourcePaths: append([]string{}, proposal.SourcePaths...), SourceReferences: append([]reference.Reference(nil), proposal.SourceReferences...),
-		}
+		result.Proposals[index] = Summary{ID: proposal.ID, Path: proposal.Path, Title: proposal.Title, Content: proposal.Content}
 	}
 	return result, nil
 }
@@ -246,21 +216,17 @@ func (promoter *Promoter) RelatedProposals(ctx context.Context, expected Preview
 			return RelatedProposals{}, ErrDrift
 		}
 		proposal := snapshot.Proposal
-		if err := promoter.inspect(proposal); err != nil {
-			return RelatedProposals{}, err
-		}
 		if proposal.ID == expected.ProposalID {
 			continue
 		}
-		score := retrieval.LexicalScore(query, proposal.Title+" "+proposal.Knowledge)
+		score := retrieval.LexicalScore(query, proposal.Title+" "+proposal.Content)
 		if score == 0 {
 			continue
 		}
-		knowledge := strings.TrimSuffix(proposal.Knowledge, "\n")
-		excerpt, truncated := utf8Excerpt(knowledge, relatedKnowledgeBytes)
+		content := strings.TrimSuffix(proposal.Content, "\n")
+		excerpt, truncated := utf8Excerpt(content, relatedKnowledgeBytes)
 		candidates = append(candidates, RelatedProposal{
-			ID: proposal.ID, Path: proposal.Path, Title: proposal.Title, SuggestedAction: proposal.SuggestedAction, Target: proposal.Target,
-			Knowledge: excerpt, KnowledgeTruncated: truncated, Score: score,
+			ID: proposal.ID, Path: proposal.Path, Title: proposal.Title, Content: excerpt, ContentTruncated: truncated, Score: score,
 		})
 	}
 	slices.SortFunc(candidates, func(left, right RelatedProposal) int {
@@ -276,7 +242,7 @@ func (promoter *Promoter) RelatedProposals(ctx context.Context, expected Preview
 	for count := len(candidates); count >= 0; count-- {
 		result := RelatedProposals{Items: append([]RelatedProposal(nil), candidates[:count]...), Truncated: count < total}
 		for _, candidate := range result.Items {
-			result.Truncated = result.Truncated || candidate.KnowledgeTruncated
+			result.Truncated = result.Truncated || candidate.ContentTruncated
 		}
 		encoded, err := json.Marshal(result)
 		if err != nil {
@@ -395,9 +361,6 @@ func (promoter *Promoter) PreviewBatch(ctx context.Context, requests []PreviewRe
 
 func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, request PreviewRequest) (Preview, error) {
 	operation, targetPath, sectionID, heading := request.Operation, request.TargetPath, request.SectionID, request.Heading
-	if !supports(operation, snapshot.Proposal.SuggestedAction) {
-		return Preview{}, ErrUnsupported
-	}
 	if err := promoter.confirmConfig(ctx, snapshot.Head); err != nil {
 		return Preview{}, err
 	}
@@ -413,12 +376,9 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 	if err := promoter.inbox.Confirm(ctx, snapshot); err != nil {
 		return Preview{}, err
 	}
-	if err := promoter.inspect(snapshot.Proposal); err != nil {
-		return Preview{}, err
-	}
 	preview := Preview{
 		Operation: operation, ProposalID: snapshot.Proposal.ID, ProposalPath: snapshot.Proposal.Path, Title: snapshot.Proposal.Title,
-		Action: snapshot.Proposal.SuggestedAction, Knowledge: snapshot.Proposal.Knowledge, SourcePaths: append([]string{}, snapshot.Proposal.SourcePaths...), SourceReferences: append([]reference.Reference(nil), snapshot.Proposal.SourceReferences...),
+		Content:    snapshot.Proposal.Content,
 		TargetPath: targetPath, ContentHash: request.ContentHash, Heading: heading, Replacement: request.Replacement, Reason: request.Reason, FoldInto: request.FoldInto, proposal: snapshot, request: request,
 	}
 	var targetDiff string
@@ -427,13 +387,8 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 		if sectionID != "" || request.ContentHash != "" || heading != "" || !memory.IsCreatePagePath(targetPath) {
 			return Preview{}, memory.ErrInvalidPath
 		}
-		if request.Replacement != "" {
-			if err := promoter.inspectKnowledge(snapshot.Proposal, request.Replacement); err != nil {
-				return Preview{}, err
-			}
-		}
 		page, err := promoter.repository.PreviewCreatePage(ctx, memory.CreatePageRequest{
-			TargetPath: targetPath, Title: snapshot.Proposal.Title, Body: snapshot.Proposal.Knowledge, Replacement: request.Replacement,
+			TargetPath: targetPath, Title: snapshot.Proposal.Title, Body: snapshot.Proposal.Content, Replacement: request.Replacement,
 		})
 		if err != nil {
 			return Preview{}, err
@@ -449,7 +404,7 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 			return Preview{}, memory.ErrInvalidPath
 		}
 		section, err := promoter.repository.PreviewCreateSection(ctx, memory.CreateSectionRequest{
-			TargetPath: targetPath, Heading: heading, Body: snapshot.Proposal.Knowledge,
+			TargetPath: targetPath, Heading: heading, Body: snapshot.Proposal.Content,
 		})
 		if err != nil {
 			return Preview{}, err
@@ -472,9 +427,6 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 			return Preview{}, memory.ErrInvalidPath
 		}
 		preview.SectionID = sectionID
-		if err := promoter.inspectKnowledge(snapshot.Proposal, request.Replacement); err != nil {
-			return Preview{}, err
-		}
 		replacement, err := promoter.repository.PreviewReplaceSection(ctx, memory.PreviewRequest{
 			Target: memory.Target{Path: targetPath, SectionID: sectionID}, Replacement: request.Replacement,
 		})
@@ -499,9 +451,6 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 	case OperationRewritePage:
 		if sectionID != "" || request.ContentHash == "" || heading != "" || request.Replacement == "" {
 			return Preview{}, memory.ErrInvalidPath
-		}
-		if err := promoter.inspectKnowledge(snapshot.Proposal, request.Replacement); err != nil {
-			return Preview{}, err
 		}
 		rewrite, err := promoter.repository.PreviewRewritePage(ctx, memory.RewritePageRequest{
 			TargetPath: targetPath, ContentHash: request.ContentHash, Replacement: request.Replacement,
@@ -596,23 +545,6 @@ func (promoter *Promoter) preview(ctx context.Context, snapshot inbox.Snapshot, 
 		preview.Diff = targetDiff + "\n" + unifieddiff.Delete(snapshot.Proposal.Path, snapshot.Contents)
 	}
 	return preview, nil
-}
-
-func supports(operation Operation, action inbox.Action) bool {
-	switch operation {
-	case OperationCreatePage, OperationCreateSection:
-		return action == inbox.ActionCreate
-	case OperationReplaceSection:
-		return action == inbox.ActionUpdate
-	case OperationRemoveSection, OperationRemovePage:
-		return action == inbox.ActionRemove
-	case OperationRewritePage, OperationFoldProposal:
-		return action == inbox.ActionCreate || action == inbox.ActionUpdate || action == inbox.ActionRemove
-	case OperationDiscard:
-		return true
-	default:
-		return false
-	}
 }
 
 func validDiscardReason(reason DiscardReason) bool {
@@ -710,32 +642,10 @@ func (promoter *Promoter) revalidateBatch(ctx context.Context, expected BatchPre
 }
 
 func samePreview(left, right Preview) bool {
-	return left.Operation == right.Operation && left.ProposalID == right.ProposalID && left.ProposalPath == right.ProposalPath && left.Title == right.Title && left.Action == right.Action && left.Knowledge == right.Knowledge &&
-		slices.Equal(left.SourcePaths, right.SourcePaths) && slices.Equal(left.SourceReferences, right.SourceReferences) && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Reason == right.Reason && left.FoldInto == right.FoldInto && left.Diff == right.Diff &&
+	return left.Operation == right.Operation && left.ProposalID == right.ProposalID && left.ProposalPath == right.ProposalPath && left.Title == right.Title && left.Content == right.Content && left.TargetPath == right.TargetPath && left.SectionID == right.SectionID && left.ContentHash == right.ContentHash && left.Replacement == right.Replacement && left.Reason == right.Reason && left.FoldInto == right.FoldInto && left.Diff == right.Diff &&
 		left.Heading == right.Heading && left.head == right.head && left.gitMode == right.gitMode && left.fileMode == right.fileMode && left.baselineHash == right.baselineHash && left.baselineBlob == right.baselineBlob && bytes.Equal(left.baseline, right.baseline) &&
 		left.postStateHash == right.postStateHash && bytes.Equal(left.postState, right.postState) &&
 		left.proposal.Head == right.proposal.Head && left.proposal.Blob == right.proposal.Blob && bytes.Equal(left.proposal.Contents, right.proposal.Contents) && left.request == right.request
-}
-
-func (promoter *Promoter) inspect(proposal inbox.Proposal) error {
-	return promoter.inspectKnowledge(proposal, proposal.Knowledge)
-}
-
-func (promoter *Promoter) inspectKnowledge(proposal inbox.Proposal, knowledge string) error {
-	candidate := struct {
-		Title            string                `json:"title"`
-		SuggestedAction  string                `json:"suggested_action"`
-		Target           string                `json:"target,omitempty"`
-		Knowledge        string                `json:"knowledge"`
-		SourcePaths      []string              `json:"source_paths"`
-		SourceReferences []reference.Reference `json:"source_references,omitempty"`
-	}{proposal.Title, string(proposal.SuggestedAction), proposal.Target, knowledge, append([]string{}, proposal.SourcePaths...), proposal.SourceReferences}
-	raw, err := json.Marshal(candidate)
-	if err != nil {
-		return err
-	}
-	_, err = promoter.guard.InspectProposal(intake.NewProposalCandidate(raw))
-	return err
 }
 
 func (promoter *Promoter) treeEntry(ctx context.Context, revision, relativePath string) (string, string, error) {

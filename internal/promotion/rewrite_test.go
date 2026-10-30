@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/Wuerike/git-push-memories/internal/inbox"
-	"github.com/Wuerike/git-push-memories/internal/intake"
 	"github.com/Wuerike/git-push-memories/internal/memory"
 )
 
@@ -33,9 +32,9 @@ type rewriteFixture struct {
 func newRewriteFixture(t *testing.T) rewriteFixture {
 	t.Helper()
 	batch, proposals := newBatchPromoter(t, map[string]string{rewritePagePath: rewriteBaseline}, []inbox.Request{
-		{Title: "Wuerike é do time da camada de leitura", SuggestedAction: inbox.ActionUpdate, Target: rewritePagePath, Knowledge: "Wuerike faz parte do time da camada de leitura.", SourcePaths: []string{}},
-		{Title: "Guilherme é membro do time da camada de leitura", SuggestedAction: inbox.ActionCreate, Knowledge: "Guilherme é membro do time da camada de leitura.", SourcePaths: []string{}},
-		{Title: "Time usa Go", SuggestedAction: inbox.ActionCreate, Knowledge: "O time da camada de leitura usa Go.", SourcePaths: []string{}},
+		{Title: "Wuerike é do time da camada de leitura", Content: "Wuerike faz parte do time da camada de leitura."},
+		{Title: "Guilherme é membro do time da camada de leitura", Content: "Guilherme é membro do time da camada de leitura."},
+		{Title: "Time usa Go", Content: "O time da camada de leitura usa Go."},
 	})
 	promoter := batch.promoter
 	page, err := promoter.repository.ReadPage(context.Background(), rewritePagePath)
@@ -280,14 +279,7 @@ func TestFoldProposalValidation(t *testing.T) {
 			t.Fatalf("PreviewBatch(two rewrites) error = %v, want ErrInvalidBatch", err)
 		}
 	})
-	t.Run("rewrite accepts any suggested action", func(t *testing.T) {
-		for _, action := range []inbox.Action{inbox.ActionCreate, inbox.ActionUpdate, inbox.ActionRemove} {
-			for _, operation := range []Operation{OperationRewritePage, OperationFoldProposal} {
-				if !supports(operation, action) {
-					t.Fatalf("supports(%s, %s) = false", operation, action)
-				}
-			}
-		}
+	t.Run("rewrite of a create proposal", func(t *testing.T) {
 		single, err := fixture.promoter.Preview(ctx, PreviewRequest{Operation: OperationRewritePage, ProposalID: b, TargetPath: rewritePagePath, ContentHash: fixture.contentHash, Replacement: rewriteReplacement})
 		if err != nil || single.SectionID != "time-camada-de-leitura" {
 			t.Fatalf("Preview(rewrite of create proposal) = %+v, %v", single, err)
@@ -300,24 +292,6 @@ func TestFoldProposalValidation(t *testing.T) {
 			t.Fatal("FoldInto does not affect the batch hash or preview identity")
 		}
 	})
-}
-
-func TestRewritePageRejectsLeakedSecretInReplacement(t *testing.T) {
-	fixture := newRewriteFixture(t)
-	defer fixture.promoter.Close()
-	leaked := fixture.requests[0]
-	leaked.Replacement = "# Time da camada de leitura\n\n## Membros\n- Wuerike\n\npassword=private-value\n"
-	_, err := fixture.promoter.PreviewBatch(context.Background(), []PreviewRequest{leaked, fixture.requests[1]})
-	var rejection intake.Rejection
-	if !errors.As(err, &rejection) {
-		t.Fatalf("PreviewBatch(leaked secret) error = %v, want guard rejection", err)
-	}
-	if _, err := fixture.promoter.Preview(context.Background(), leaked); !errors.As(err, &rejection) {
-		t.Fatalf("Preview(leaked secret) error = %v, want guard rejection", err)
-	}
-	if got := readRewritePage(t, fixture); got != rewriteBaseline {
-		t.Fatalf("rejected rewrite wrote the page: %q", got)
-	}
 }
 
 func TestRewriteBatchFaultWindowsConverge(t *testing.T) {
@@ -435,9 +409,9 @@ func TestRewritePageAfterMarkerRemovalIsRecognized(t *testing.T) {
 func newCreateReplacementFixture(t *testing.T) rewriteFixture {
 	t.Helper()
 	batch, proposals := newBatchPromoter(t, nil, []inbox.Request{
-		{Title: "Wuerike é do time da camada de leitura", SuggestedAction: inbox.ActionCreate, Knowledge: "Wuerike faz parte do time da camada de leitura.", SourcePaths: []string{}},
-		{Title: "Guilherme é membro do time da camada de leitura", SuggestedAction: inbox.ActionCreate, Knowledge: "Guilherme é membro do time da camada de leitura.", SourcePaths: []string{}},
-		{Title: "Time usa Go", SuggestedAction: inbox.ActionCreate, Knowledge: "O time da camada de leitura usa Go.", SourcePaths: []string{}},
+		{Title: "Wuerike é do time da camada de leitura", Content: "Wuerike faz parte do time da camada de leitura."},
+		{Title: "Guilherme é membro do time da camada de leitura", Content: "Guilherme é membro do time da camada de leitura."},
+		{Title: "Time usa Go", Content: "O time da camada de leitura usa Go."},
 	})
 	promoter := batch.promoter
 	requests := []PreviewRequest{
@@ -547,22 +521,6 @@ func TestFoldIntoCreatePageWithoutReplacementIsInvalid(t *testing.T) {
 	if status := gitOutput(t, fixture.root, "status", "--porcelain"); status != "" {
 		t.Fatalf("rejected batch left changes: %q", status)
 	}
-}
-
-func TestCreatePageWithReplacementRejectsLeakedSecret(t *testing.T) {
-	fixture := newCreateReplacementFixture(t)
-	defer fixture.promoter.Close()
-	leaked := fixture.requests[0]
-	leaked.Replacement = "# Time da camada de leitura\n\n## Membros\n- Wuerike\n\npassword=private-value\n"
-	_, err := fixture.promoter.PreviewBatch(context.Background(), []PreviewRequest{leaked, fixture.requests[1]})
-	var rejection intake.Rejection
-	if !errors.As(err, &rejection) {
-		t.Fatalf("PreviewBatch(leaked secret) error = %v, want guard rejection", err)
-	}
-	if _, err := fixture.promoter.Preview(context.Background(), leaked); !errors.As(err, &rejection) {
-		t.Fatalf("Preview(leaked secret) error = %v, want guard rejection", err)
-	}
-	assertPageAbsent(t, fixture)
 }
 
 func TestCreatePageWithReplacementFaultWindowsConverge(t *testing.T) {

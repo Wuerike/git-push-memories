@@ -60,6 +60,16 @@ func environment() []string {
 var baseArguments = []string{"--no-optional-locks", "--no-replace-objects", "-c", "core.hooksPath=/dev/null"}
 
 func (git Git) run(ctx context.Context, input []byte, arguments ...string) (string, error) {
+	out, err := git.bytes(ctx, input, arguments...)
+	return strings.TrimSpace(string(out)), err
+}
+
+// Bytes runs a local Git command and returns stdout untouched, for blob contents.
+func (git Git) Bytes(ctx context.Context, arguments ...string) ([]byte, error) {
+	return git.bytes(ctx, nil, arguments...)
+}
+
+func (git Git) bytes(ctx context.Context, input []byte, arguments ...string) ([]byte, error) {
 	command := exec.CommandContext(ctx, "git", append(append([]string{}, baseArguments...), arguments...)...)
 	command.Dir = git.Dir
 	command.Env = environment()
@@ -69,9 +79,9 @@ func (git Git) run(ctx context.Context, input []byte, arguments ...string) (stri
 	var stdout, stderr bytes.Buffer
 	command.Stdout, command.Stderr = &stdout, &stderr
 	if err := command.Run(); err != nil {
-		return "", fmt.Errorf("git %s: %w: %s", arguments[0], err, strings.TrimSpace(stderr.String()))
+		return nil, fmt.Errorf("git %s: %w: %s", arguments[0], err, strings.TrimSpace(stderr.String()))
 	}
-	return strings.TrimSpace(stdout.String()), nil
+	return stdout.Bytes(), nil
 }
 
 // Output runs a local Git command and returns trimmed stdout.

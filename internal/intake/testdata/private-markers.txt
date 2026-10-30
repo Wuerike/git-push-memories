@@ -1,4 +1,0 @@
-Synthetic test values. These are not real credentials or personal data.
-
-secret_marker=GPM_SYNTH_SECRET_7F3C9A
-personal_marker=gpm.synthetic.person@example.invalid

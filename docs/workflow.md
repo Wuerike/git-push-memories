@@ -42,12 +42,12 @@ A resolução dos paths fica em um único ponto (`internal/config`). O restante 
 
 O remote (`origin`, no GitHub) é requisito do GPM.
 
-- `/remember` faz push na `proposals`. A confirmação do `/remember` já avisa que a proposta será enviada ao repositório compartilhado.
+- `/remember` cria a proposta na `proposals` remota pela API do GitHub (`gh api`). A confirmação do `/remember` já avisa que a proposta será enviada ao repositório compartilhado.
 - A leitura faz `fetch` periódico.
 - `/promote` grava o marcador de release com push na `proposals` (o lock) e abre o PR.
 - Os comandos do `gh` sempre levam `-R owner/repo`, e o `gh pr create` leva `--title` e `--body` (nunca interativo).
 - Operação rejeitada por falta de permissão é erro.
-- Toda chamada de rede tem timeout, e o estouro conta como falha de rede. Falha de rede não perde dados: o `/remember` commita localmente, avisa e reenvia na próxima chamada. A leitura usa o último SHA conhecido.
+- Toda chamada de rede tem timeout, e o estouro conta como falha de rede. Falha de rede no `/remember` não grava nada (a escrita é tudo ou nada): a pessoa recebe o erro e repete. A leitura usa o último SHA conhecido.
 
 ## Setup
 
@@ -61,7 +61,7 @@ Para começar a usar o GPM, a pessoa cria um repositório vazio no GitHub e roda
 - Categorias de memória (`--categories` ou prompt), necessárias só quando o repositório é criado. Com `--yes` e sem `--categories`, o comando falha pedindo a flag.
 - `--yes`, para execução sem prompts. Sem TTY e sem `--yes`, o comando falha pedindo a flag.
 
-**Pré-requisitos:** `git` com suporte a worktree, CLI do `claude`, identidade Git (`user.name` e `user.email`) e credenciais Git da pessoa para o remote. O GPM não gerencia credenciais. O `gh` instalado e autenticado só é exigido no primeiro `/promote` (verificado com `gh auth status`); quem só lê e faz `/remember` não precisa dele.
+**Pré-requisitos:** `git` com suporte a worktree, CLI do `claude`, identidade Git (`user.name` e `user.email`) e credenciais Git da pessoa para o remote. O GPM não gerencia credenciais. O `gh` instalado e autenticado, com escrita no repositório, é exigido pelo `/remember` (que grava pela API do GitHub) e pelo `/promote` (verificado com `gh auth status`); quem só lê não precisa dele.
 
 **Resolução da origem:**
 
@@ -95,10 +95,15 @@ Para começar a usar o GPM, a pessoa cria um repositório vazio no GitHub e roda
 
 ## `/remember`
 
-1. Faz `fetch` da `proposals`, para que o push seja fast-forward em relação ao que já foi enviado.
-2. Cria a proposta em `proposals/<id>-<slug>.md` no worktree `proposals` e faz um commit path-scoped.
-3. Faz push. Em caso de rejeição, faz `fetch` e `merge --no-edit origin/proposals` (nunca `pull`, que obedece ao `pull.rebase` da pessoa) e tenta de novo. Cada proposta é um arquivo único, então conflitos não são esperados. Se houver conflito, faz `merge --abort`, mantém a proposta commitada localmente e informa o erro.
-4. Se o push falhar por falta de rede, a proposta permanece commitada localmente e é enviada na próxima chamada.
+A proposta é texto livre (`title` e `content`): o código não interpreta ação nem destino, só grava o texto. A escrita é uma única chamada à API do GitHub (`gh api -X PUT repos/<owner>/<repo>/contents/proposals/<id>-<slug>.md`, branch `proposals`), sem worktree, lock nem push locais; o `slug` vem do título.
+
+1. Cria o arquivo e o commit na `proposals` remota numa só chamada: ou a proposta entra, ou nada muda.
+2. Se a branch se mover no meio (HTTP 409, outra pessoa escreveu ao mesmo tempo), repete a chamada, até 5 vezes. Cada proposta é um arquivo único, então não há conflito de conteúdo.
+3. Se falhar (sem rede, sem permissão, `gh` ausente), devolve o erro e nada é gravado. A pessoa repete o `/remember`.
+
+O worktree local `proposals` não muda na escrita. O `memory_proposal_list` (com `source: proposals`) faz um `fetch` e avança a branch local antes de listar, em modo best-effort: se o fetch falhar, lista o que foi visto por último. O `/promote` também faz `fetch` ao abrir o release.
+
+Requisito: GitHub configurado (`gh` autenticado com escrita no repositório) e acesso à rede. Não há modo offline.
 
 Nenhuma etapa do `/remember` toca a `main`.
 

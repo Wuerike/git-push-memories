@@ -40,9 +40,9 @@ func newRewriteFixture(t *testing.T, baseline bool) *rewriteFixture {
 	e := newEnv(t, files)
 	fixture := &rewriteFixture{env: e}
 	for index, title := range []string{"Wuerike é do time da camada de leitura", "Guilherme é membro do time da camada de leitura"} {
-		arguments := map[string]any{"title": title, "suggested_action": "create", "knowledge": title + ".", "source_paths": []string{"source.go"}}
+		arguments := map[string]any{"title": title, "content": title + "."}
 		if index == 0 && baseline {
-			arguments["suggested_action"], arguments["target"] = "update", rewriteBaselinePath
+			arguments["content"] = "Update " + rewriteBaselinePath + ": " + title + "."
 		}
 		proposal := e.propose(t, arguments)
 		fixture.proposal[index], fixture.paths[index] = proposal.ID, proposal.Path

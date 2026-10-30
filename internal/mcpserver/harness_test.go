@@ -53,8 +53,6 @@ type response struct {
 type inboxResponse struct {
 	SchemaVersion int             `json:"schema_version"`
 	Data          *inbox.Proposal `json:"data,omitempty"`
-	Pushed        bool            `json:"pushed"`
-	Message       string          `json:"message"`
 	Error         *struct {
 		Code string `json:"code"`
 	} `json:"error,omitempty"`

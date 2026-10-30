@@ -70,7 +70,7 @@ func Seed(t *testing.T, remote, branch string, files map[string]string) {
 	Git(t, clone, "push", "-q", "origin", branch)
 }
 
-// GH is a fake gh: auth always succeeds, and the last PR of any head is whatever the test sets.
+// GH is a fake gh: auth always succeeds, "api" commits files to the remote in GPM_FAKE_REMOTE, and the last PR of any head is whatever the test sets.
 type GH struct{ dir string }
 
 const fakeGH = `#!/usr/bin/env bash
@@ -85,14 +85,34 @@ case "$1 $2" in
     [ -f "$dir/state" ] || { [ "$2" = list ] && echo '[]' && exit 0; exit 1; }
     pr="{\"number\":$(cat "$dir/number"),\"state\":\"$(cat "$dir/state")\",\"url\":\"https://github.com/o/r/pull/$(cat "$dir/number")\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"mergeCommit\":{\"oid\":\"$(cat "$dir/oid")\"}}"
     if [ "$2" = list ]; then echo "[$pr]"; else echo "$pr"; fi ;;
+  "api -X")
+    # PUT repos/o/r/contents/<path> with a JSON body: commits the file to the branch of the bare remote in $GPM_FAKE_REMOTE.
+    [ -z "$GPM_FAKE_API_FAIL" ] || { echo "gh: $GPM_FAKE_API_FAIL" >&2; exit 1; }
+    path="$(echo "$4" | sed 's#^repos/[^/]*/[^/]*/contents/##')"
+    body="$(cat)"
+    field() { python3 -c 'import json,sys;print(json.loads(sys.argv[1])[sys.argv[2]])' "$body" "$1"; }
+    branch="$(field branch)"; message="$(field message)"
+    export GIT_DIR="$GPM_FAKE_REMOTE" GIT_INDEX_FILE="$dir/index.$$"
+    parent="$(git rev-parse "refs/heads/$branch")" || { echo "gh: Not Found (HTTP 404)" >&2; exit 1; }
+    blob="$(python3 -c 'import json,sys,base64;sys.stdout.buffer.write(base64.b64decode(json.loads(sys.argv[1])["content"]))' "$body" | git hash-object -w --stdin)"
+    git read-tree "$parent" && git update-index --add --cacheinfo "100644,$blob,$path"
+    tree="$(git write-tree)"
+    commit="$(git -c user.name=fake -c user.email=fake@example.com commit-tree "$tree" -p "$parent" -m "$message")"
+    rm -f "$GIT_INDEX_FILE"
+    git update-ref "refs/heads/$branch" "$commit" "$parent" 2>/dev/null || { echo "gh: Conflict (HTTP 409)" >&2; exit 1; }
+    echo "{\"commit\":{\"sha\":\"$commit\"}}" ;;
   *) echo "fake gh: unsupported: $*" >&2; exit 1 ;;
 esac
 `
 
-// FakeGH installs the fake gh first on PATH.
+// FakeGH installs the fake gh first on PATH, or returns the one this test already installed.
 func FakeGH(t *testing.T) *GH {
 	t.Helper()
+	if dir := os.Getenv("GPM_FAKE_GH_DIR"); dir != "" {
+		return &GH{dir: dir}
+	}
 	dir := t.TempDir()
+	t.Setenv("GPM_FAKE_GH_DIR", dir)
 	if err := os.WriteFile(filepath.Join(dir, "gh"), []byte(fakeGH), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -125,6 +145,8 @@ func Setup(t *testing.T, files map[string]string) *Managed {
 	t.Helper()
 	Env(t)
 	remote := Remote(t)
+	t.Setenv("GPM_FAKE_REMOTE", remote)
+	FakeGH(t)
 	seed := map[string]string{"gpm.json": "{\n  \"schema_version\": 1,\n  \"memory_categories\": [\"domains\", \"decision\"]\n}\n"}
 	for name, contents := range files {
 		seed[name] = contents
@@ -162,13 +184,9 @@ func (m *Managed) Remember(t *testing.T, title string) inbox.Proposal {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer box.Close()
-	proposal, err := box.Add(context.Background(), inbox.Request{Title: title, SuggestedAction: inbox.ActionCreate, Knowledge: "A durable fact about " + title + ".", SourcePaths: []string{}})
+	proposal, err := box.Add(context.Background(), inbox.Request{Title: title, Content: "Create: a durable fact about " + title + "."})
 	if err != nil {
 		t.Fatal(err)
-	}
-	if pushed, err := box.Publish(context.Background()); err != nil || !pushed {
-		t.Fatalf("Publish() = %v, %v", pushed, err)
 	}
 	return proposal
 }

@@ -36,7 +36,7 @@ Em qualquer sessao do Claude Code:
 /remember <fato>
 ```
 
-O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. Fontes commitadas passam por `memory_reference_snapshot`; somente repository lineage, revisao completa, path relativo e hash do blob entram na proposta v2, nunca o root local. A proposta e commitada na `proposals` e enviada ao remote; sem rede, fica local e segue no proximo `/remember`.
+O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta e texto livre (`title` e `content`): acao sugerida, destino e origem, se importarem, vao escritos no texto. Ela e criada na `proposals` remota pela API do GitHub (`gh` autenticado e rede sao requisitos); se falhar, nada e gravado e o `/remember` e repetido.
 
 Para consolidar as propostas pendentes em memoria canonica:
 
@@ -44,14 +44,13 @@ Para consolidar as propostas pendentes em memoria canonica:
 /promote
 ```
 
-A skill abre (ou retoma) o release, agrupa todas as propostas por assunto ou pagina, mostra plano, diff e evidencias e aplica lotes de ate dezesseis decisoes, cada um confirmado pela pessoa, ate nao restar nenhuma proposta. Entao envia o release para revisao: push da branch e pull request para a `main` (via `gh`). O merge e humano; o proximo `/promote` ou `gpm promote --finish` finaliza o release. O preview apresenta candidatos canonicos, propostas relacionadas e referencia por referencia os estados `verified`, `unavailable`, `mismatch` ou `legacy_unverified`; integridade nao implica que a fonte sustenta a afirmacao, avaliada a parte como `supports`, `contradicts` ou `unclear`.
+A skill abre (ou retoma) o release, agrupa todas as propostas por assunto ou pagina, mostra plano, diff e evidencias e aplica lotes de ate dezesseis decisoes, cada um confirmado pela pessoa, ate nao restar nenhuma proposta. Entao envia o release para revisao: push da branch e pull request para a `main` (via `gh`). O merge e humano; o proximo `/promote` ou `gpm promote --finish` finaliza o release. O preview apresenta candidatos canonicos e propostas relacionadas.
 
 Release abandonado: `gpm promote --resume` (continua; cria outro PR se o anterior foi fechado) ou `gpm promote --abort`.
 
 O servidor expoe:
 
 - `memory_search`, `memory_expand`, `memory_page_read` (aceitam `source: release`);
-- `memory_reference_snapshot`, `memory_reference_expand`;
 - `memory_propose`, `memory_proposal_list`;
 - `memory_promote_open`, `memory_promote_status`, `memory_promote_submit`;
 - `memory_promote_preview`, `memory_promote_apply`, `memory_promote_batch_preview`, `memory_promote_batch_apply`.

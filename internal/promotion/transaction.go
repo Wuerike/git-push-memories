@@ -518,10 +518,7 @@ func (promoter *Promoter) commitBatch(ctx context.Context, batch BatchPreview, v
 
 func (promoter *Promoter) applyWorktree(ctx context.Context, preview Preview) error {
 	preflight := func() error {
-		if err := promoter.inbox.Confirm(ctx, preview.proposal); err != nil {
-			return err
-		}
-		return promoter.inspect(preview.proposal.Proposal)
+		return promoter.inbox.Confirm(ctx, preview.proposal)
 	}
 	validate := func(postState []byte) error {
 		if !bytes.Equal(postState, preview.postState) {
@@ -534,12 +531,12 @@ func (promoter *Promoter) applyWorktree(ctx context.Context, preview Preview) er
 	switch preview.Operation {
 	case OperationCreatePage:
 		result, err = promoter.repository.ReconcileCreatePage(ctx, memory.ReconcileCreatePageRequest{
-			CreatePageRequest: memory.CreatePageRequest{TargetPath: preview.TargetPath, Title: preview.Title, Body: preview.proposal.Proposal.Knowledge, Replacement: preview.Replacement},
+			CreatePageRequest: memory.CreatePageRequest{TargetPath: preview.TargetPath, Title: preview.Title, Body: preview.proposal.Proposal.Content, Replacement: preview.Replacement},
 			PostStateHash:     preview.postStateHash, Head: preview.head, Preflight: preflight, Validate: validate, Mode: memory.ApplyBaseline,
 		})
 	case OperationCreateSection:
 		result, err = promoter.repository.ReconcileCreateSection(ctx, memory.ReconcileCreateSectionRequest{
-			CreateSectionRequest: memory.CreateSectionRequest{TargetPath: preview.TargetPath, Heading: preview.Heading, Body: preview.proposal.Proposal.Knowledge},
+			CreateSectionRequest: memory.CreateSectionRequest{TargetPath: preview.TargetPath, Heading: preview.Heading, Body: preview.proposal.Proposal.Content},
 			ExpectedSectionID:    preview.SectionID, BaselineHash: preview.baselineHash, PostStateHash: preview.postStateHash,
 			Head: preview.head, Blob: preview.baselineBlob, Preflight: preflight,
 			Validate: func(baseline, postState []byte) error {

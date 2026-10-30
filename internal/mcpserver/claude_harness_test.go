@@ -82,14 +82,11 @@ func TestClaudeAdapterCommitsProposalToMemoryRepository(t *testing.T) {
 	h := newHarness(t, map[string]string{checkoutPath: memoryPage})
 	session := h.connect(t, "claude-harness")
 	result := e2eCall(t, session, "memory_propose", map[string]any{
-		"title":            "Update checkout timeout",
-		"suggested_action": "update",
-		"target":           checkoutPath,
-		"knowledge":        "The checkout timeout is five seconds.",
-		"source_paths":     []string{"services/checkout.go"},
+		"title":   "Update checkout timeout",
+		"content": "The checkout timeout is five seconds.",
 	})
 	response := decodeInboxResponse(t, result)
-	if response.Data == nil || !response.Pushed {
+	if response.Data == nil {
 		t.Fatalf("proposal result = %+v, response = %+v", result, response)
 	}
 	if err := session.Close(); err != nil {
@@ -97,18 +94,17 @@ func TestClaudeAdapterCommitsProposalToMemoryRepository(t *testing.T) {
 	}
 
 	proposals := h.m.Config.Paths.Proposals
-	proposalContents, err := os.ReadFile(filepath.Join(proposals, filepath.FromSlash(response.Data.Path)))
-	if err != nil || !strings.Contains(string(proposalContents), "# Update checkout timeout") {
-		t.Fatalf("proposal Markdown = %q, %v", proposalContents, err)
+	if remote := gitOutput(t, h.m.Remote, "show", response.Data.Commit+":"+response.Data.Path); remote != "The checkout timeout is five seconds." {
+		t.Fatalf("remote proposal Markdown = %q", remote)
+	}
+	if gitOutput(t, h.m.Remote, "rev-parse", "refs/heads/proposals") != response.Data.Commit {
+		t.Fatal("remote proposals does not point at the proposal commit")
 	}
 	if contents := readFile(t, proposals, checkoutPath); contents != memoryPage {
 		t.Fatal("proposal changed canonical memory")
 	}
 	if status := gitOutput(t, proposals, "status", "--porcelain=v1"); status != "" {
-		t.Fatalf("proposal commit left Git dirty: %s", status)
-	}
-	if pushed, head := gitOutput(t, h.m.Remote, "rev-parse", "refs/heads/proposals"), gitOutput(t, proposals, "rev-parse", "HEAD"); pushed != head {
-		t.Fatalf("remote proposals = %s, want %s", pushed, head)
+		t.Fatalf("proposal left Git dirty: %s", status)
 	}
 	if main := gitOutput(t, h.m.Remote, "ls-tree", "-r", "--name-only", "main"); strings.Contains(main, "proposals/") {
 		t.Fatalf("proposal reached main: %q", main)
@@ -119,8 +115,7 @@ func TestClaudeAdapterPromotesCreateProposalForFreshProcessRetrieval(t *testing.
 	h := newHarness(t, nil)
 	session := h.connect(t, "claude-promotion-harness")
 	proposal := decodeInboxResponse(t, e2eCall(t, session, "memory_propose", map[string]any{
-		"title": "Settlement retry policy", "suggested_action": "create",
-		"knowledge": "Settlement retries stop after three failures.", "source_paths": []string{},
+		"title": "Settlement retry policy", "content": "Settlement retries stop after three failures.",
 	})).Data
 	e2eOpenRelease(t, session)
 	token := e2eToken(t, e2eCall(t, session, "memory_promote_preview", map[string]any{
@@ -156,8 +151,7 @@ func TestClaudeAdapterPromotesUpdateForFreshProcessRetrieval(t *testing.T) {
 	}
 	handle := search.Data.Items[0].Handle
 	proposal := decodeInboxResponse(t, e2eCall(t, session, "memory_propose", map[string]any{
-		"title": "Update checkout timeout", "suggested_action": "update", "target": handle.Path,
-		"knowledge": "The checkout timeout is five seconds.", "source_paths": []string{},
+		"title": "Update checkout timeout", "content": "The checkout timeout is five seconds.",
 	})).Data
 	e2eOpenRelease(t, session)
 	token := e2eToken(t, e2eCall(t, session, "memory_promote_preview", map[string]any{
@@ -188,12 +182,10 @@ func TestE2EReadingTeamPageIsRestructuredByRewrite(t *testing.T) {
 	h := newHarness(t, map[string]string{rewriteBaselinePath: rewriteBaselinePage})
 	session := h.connect(t, "e2e-rewrite")
 	first := e2ePropose(t, session, map[string]any{
-		"title": "Wuerike é do time da camada de leitura", "suggested_action": "update", "target": rewriteBaselinePath,
-		"knowledge": "Wuerike faz parte do time da camada de leitura.", "source_paths": []string{},
+		"title": "Wuerike é do time da camada de leitura", "content": "Wuerike faz parte do time da camada de leitura.",
 	})
 	second := e2ePropose(t, session, map[string]any{
-		"title": "Guilherme é membro do time da camada de leitura", "suggested_action": "update", "target": rewriteBaselinePath,
-		"knowledge": "Guilherme é membro do time da camada de leitura.", "source_paths": []string{},
+		"title": "Guilherme é membro do time da camada de leitura", "content": "Guilherme é membro do time da camada de leitura.",
 	})
 	e2eOpenRelease(t, session)
 	release := h.m.Config.Paths.Release
@@ -220,12 +212,10 @@ func TestE2ENewTeamPageIsCreatedFromTwoProposalsInOneRun(t *testing.T) {
 	h := newHarness(t, nil)
 	session := h.connect(t, "e2e-create-fold")
 	first := e2ePropose(t, session, map[string]any{
-		"title": "Wuerike é do time da camada de leitura", "suggested_action": "create",
-		"knowledge": "Wuerike faz parte do time da camada de leitura.", "source_paths": []string{},
+		"title": "Wuerike é do time da camada de leitura", "content": "Wuerike faz parte do time da camada de leitura.",
 	})
 	second := e2ePropose(t, session, map[string]any{
-		"title": "Guilherme é membro do time da camada de leitura", "suggested_action": "create",
-		"knowledge": "Guilherme é membro do time da camada de leitura.", "source_paths": []string{},
+		"title": "Guilherme é membro do time da camada de leitura", "content": "Guilherme é membro do time da camada de leitura.",
 	})
 	e2eOpenRelease(t, session)
 	release := h.m.Config.Paths.Release

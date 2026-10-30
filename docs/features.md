@@ -42,7 +42,7 @@ Ambos so rodam quando invocados pela pessoa e exigem confirmacao explicita antes
 
 | Comando | O que acontece | Efeito |
 |---|---|---|
-| `/remember <fato>` | Interpreta o fato, pesquisa a memoria e as propostas pendentes para sugerir alvo e acao (`create`, `update` ou `remove`) e avisar de propostas ja pendentes sobre o mesmo assunto, e mostra os campos exatos. A busca e orientacao, nao deteccao de duplicidade ou contradicao. Apos confirmar, chama `memory_propose`. | Um commit na `proposals` que adiciona `proposals/<id>-<slug>.md`, enviado ao remote (`pushed`). Sem rede, fica local e e reenviado no proximo `/remember`. A memoria canonica nao muda. |
+| `/remember <fato>` | Interpreta o fato, pesquisa a memoria e as propostas pendentes para sugerir alvo e acao (`create`, `update` ou `remove`) e avisar de propostas ja pendentes sobre o mesmo assunto, e mostra os campos exatos. A busca e orientacao, nao deteccao de duplicidade ou contradicao. Apos confirmar, chama `memory_propose`. | Um commit na `proposals` que adiciona `proposals/<id>-<slug>.md`, criado direto no remote pela API do GitHub, em uma chamada. Se falhar, nada e gravado e a pessoa repete o `/remember`. A memoria canonica nao muda. |
 | `/promote` | Abre (ou retoma) o release, agrupa **todas** as propostas por assunto/pagina, classifica cada candidato canonico, fato da pagina e proposta relacionada como `equivalent`, `contradictory`, `related` ou `unrelated` e as consolida em lotes de ate 16, com plano, diff e evidencias; ao zerar, envia para revisao. | Um commit por lote na `release` (memoria + remocao das propostas); push da branch e PR para a `main`. Merge e revisao sao humanos (squash recomendado). |
 
 Decisoes possiveis em `/promote`:
@@ -58,16 +58,15 @@ Decisoes possiveis em `/promote`:
 
 Duplicidade e contradicao sao tratadas aqui, por decisao de design: a consolidacao e o unico ponto em que todas as propostas e a pagina canonica completa aparecem juntas. O agente classifica e resolve com `fold_proposal` ou `discard_proposal` (`duplicate`, `superseded`); a pessoa confirma cada lote e revisa o PR. O inbox pode conter propostas repetidas ou conflitantes sem dano, pois nada nele e memoria canonica.
 
-Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Regras do lote: targets canonicos distintos (exceto folds), preview de uso unico, e qualquer mudanca de `HEAD`, conteudo ou integridade de referencia invalida o preview.
+Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Regras do lote: targets canonicos distintos (exceto folds), preview de uso unico, e qualquer mudanca de `HEAD` ou conteudo invalida o preview.
 
 ## 4. Ferramentas MCP
 
 | Tool | Le/escreve | Efeito |
 |---|---|---|
 | `memory_search`, `memory_expand`, `memory_page_read` | le | Busca, expansao por handle e pagina inteira com `content_hash`. `source`: `main` (padrao) ou `release`. |
-| `memory_proposal_list` | le | Propostas revalidadas e categorias. `source`: `proposals` (padrao) ou `release`. |
-| `memory_reference_snapshot`, `memory_reference_expand` | le | Referencias imutaveis a blobs de um checkout local de codigo e trechos de linhas. |
-| `memory_propose` | **escreve** | Commit da proposta na `proposals` e push (`pushed`, `message`). |
+| `memory_proposal_list` | le | Propostas (texto livre; arquivos ilegiveis sao ignorados) e categorias. `source`: `proposals` (padrao) ou `release`. |
+| `memory_propose` | **escreve** | `title` e `content` livres; commit da proposta na `proposals` remota via API do GitHub (`gh api`), tudo ou nada. Erros: `invalid_proposal`, `gh_unavailable`, `push_denied`, `proposal_failed`. |
 | `memory_promote_open`, `memory_promote_status` | **escreve** / le | Abre (marcador enviado = lock) ou retoma o release; mostra pendentes. |
 | `memory_promote_preview`, `memory_promote_batch_preview` | le | Diff e evidencias de 1 a 16 decisoes na `release`, com token de uso unico. |
 | `memory_promote_apply`, `memory_promote_batch_apply` | **escreve** | Consome o token e cria o commit do lote na `release`. |
@@ -75,15 +74,15 @@ Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Reg
 
 ## 5. Restricoes que o usuario sente
 
-- **Worktrees gerenciados**: o GPM so escreve nos seus worktrees; se um deles for alterado por fora o comando falha (`wrong_branch`, `worktree_dirty`). Commits ignoram hooks, assinatura e templates da configuracao Git da pessoa.
+- **Worktrees gerenciados**: o GPM so escreve nos seus worktrees (o `/remember` nao usa worktree); se um deles for alterado por fora o `/promote` falha (`wrong_branch`, `worktree_dirty`). Commits ignoram hooks, assinatura e templates da configuracao Git da pessoa.
 - **Leitura**: sempre da `main` publicada; uma mudanca pode levar ate 10 min (mais uma leitura) para aparecer, exceto apos `/promote` ou `--finish`, que atualizam na hora.
 - **Rede**: toda chamada tem timeout. Falha de rede nao perde dados no `/remember`; permissao negada e erro.
 - **Concorrencia**: locks serializam sessoes na mesma maquina; entre maquinas, o marcador `release.lock.json` enviado a `proposals` e o lock do release.
 - **Recovery**: uma promocao interrompida converge para o estado anterior ao avanco da `release` ou para o commit completo; lock de outro processo nunca e removido. Falha de recovery desabilita so o `/promote`.
-- **Privacidade (fail-closed)**: o payload da proposta e validado antes de qualquer arquivo ou objeto Git. Bloqueia chaves, tokens, autorizacao, e-mail, telefone, CPF e referencias de sessao.
+- **Privacidade**: o codigo nao filtra o conteudo da proposta (sem guard de segredos/PII). A barreira e a skill `remember` e a confirmacao humana no `/remember` e no `/promote`. Uma proposta enviada fica no historico da `proposals` mesmo se descartada depois.
 - **Duplicidade e contradicao**: a classificacao e feita pelo agente seguindo a skill, sem verificacao em codigo; a qualidade depende do agente e da revisao humana (confirmacao de cada lote e PR).
-- **Fontes**: `source_paths` (v1) aparecem como `legacy_unverified`; `source_references` (v2) sao `verified` somente com o checkout local vinculado. Integridade nao prova que a fonte sustenta o fato.
-- **GitHub**: o `/promote` exige `gh` instalado e autenticado; todos os comandos levam `-R owner/repo`.
+- **Fontes**: a proposta nao carrega fonte estruturada; se a origem importa, a skill `remember` a escreve no texto.
+- **GitHub**: o `/remember` e o `/promote` exigem `gh` instalado e autenticado (com escrita no repositorio) e rede; todos os comandos levam `-R owner/repo`.
 
 ## 6. Parcial
 
@@ -93,7 +92,7 @@ Existe, mas com limite conhecido.
 - **Validacao por agentes**: o `/promote` guia o agente com preview e evidencias, mas nao ha criterios automaticos para aceitar, rejeitar ou pedir revisao.
 - **Busca**: textual, sem ranking semantico.
 - **Release sem dono**: `--resume` e `--abort` valem para qualquer pessoa.
-- **Forge**: so GitHub (via `gh`), e so o `/promote` o exige.
+- **Forge**: so GitHub (via `gh`), exigido pelo `/remember` e pelo `/promote`. Nao ha modo offline.
 - **Plataformas**: so Linux (`amd64` e `arm64`).
 - **Escopo de uso**: um repositorio de memoria por pessoa; validado com um desenvolvedor.
 
