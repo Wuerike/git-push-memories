@@ -1,3 +1,5 @@
 .artifacts/
 .claude
 .local
+.agents
+.codex
