@@ -15,17 +15,16 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/claudecode"
 	"github.com/Wuerike/git-push-memories/internal/config"
-	"github.com/Wuerike/git-push-memories/internal/forge/github"
+	"github.com/Wuerike/git-push-memories/internal/consolidation"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
 	"github.com/Wuerike/git-push-memories/internal/protocol"
-	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/setup"
 )
 
 const usage = `Usage:
   gpm setup <repository-url> [--categories a,b] [--yes]
-  gpm promote --resume|--abort|--finish [--yes]
+  gpm promote --finish
   gpm mcp
   gpm retrieve <query> --budget-bytes <n>
   gpm version
@@ -203,24 +202,15 @@ func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	return 0
 }
 
-func runPromote(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runPromote(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("promote", flag.ContinueOnError)
 	flags.SetOutput(stderr)
-	resume := flags.Bool("resume", false, "continue the release in progress here, sending it for review when nothing is pending")
-	abort := flags.Bool("abort", false, "drop the release in progress; proposals stay on the proposals branch")
-	finish := flags.Bool("finish", false, "finalize a release whose pull request was merged")
-	yes := flags.Bool("yes", false, "do not ask for confirmation")
+	finish := flags.Bool("finish", false, "confirm the published PR merge and remove concluded proposals")
 	if err := flags.Parse(args); err != nil || flags.NArg() != 0 {
 		return 2
 	}
-	chosen := 0
-	for _, flagged := range []bool{*resume, *abort, *finish} {
-		if flagged {
-			chosen++
-		}
-	}
-	if chosen != 1 {
-		fmt.Fprintln(stderr, "promote needs exactly one of --resume, --abort or --finish")
+	if !*finish {
+		fmt.Fprintln(stderr, "promote needs --finish; start consolidation with /promote in Claude Code")
 		return 2
 	}
 	cfg, err := config.Load()
@@ -228,66 +218,19 @@ func runPromote(ctx context.Context, args []string, stdin io.Reader, stdout, std
 		fmt.Fprintln(stderr, err)
 		return 2
 	}
-	manager := release.New(cfg)
-	reader := bufio.NewReader(stdin)
-	confirm := func(question string) bool {
-		if *yes {
-			return true
-		}
-		fmt.Fprintf(stdout, "%s [y/N] ", question)
-		answer, _ := reader.ReadString('\n')
-		return strings.EqualFold(strings.TrimSpace(answer), "y")
+	result, err := consolidation.New(cfg).Finish(ctx)
+	if err != nil {
+		fmt.Fprintln(stderr, err)
+		return 1
 	}
-	switch {
-	case *resume:
-		status, err := manager.Resume(ctx)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		fmt.Fprintf(stdout, "Release %s: %d proposal(s) pending.\n", status.Marker.ReleaseBranch, len(status.Pending))
-		if len(status.Pending) > 0 {
-			fmt.Fprintln(stdout, "Run /promote in Claude Code to continue consolidating.")
-			return 0
-		}
-		url, err := manager.Submit(ctx)
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if url == "" {
-			fmt.Fprintln(stdout, "The release pull request was already merged; the release is finalized.")
-			return 0
-		}
-		fmt.Fprintf(stdout, "Pull request: %s\n", url)
-	case *abort:
-		if !confirm("Abort the release in progress? Proposals stay in the inbox; consolidation work is lost.") {
-			fmt.Fprintln(stderr, "aborted by the user")
-			return 1
-		}
-		if err := manager.Abort(ctx); err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		fmt.Fprintln(stdout, "Release aborted.")
-	case *finish:
-		outcome, err := manager.Finalize(ctx, false)
-		if errors.Is(err, github.ErrUnavailable) || errors.Is(err, github.ErrNotGitHub) {
-			if !confirm("gh cannot confirm the merge. Was the release pull request merged into main?") {
-				fmt.Fprintln(stderr, "not finalized")
-				return 1
-			}
-			outcome, err = manager.Finalize(ctx, true)
-		}
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
-		if outcome != release.Finalized {
-			fmt.Fprintln(stdout, "The release pull request is not merged yet.")
-			return 1
-		}
-		fmt.Fprintln(stdout, "Release finalized.")
+	if !result.Found {
+		fmt.Fprintln(stdout, "No published promotion to finish.")
+		return 1
 	}
+	if !result.Merged {
+		fmt.Fprintln(stdout, "The promotion pull request is not merged yet.")
+		return 1
+	}
+	fmt.Fprintf(stdout, "Promotion finished: %d proposal(s) removed; %d changed input(s) preserved.\n", len(result.Removed), len(result.Preserved))
 	return 0
 }

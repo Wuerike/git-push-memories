@@ -241,15 +241,17 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] A ajuda e o parser expõem a conclusão explícita, sem comandos de retomada/aborto ou CLI completa paralela.
-- [ ] O comando usa confirmação real do GitHub e reporta seus resultados/erros.
-- [ ] Substituir somente testes das flags/comportamentos removidos; preservar setup, retrieve, MCP e help/version existentes.
-- [ ] Os testes de CLI e a suíte completa passam; registrar contagem real.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] A ajuda e o parser expõem a conclusão explícita, sem comandos de retomada/aborto ou CLI completa paralela.
+- [x] O comando usa confirmação real do GitHub e reporta seus resultados/erros.
+- [x] Substituir somente testes das flags/comportamentos removidos; preservar setup, retrieve, MCP e help/version existentes.
+- [x] Os testes de CLI e a suíte completa passam; registrar contagem real.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: integration; atualizar internal/app/app_test.go com pelo menos 3 testes para conclusão, merge ainda aberto e rejeição das flags removidas.
 **Gate**: Full — go test ./...
 **Commit**: `refactor(cli): finish publications without release state`
+
+**Result**: Complete — 7 testes nomeados de promoção na CLI e gate completo passaram; sem resume/abort/yes e sem fallback manual de merge; regressões de setup, captura/leitura e URL preservadas.
 
 ### T9: Reescrever o skill para consolidação pelo agente
 
@@ -504,9 +506,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T7 concluídas e verificadas; próxima T8. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T8 concluídas e verificadas; próxima T9. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
-**Current:** T7 concluída com gate verde; próxima T8.
+**Current:** T8 concluída com gate verde; próxima T9.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 

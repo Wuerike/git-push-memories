@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/consolidation"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	wt "github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -218,194 +219,6 @@ func TestSetupFlagsAndErrors(t *testing.T) {
 	})
 }
 
-func TestPromoteFlagValidation(t *testing.T) {
-	wt.Setup(t, nil)
-	for _, args := range [][]string{
-		{"promote"},
-		{"promote", "--yes"},
-		{"promote", "--resume", "--abort"},
-		{"promote", "--abort", "--finish"},
-		{"promote", "--bogus"},
-		{"promote", "--abort", "extra"},
-	} {
-		if code, stdout, _ := run(args...); code != 2 || strings.Contains(stdout, "aborted") {
-			t.Fatalf("%v: exit = %d, stdout = %q, want 2", args, code, stdout)
-		}
-	}
-	code, _, stderr := run("promote")
-	if code != 2 || !strings.Contains(stderr, "exactly one of --resume, --abort or --finish") {
-		t.Fatalf("stderr = %q", stderr)
-	}
-}
-
-func TestPromoteRequiresSetup(t *testing.T) {
-	wt.Env(t)
-	code, _, stderr := run("promote", "--abort", "--yes")
-	if code != 2 || !strings.Contains(stderr, "run setup first") {
-		t.Fatalf("exit = %d, stderr = %q", code, stderr)
-	}
-}
-
-func TestPromoteAbort(t *testing.T) {
-	t.Run("declined confirmation keeps the release", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		managed.Remember(t, "Checkout timeout")
-		managed.OpenRelease(t)
-		before := remoteRef(t, managed.Remote, "refs/heads/proposals")
-		code, stdout, stderr := runWithInput("n\n", "promote", "--abort")
-		if code != 1 || !strings.Contains(stderr, "aborted by the user") || !strings.Contains(stdout, "[y/N]") {
-			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if remoteRef(t, managed.Remote, "refs/heads/proposals") != before {
-			t.Fatal("declined abort changed the remote")
-		}
-	})
-
-	t.Run("--yes drops the lock and keeps the proposals", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		proposal := managed.Remember(t, "Checkout timeout")
-		status := managed.OpenRelease(t)
-		if wt.Git(t, managed.Remote, "cat-file", "-t", "proposals:release.lock.json") != "blob" {
-			t.Fatal("open did not publish the marker")
-		}
-		code, stdout, stderr := run("promote", "--abort", "--yes")
-		if code != 0 || !strings.Contains(stdout, "Release aborted.") {
-			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if err := exec.Command("git", "-C", managed.Remote, "cat-file", "-e", "proposals:release.lock.json").Run(); err == nil {
-			t.Fatal("abort left the release marker on the remote")
-		}
-		if wt.Git(t, managed.Remote, "ls-tree", "--name-only", "proposals", proposal.Path) == "" {
-			t.Fatal("abort removed the proposal")
-		}
-		if _, err := os.Stat(status.ReleaseRoot); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("abort left the release worktree: %v", err)
-		}
-	})
-
-	t.Run("without a release it succeeds idempotently", func(t *testing.T) {
-		wt.Setup(t, nil)
-		if code, stdout, stderr := run("promote", "--abort", "--yes"); code != 0 || !strings.Contains(stdout, "Release aborted.") {
-			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-	})
-}
-
-func TestPromoteResume(t *testing.T) {
-	t.Run("without a release it fails", func(t *testing.T) {
-		wt.Setup(t, nil)
-		code, _, stderr := run("promote", "--resume")
-		if code != 1 || !strings.Contains(stderr, "no release in progress") {
-			t.Fatalf("exit = %d, stderr = %q", code, stderr)
-		}
-	})
-
-	t.Run("pending proposals are reported and nothing is sent", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		managed.Remember(t, "Checkout timeout")
-		managed.OpenRelease(t)
-		code, stdout, stderr := run("promote", "--resume")
-		if code != 0 || !strings.Contains(stdout, "1 proposal(s) pending") || !strings.Contains(stdout, "/promote") {
-			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-	})
-}
-
-func TestPromoteFinish(t *testing.T) {
-	// The release PR is merged: its merge commit is on the remote main.
-	mergeInto := func(t *testing.T, managed *wt.Managed) string {
-		t.Helper()
-		managed.PublishMain(t, map[string]string{"memories/domains/checkout-api.md": "# checkout-api\n"})
-		return wt.Git(t, managed.Remote, "rev-parse", "main")
-	}
-
-	t.Run("a merged pull request finalizes the release", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		gh := wt.FakeGH(t)
-		proposal := managed.Remember(t, "Checkout timeout")
-		managed.OpenRelease(t)
-		gh.SetPR(t, "MERGED", mergeInto(t, managed))
-		code, stdout, stderr := run("promote", "--finish", "--yes")
-		if code != 0 || !strings.Contains(stdout, "Release finalized.") {
-			t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if err := exec.Command("git", "-C", managed.Remote, "cat-file", "-e", "proposals:release.lock.json").Run(); err == nil {
-			t.Fatal("finish left the release marker")
-		}
-		if listed := wt.Git(t, managed.Remote, "ls-tree", "-r", "--name-only", "proposals"); strings.Contains(listed, proposal.Path) {
-			t.Fatalf("finish left the consumed proposal: %s", listed)
-		}
-	})
-
-	t.Run("an open pull request is not finalized", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		gh := wt.FakeGH(t)
-		managed.Remember(t, "Checkout timeout")
-		managed.OpenRelease(t)
-		gh.SetPR(t, "OPEN", "")
-		code, stdout, _ := run("promote", "--finish", "--yes")
-		if code != 1 || !strings.Contains(stdout, "not merged yet") {
-			t.Fatalf("exit = %d, stdout = %q", code, stdout)
-		}
-		if wt.Git(t, managed.Remote, "cat-file", "-t", "proposals:release.lock.json") != "blob" {
-			t.Fatal("unmerged finish dropped the marker")
-		}
-	})
-
-	t.Run("a closed pull request is reported", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		gh := wt.FakeGH(t)
-		managed.Remember(t, "Checkout timeout")
-		managed.OpenRelease(t)
-		gh.SetPR(t, "CLOSED", "")
-		code, _, stderr := run("promote", "--finish", "--yes")
-		if code != 1 || !strings.Contains(stderr, "closed without merging") {
-			t.Fatalf("exit = %d, stderr = %q", code, stderr)
-		}
-	})
-
-	t.Run("without gh the person vouches for the merge", func(t *testing.T) {
-		managed := wt.Setup(t, nil)
-		managed.Remember(t, "Checkout timeout")
-		managed.OpenRelease(t)
-		mergeInto(t, managed)
-		// Only git on PATH: gh is unavailable.
-		bin := t.TempDir()
-		gitPath, err := exec.LookPath("git")
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
-			t.Fatal(err)
-		}
-		t.Setenv("PATH", bin)
-
-		code, stdout, stderr := runWithInput("n\n", "promote", "--finish")
-		if code != 1 || !strings.Contains(stderr, "not finalized") || !strings.Contains(stdout, "Was the release pull request merged") {
-			t.Fatalf("declined: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if wt.Git(t, managed.Remote, "cat-file", "-t", "proposals:release.lock.json") != "blob" {
-			t.Fatal("declined finish dropped the marker")
-		}
-		code, stdout, stderr = run("promote", "--finish", "--yes")
-		if code != 0 || !strings.Contains(stdout, "Release finalized.") {
-			t.Fatalf("vouched: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if err := exec.Command("git", "-C", managed.Remote, "cat-file", "-e", "proposals:release.lock.json").Run(); err == nil {
-			t.Fatal("vouched finish left the marker")
-		}
-	})
-
-	t.Run("without a release it fails", func(t *testing.T) {
-		wt.Setup(t, nil)
-		wt.FakeGH(t)
-		code, _, stderr := run("promote", "--finish", "--yes")
-		if code != 1 || !strings.Contains(stderr, "no release in progress") {
-			t.Fatalf("exit = %d, stderr = %q", code, stderr)
-		}
-	})
-}
-
 func TestMCPRequiresSetup(t *testing.T) {
 	wt.Env(t)
 	var stdout, stderr bytes.Buffer
@@ -427,7 +240,7 @@ func TestMCPDoesNotExposeConfiguredURL(t *testing.T) {
 	if err := config.Save(secretURL); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"mcp"}, {"retrieve", "query", "--budget-bytes", "1024"}, {"promote", "--abort", "--yes"}} {
+	for _, args := range [][]string{{"mcp"}, {"retrieve", "query", "--budget-bytes", "1024"}, {"promote", "--finish"}} {
 		code, stdout, stderr := run(args...)
 		if code == 0 {
 			t.Fatalf("%v: exit code = 0, want failure", args)
@@ -620,4 +433,127 @@ func treeFingerprint(t *testing.T, root string) string {
 		t.Fatal(err)
 	}
 	return fmt.Sprintf("%x", hash.Sum(nil))
+}
+
+func TestPromoteFlagValidation(t *testing.T) {
+	wt.Setup(t, nil)
+	for _, args := range [][]string{{"promote"}, {"promote", "--yes"}, {"promote", "--resume"}, {"promote", "--abort"}, {"promote", "--finish", "extra"}, {"promote", "--finish", "--yes"}, {"promote", "--bogus"}} {
+		code, stdout, _ := run(args...)
+		if code != 2 || strings.Contains(stdout, "finished") {
+			t.Fatalf("%v: exit=%d stdout=%q", args, code, stdout)
+		}
+	}
+	code, _, stderr := run("promote")
+	if code != 2 || !strings.Contains(stderr, "needs --finish") {
+		t.Fatalf("missing finish: %d %q", code, stderr)
+	}
+}
+
+func TestPromoteRequiresSetup(t *testing.T) {
+	wt.Env(t)
+	code, _, stderr := run("promote", "--finish")
+	if code != 2 || !strings.Contains(stderr, "run setup first") {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
+}
+
+func publishedCLIPromotion(t *testing.T) (*wt.Managed, consolidation.Prepared, string) {
+	t.Helper()
+	managed := wt.Setup(t, nil)
+	proposal := managed.Remember(t, "Checkout timeout")
+	manager := consolidation.New(managed.Config)
+	prepared, err := manager.Prepare(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(prepared.Worktree, "memories/domains/checkout-timeout.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# Checkout timeout\nThe timeout is nine seconds.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Check(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Submit(context.Background(), proposal.ID+" creates checkout timeout memory."); err != nil {
+		t.Fatal(err)
+	}
+	return managed, prepared, proposal.Path
+}
+
+func TestPromoteFinishConfirmsMergeAndCleansApprovedInputs(t *testing.T) {
+	managed, prepared, proposalPath := publishedCLIPromotion(t)
+	clone := filepath.Join(t.TempDir(), "review")
+	wt.Git(t, filepath.Dir(clone), "clone", "-q", "-b", "main", managed.Remote, clone)
+	wt.Git(t, clone, "merge", "--squash", "origin/"+prepared.Branch)
+	wt.Git(t, clone, "commit", "-q", "-m", "Reviewed consolidation")
+	wt.Git(t, clone, "push", "-q", "origin", "main")
+	merged := wt.Git(t, clone, "rev-parse", "HEAD")
+	wt.FakeGH(t).SetPR(t, "MERGED", merged)
+	code, stdout, stderr := run("promote", "--finish")
+	if code != 0 || !strings.Contains(stdout, "Promotion finished: 1 proposal(s) removed") || stderr != "" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if paths := wt.Git(t, managed.Remote, "ls-tree", "-r", "--name-only", "proposals", "--", proposalPath); paths != "" {
+		t.Fatalf("concluded proposal remains: %s", paths)
+	}
+	if _, err := os.Stat(managed.Config.Paths.Published); !os.IsNotExist(err) {
+		t.Fatalf("publication record remains: %v", err)
+	}
+	if wt.Git(t, managed.Config.Paths.Read, "rev-parse", "HEAD") != merged {
+		t.Fatal("CLI did not refresh published reads")
+	}
+}
+
+func TestPromoteFinishWaitsForConfirmedMerge(t *testing.T) {
+	managed, _, proposalPath := publishedCLIPromotion(t)
+	before := wt.Git(t, managed.Remote, "show-ref")
+	code, stdout, stderr := run("promote", "--finish")
+	if code != 1 || !strings.Contains(stdout, "not merged yet") || stderr != "" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if wt.Git(t, managed.Remote, "show-ref") != before || wt.Git(t, managed.Remote, "ls-tree", "-r", "--name-only", "proposals", "--", proposalPath) == "" {
+		t.Fatal("open PR cleanup changed the inbox")
+	}
+}
+
+func TestPromoteFinishReportsMissingGitHubWithoutManualFallback(t *testing.T) {
+	managed, _, proposalPath := publishedCLIPromotion(t)
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	if err := os.Symlink(gitPath, filepath.Join(bin, "git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	code, stdout, stderr := runWithInput("y\n", "promote", "--finish")
+	if code != 1 || !strings.Contains(stderr, "gh is not installed or not authenticated") || strings.Contains(stdout, "[y/N]") || strings.Contains(stdout, "finished") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+	if wt.Git(t, managed.Remote, "ls-tree", "-r", "--name-only", "proposals", "--", proposalPath) == "" {
+		t.Fatal("unconfirmed merge removed a proposal")
+	}
+	if _, err := os.Stat(managed.Config.Paths.Published); err != nil {
+		t.Fatalf("unconfirmed publication lost its record: %v", err)
+	}
+}
+
+func TestPromoteFinishWithoutPublication(t *testing.T) {
+	wt.Setup(t, nil)
+	code, stdout, stderr := run("promote", "--finish")
+	if code != 1 || !strings.Contains(stdout, "No published promotion") || stderr != "" {
+		t.Fatalf("exit=%d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+func TestPromoteFinishReportsClosedPR(t *testing.T) {
+	publishedCLIPromotion(t)
+	wt.FakeGH(t).SetPR(t, "CLOSED", "")
+	code, _, stderr := run("promote", "--finish")
+	if code != 1 || !strings.Contains(stderr, "closed without merging") {
+		t.Fatalf("exit=%d stderr=%q", code, stderr)
+	}
 }
