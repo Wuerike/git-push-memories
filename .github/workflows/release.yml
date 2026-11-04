@@ -23,12 +23,15 @@ jobs:
           version="${GITHUB_REF_NAME}"
           license_directory="dist/dependency-licenses"
           mkdir -p "$license_directory"
+          go mod download
           go list -m -f '{{if not .Main}}{{.Path}}|{{.Version}}|{{.Dir}}{{end}}' all | while IFS='|' read -r module version directory; do
             [ -n "$module" ] || continue
             destination="${license_directory}/$(printf '%s' "$module" | tr '/' '_')@${version}"
             mkdir -p "$destination"
             for license in "$directory"/LICENSE* "$directory"/NOTICE*; do
-              [ -f "$license" ] && cp "$license" "$destination/"
+              if [ -f "$license" ]; then
+                cp "$license" "$destination/"
+              fi
             done
           done
           for architecture in amd64 arm64; do
