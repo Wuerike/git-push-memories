@@ -1,60 +1,118 @@
 # Claude Code
 
-Esta integracao usa MCP sobre stdio e os skills explicitos `/remember` e `/promote`. Ela nao instala hooks, nao captura sessoes e nao altera memoria canonica durante a captura.
+A integração usa MCP por stdio e as skills explícitas `/remember` e `/promote`.
+Não instala hooks nem captura sessões automaticamente.
 
-## Configurar
+## Setup
 
-Depois de instalar a CLI, execute uma vez por maquina:
+Depois de instalar a CLI, execute por máquina:
 
-```bash
+```sh
 gpm setup git@github.com:org/memoria.git --categories domains,decision
 ```
 
-O repositorio e remoto. Vazio, o setup cria `gpm.json`, a `main` e a `proposals`; com `gpm.json`, so clona e valida. O comando:
+O setup prepara o clone bare e os worktrees `read` e `proposals` no diretório de
+estado do usuário, salva a URL, registra `gpm mcp` no escopo `user` do Claude
+Code e instala `~/.claude/skills/{remember,promote}/SKILL.md`. Repita o setup
+para reparar a instalação ou atualizar o caminho do binário. Consulte o
+[guia do fluxo](../../docs/workflow.md) para requisitos e configuração do remoto.
 
-- mantem um clone bare gerenciado em `$XDG_STATE_HOME/git-push-memories/<id>` (ou `~/.local/state/...`), com worktrees `read` (`main`), `proposals` e `release`;
-- salva a URL na configuracao global do usuario;
-- registra `gpm mcp` no escopo `user` do Claude Code;
-- instala os skills globais em `~/.claude/skills/remember/SKILL.md` e `~/.claude/skills/promote/SKILL.md`.
+A leitura usa apenas `memories/<categoria-configurada>/**/*.md` da `main`.
+Propostas em `proposals/<id>-<slug>.md` ficam fora da busca cotidiana.
 
-O setup e idempotente: repita-o para reparar ou depois de mover o binario. Trocar de repositorio exige remover o diretorio de estado.
+## Capture
 
-O repositorio usa dois namespaces versionaveis:
-
-```text
-memories/<categoria-configurada>/**/*.md    memoria canonica pesquisavel (main)
-proposals/<id>-<slug>.md                    inbox de propostas (branch proposals)
-```
-
-Markdown fora das categorias configuradas, incluindo `README.md`, arquivos diretos em `memories/` e `proposals/`, nao participa da recuperacao.
-
-## Usar
-
-Em qualquer sessao do Claude Code:
+Em uma sessão do Claude Code, invoque:
 
 ```text
 /remember <fato>
 ```
 
-O fluxo pesquisa a memoria, expande ate tres candidatos, sugere `create`, `update` ou `remove` e exige confirmacao antes de criar uma proposta. A proposta e texto livre (`title` e `content`): acao sugerida, destino e origem, se importarem, vao escritos no texto. Ela e criada na `proposals` remota pela API do GitHub (`gh` autenticado e rede sao requisitos); se falhar, nada e gravado e o `/remember` e repetido.
+O agente pesquisa memórias e propostas para sugerir ação e destino, apresenta o
+texto que será compartilhado e espera sua confirmação. A proposta tem `title`
+e `content` livres; ação, destino e origem relevante são texto. A captura cria
+a proposta na branch remota `proposals` pela API do GitHub. Exige rede e `gh`
+autenticado; uma falha é mostrada e interrompe a tentativa. A `main` não muda.
 
-Para consolidar as propostas pendentes em memoria canonica:
+## Consolidate
+
+Invoque explicitamente:
 
 ```text
 /promote
 ```
 
-A skill abre (ou retoma) o release, agrupa todas as propostas por assunto ou pagina, mostra plano, diff e evidencias e aplica lotes de ate dezesseis decisoes, cada um confirmado pela pessoa, ate nao restar nenhuma proposta. Entao envia o release para revisao: push da branch e pull request para a `main` (via `gh`). O merge e humano; o proximo `/promote` ou `gpm promote --finish` finaliza o release. O preview apresenta candidatos canonicos e propostas relacionadas.
+O agente prepara um worktree separado a partir da `main` e recebe cópias de
+todas as propostas de uma revisão fixa, fora do worktree. Leia e discuta com o
+agente o plano global na conversa: grupos, destinos e justificativas para cada
+proposta. Ele lê integralmente todas as propostas e memórias antes de propor o
+plano. Se não couberem no contexto, informa o limite e para.
 
-Release abandonado: `gpm promote --resume` (continua; cria outro PR se o anterior foi fechado) ou `gpm promote --abort`.
+Aprove o plano antes da escrita. O agente prepara diretamente os arquivos
+finais, pode delegar arquivos independentes e revisa a coerência do conjunto.
+Reorganizações ficam limitadas às memórias relacionadas ao plano, preservando
+conhecimento válido. Mudanças materiais exigem nova decisão na conversa.
 
-O servidor expoe:
+A conferência completa IDs de headings novos, valida formato e categorias e
+produz o diff atual. O agente mostra resumo global, diff por memória e caminho
+do worktree. Você pode abrir esse caminho no VS Code e editar os mesmos
+arquivos; o editor não abre automaticamente. Durante a edição humana, os
+agentes suspendem a escrita e não executam a conferência. Diga na conversa
+quando terminar ou quais ajustes deseja. Ajustes partem dos arquivos atuais e
+preservam suas edições fora do pedido.
 
-- `memory_search`, `memory_expand`, `memory_page_read` (aceitam `source: release`);
-- `memory_propose`, `memory_proposal_list`;
-- `memory_promote_open`, `memory_promote_status`, `memory_promote_submit`;
-- `memory_promote_preview`, `memory_promote_apply`, `memory_promote_batch_preview`, `memory_promote_batch_apply`.
+Aprove a publicação dos arquivos e do diff atuais. Se os arquivos mudarem após
+a revisão, o agente deve apresentar a mudança e obter nova aprovação. O envio
+cria um commit global contendo somente memórias e abre um PR para `main`, com
+resumo dos destinos ou justificativas de todas as propostas. O merge é humano.
+As propostas permanecem pendentes até a confirmação do merge.
 
-O envio ao remote e automatico no `/remember` (aviso na confirmacao) e no `/promote`; ninguem precisa rodar `git push`.
+Depois do merge, na máquina que publicou, execute:
 
-Se o servidor MCP estiver ausente ou falhar, Claude Code deve mostrar a falha e encerrar a tentativa. Nenhuma configuracao de `SessionStart`, `Stop`, `PostToolUse` ou outro hook faz parte desta integracao.
+```sh
+gpm promote --finish
+```
+
+Você também pode pedir `memory_promote_finish` ou invocar o próximo `/promote`.
+A conclusão consulta o GitHub, confirma o commit na `main`, remove somente
+propostas cujo caminho e conteúdo ainda correspondam aos insumos concluídos e
+atualiza a leitura local. Propostas novas ou alteradas permanecem pendentes.
+O registro local vincula PR e insumos para essa limpeza; não restaura uma sessão
+de edição. Esta versão não inclui retomada, recuperação automática ou
+coordenação entre promoções. Um diff canônico vazio não publica nem limpa.
+
+## File access and delegation
+
+O worktree de promoção fica no estado do usuário, fora da pasta do projeto.
+Use o caminho absoluto devolvido pela preparação para leitura e edição. Se a
+sessão pedir acesso, autorize esse diretório pelas permissões normais do host;
+no Claude Code você pode adicionar a pasta com `/add-dir <caminho-do-worktree>`.
+Os caminhos dos insumos também precisam estar acessíveis para leitura.
+
+A declaração `allowed-tools` da skill permite usar as ferramentas indicadas
+durante a invocação. Ela não restringe todo o conjunto de ferramentas da sessão
+nem concede acesso permanente a diretórios. As permissões do host continuam
+valendo. Consulte a [referência de skills do Claude Code](https://code.claude.com/docs/en/skills)
+e a [referência de ferramentas](https://code.claude.com/docs/en/tools-reference).
+
+O principal pode delegar memórias independentes após a aprovação do plano.
+Cada arquivo tem um responsável por rodada, com conteúdo atual, propostas,
+decisões e contexto entre páginas. O principal espera os delegados terminarem,
+revê o conjunto e mantém Git, limpeza e publicação sob sua responsabilidade.
+Veja a [documentação de subagentes](https://code.claude.com/docs/en/sub-agents).
+
+## MCP tools
+
+O servidor expõe nove ferramentas:
+
+- `memory_search`, `memory_expand` e `memory_page_read`: leitura da `main`.
+- `memory_propose` e `memory_proposal_list`: captura e consulta de propostas.
+- `memory_promote_prepare`: worktree e inventários fixos.
+- `memory_promote_check`: formato canônico e diff dos arquivos atuais.
+- `memory_promote_submit`: commit global, envio e PR após aprovação.
+- `memory_promote_finish`: confirmação de merge e limpeza correspondente.
+
+A [referência de funcionalidades](../../docs/features.md) detalha parâmetros e
+limites. Se o MCP estiver ausente ou uma ferramenta falhar, o agente mostra a
+falha e para, conservando os arquivos preparados. A integração não modifica a
+configuração global de permissões para liberar diretórios automaticamente.

@@ -352,14 +352,16 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] O guia orienta revisão dos mesmos arquivos pelo terminal/editor, sem abertura automática ou estado retomável.
-- [ ] Acesso ao diretório segue permissões normais do host; não prometer que allowed-tools limita ferramentas ou concede permissão permanente.
-- [ ] Os testes mantêm asserções anteriores e acrescentam este documento; suíte completa passa.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] O guia orienta revisão dos mesmos arquivos pelo terminal/editor, sem abertura automática ou estado retomável.
+- [x] Acesso ao diretório segue permissões normais do host; não prometer que allowed-tools limita ferramentas ou concede permissão permanente.
+- [x] Os testes mantêm asserções anteriores e acrescentam este documento; suíte completa passa.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: contract; ampliar TestPromotionDocumentationDescribesImplementedWorkflow para o guia da integração; manter testes de setup/instalação.
 **Gate**: Full — go test ./...
 **Commit**: `docs(claude): explain file-based promotion review`
+
+**Result**: Complete — Guia Claude alinhado à edição dos arquivos atuais e permissões do host; três documentos cobertos; links locais e oficiais conferidos, go test ./... passou.
 
 ### T14: Alinhar o glossário ao modelo simplificado
 
@@ -514,9 +516,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T12 concluídas e verificadas; próxima T13. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T13 concluídas e verificadas; próxima T14. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
-**Current:** T12 concluída com gate verde; próxima T13.
+**Current:** T13 concluída com gate verde; próxima T14.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 

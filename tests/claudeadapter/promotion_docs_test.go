@@ -26,6 +26,13 @@ func TestPromotionDocumentationDescribesImplementedWorkflow(t *testing.T) {
 			"commit global", "merge é humano", "Propostas novas ou alteradas", "promotion-published.json",
 			"não há avaliação estruturada de fontes", "não executam julgamento por um LLM",
 		}},
+		{"integrations/claude-code/README.md", []string{
+			"memory_promote_prepare", "memory_promote_check", "memory_promote_submit", "memory_promote_finish",
+			"gpm promote --finish", "plano global na conversa", "Aprove o plano antes da escrita",
+			"mesmos\narquivos", "editor não abre automaticamente", "suspendem a escrita",
+			"Propostas novas ou alteradas", "allowed-tools", "/add-dir", "permissões do host continuam",
+			"não restringe todo o conjunto", "não restaura uma sessão",
+		}},
 	}
 	for _, doc := range documents {
 		t.Run(doc.path, func(t *testing.T) {
