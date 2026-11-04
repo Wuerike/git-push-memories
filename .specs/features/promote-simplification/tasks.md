@@ -127,15 +127,17 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] A preparação lê revisões capturadas após fetch e devolve inventário sem cortar propostas ou truncar conteúdo.
-- [ ] Os insumos copiados ficam fora do worktree publicável; uma proposta recebida depois não altera esse conjunto.
-- [ ] Erros interrompem a preparação; ausência de propostas não cria PR ou commit; nenhuma escrita remota abre um lock.
-- [ ] A suíte completa permanece verde; registrar contagens dos novos testes e regressões.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] A preparação lê revisões capturadas após fetch e devolve inventário sem cortar propostas ou truncar conteúdo.
+- [x] Os insumos copiados ficam fora do worktree publicável; uma proposta recebida depois não altera esse conjunto.
+- [x] Erros interrompem a preparação; ausência de propostas não cria PR ou commit; nenhuma escrita remota abre um lock.
+- [x] A suíte completa permanece verde; registrar contagens dos novos testes e regressões.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: integration; internal/consolidation/prepare_test.go com pelo menos 6 testes selecionáveis de base, bytes integrais, 17 propostas, chegada posterior, ausência de propostas e falha de fetch/leitura.
 **Gate**: Full — go test ./...
 **Commit**: `feat(consolidation): capture fixed proposal inputs`
+
+**Result**: Complete — 6 testes novos de preparação passaram; gate completo go test ./... -timeout=120s passou em todos os pacotes. Fixture ajustada antes do commit sem alterar asserções. Nenhuma publicação remota.
 
 ### T4: Conferir arquivos atuais e produzir diff
 
@@ -494,7 +496,7 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T2 concluídas e verificadas; próxima T3. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T3 concluídas e verificadas; próxima T4. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 
