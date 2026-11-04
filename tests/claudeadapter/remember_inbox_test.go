@@ -7,18 +7,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/consolidation"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
-	"github.com/Wuerike/git-push-memories/internal/promotion"
-	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
-	"github.com/Wuerike/git-push-memories/internal/workspace"
 	wt "github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -108,66 +105,59 @@ func TestRememberReadingAndBudgetFailureDoNotModifyProposals(t *testing.T) {
 	}
 }
 
-func TestPromoteCreateFlowRunsOnAReleaseAndSendsItForReview(t *testing.T) {
+func TestPromoteCreateFlowUsesFinalFilesAndSendsPR(t *testing.T) {
 	managed := wt.Setup(t, nil)
-	wt.FakeGH(t)
-	proposal := managed.Remember(t, "Checkout timeout")
 	session, stop := startMCP(t, managed.Config)
 	defer stop()
 	mainBefore := wt.Git(t, managed.Remote, "rev-parse", "main")
-
-	opened := decodeEnvelope[release.Status](t, callOK(t, session, "memory_promote_open", map[string]any{}))
-	if !opened.Open || opened.Marker == nil || !strings.HasPrefix(opened.Marker.ReleaseBranch, workspace.ReleasePrefix) || len(opened.Pending) != 1 {
-		t.Fatalf("memory_promote_open = %+v", opened)
+	content := "# Checkout timeout\n\nCreate a memory about checkout timeout: five seconds.\n"
+	proposal := decodeProposal(t, callOK(t, session, "memory_propose", map[string]any{"title": "Checkout timeout", "content": content}))
+	prepared := decodeEnvelope[consolidation.Prepared](t, callOK(t, session, "memory_promote_prepare", map[string]any{}))
+	if prepared.MainSHA != mainBefore || len(prepared.Proposals) != 1 || prepared.Proposals[0].ID != proposal.ID {
+		t.Fatalf("prepare = %+v", prepared)
 	}
-	releaseRoot := managed.Config.Paths.Release
-	if branch := wt.Git(t, releaseRoot, "symbolic-ref", "--short", "HEAD"); branch != opened.Marker.ReleaseBranch {
-		t.Fatalf("release worktree is on %q", branch)
+	input, err := os.ReadFile(prepared.Proposals[0].InputPath)
+	if err != nil || string(input) != content {
+		t.Fatalf("fixed proposal content = %q, %v", input, err)
 	}
-	listed := decodeEnvelope[promotion.List](t, callOK(t, session, "memory_proposal_list", map[string]any{"source": "release"}))
-	if len(listed.Proposals) != 1 || listed.Proposals[0].ID != proposal.ID {
-		t.Fatalf("release proposals = %+v", listed.Proposals)
+	refused, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_promote_submit", Arguments: map[string]any{"summary": "No memory prepared yet."}})
+	if err != nil || !refused.IsError || errorCode(t, refused) != "no_changes" {
+		t.Fatalf("empty submit = %+v, %v", refused, err)
 	}
-
-	// Submitting while a proposal is still pending is refused.
-	refused, err := session.CallTool(context.Background(), &mcp.CallToolParams{Name: "memory_promote_submit", Arguments: map[string]any{}})
-	if err != nil || !refused.IsError || errorCode(t, refused) != "proposals_pending" {
-		t.Fatalf("submit with pending proposals = %+v, %v", refused, err)
+	const target = "memories/domains/checkout-timeout.md"
+	body := "# Checkout timeout\n\n## Policy\nThe checkout timeout is five seconds.\n"
+	full := filepath.Join(prepared.Worktree, target)
+	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		t.Fatal(err)
 	}
-
-	preview := decodeEnvelope[struct {
-		PreviewToken string `json:"preview_token"`
-	}](t, callOK(t, session, "memory_promote_preview", map[string]any{
-		"operation": "create_page", "proposal_id": proposal.ID, "target_path": "memories/domains/checkout-timeout.md",
-	}))
-	applied := decodeEnvelope[promotion.Result](t, callOK(t, session, "memory_promote_apply", map[string]any{"preview_token": preview.PreviewToken}))
-	if got := wt.Git(t, releaseRoot, "rev-parse", "HEAD"); got != applied.Commit {
-		t.Fatalf("promotion commit %s is not the release head %s", applied.Commit, got)
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	changed := strings.Fields(wt.Git(t, releaseRoot, "diff-tree", "--no-commit-id", "--name-only", "-r", applied.Commit))
-	if !slices.Contains(changed, "memories/domains/checkout-timeout.md") || !slices.Contains(changed, proposal.Path) {
-		t.Fatalf("promotion commit changed %v", changed)
+	checked := decodeEnvelope[consolidation.Checked](t, callOK(t, session, "memory_promote_check", map[string]any{}))
+	if len(checked.Paths) != 1 || checked.Paths[0] != target || !strings.Contains(checked.Diff, "+The checkout timeout is five seconds.") {
+		t.Fatalf("review = %+v", checked)
 	}
-	// Published memory and the shared inbox stay untouched until the PR merges.
-	if got := wt.Git(t, managed.Remote, "rev-parse", "main"); got != mainBefore {
-		t.Fatal("promotion moved main")
+	submitted := decodeEnvelope[consolidation.Submitted](t, callOK(t, session, "memory_promote_submit", map[string]any{"summary": proposal.ID + " creates " + target}))
+	if submitted.PRURL == "" || submitted.PRNumber <= 0 || submitted.Commit == "" {
+		t.Fatalf("submit = %+v", submitted)
 	}
-	if _, err := os.Stat(filepath.Join(managed.Config.Paths.Read, "memories", "domains", "checkout-timeout.md")); !errors.Is(err, os.ErrNotExist) {
+	if head := wt.Git(t, prepared.Worktree, "rev-parse", "HEAD"); head != submitted.Commit {
+		t.Fatalf("worktree HEAD = %s, want %s", head, submitted.Commit)
+	}
+	if changed := wt.Git(t, managed.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", submitted.Commit); changed != target {
+		t.Fatalf("canonical commit changed %q", changed)
+	}
+	if wt.Git(t, managed.Remote, "rev-parse", "main") != mainBefore {
+		t.Fatal("submission moved main before merge")
+	}
+	if _, err := os.Stat(filepath.Join(managed.Config.Paths.Read, target)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("unreviewed memory is visible to readers: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(managed.Config.Paths.Proposals, proposal.Path)); err != nil {
-		t.Fatalf("proposal left the proposals branch before merge: %v", err)
+	if text := wt.Git(t, managed.Remote, "show", "proposals:"+proposal.Path); text != strings.TrimSuffix(content, "\n") {
+		t.Fatalf("proposal removed or changed before merge: %q", text)
 	}
-
-	submitted := decodeEnvelope[struct {
-		PullRequest string `json:"pull_request"`
-		Finalized   bool   `json:"finalized"`
-	}](t, callOK(t, session, "memory_promote_submit", map[string]any{}))
-	if submitted.PullRequest == "" || submitted.Finalized {
-		t.Fatalf("memory_promote_submit = %+v", submitted)
-	}
-	if got := wt.Git(t, managed.Remote, "rev-parse", opened.Marker.ReleaseBranch); got != applied.Commit {
-		t.Fatalf("remote release branch = %s, want %s", got, applied.Commit)
+	if head := wt.Git(t, managed.Remote, "rev-parse", prepared.Branch); head != submitted.Commit {
+		t.Fatalf("remote promotion branch = %s", head)
 	}
 }
 

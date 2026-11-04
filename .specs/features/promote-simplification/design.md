@@ -1,7 +1,7 @@
 # Promote Simplification Design
 
 **Spec:** `.specs/features/promote-simplification/spec.md`
-**Status:** Abordagem A confirmada; detalhamento técnico e 14 tarefas prontos para revisão. Os validadores de spec e tarefas passaram; código ainda não alterado.
+**Status:** Abordagem A e tarefas aprovadas; execução em andamento. Os validadores de spec e tarefas passaram antes da implementação.
 **Approach confirmed:** 2026-11-03 - user: "aceito A"
 
 ## Architecture Overview

@@ -136,7 +136,7 @@ func (m *Manager) Prepare(ctx context.Context) (Prepared, error) {
 	}
 	memoryPaths := []string{}
 	for _, entry := range memories {
-		if canonical.IsMemoryPath(entry.path) && entry.mode == "100644" && entry.kind == "blob" {
+		if canonical.IsMemoryPath(entry.path) && (entry.mode == "100644" || entry.mode == "100755") && entry.kind == "blob" {
 			memoryPaths = append(memoryPaths, entry.path)
 		}
 	}

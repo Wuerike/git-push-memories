@@ -2,9 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,40 +9,24 @@ import (
 	"sync"
 
 	"github.com/Wuerike/git-push-memories/internal/config"
+	"github.com/Wuerike/git-push-memories/internal/consolidation"
 	"github.com/Wuerike/git-push-memories/internal/forge/github"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
 	"github.com/Wuerike/git-push-memories/internal/memory"
-	"github.com/Wuerike/git-push-memories/internal/promotion"
-	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/workspace"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Server struct {
-	inner      *mcp.Server
-	retriever  *retrieval.Retriever
-	cfg        config.Config
-	stateRoot  string
-	inbox      *inbox.Inbox
-	inboxMu    sync.Mutex
-	releases   *release.Manager
-	recoverErr error // set when startup recovery of an interrupted promotion failed
-	promoterMu sync.Mutex
-	previews   map[string]pendingPromotion
-	batches    map[string]pendingBatchPromotion
-	pages      *memory.Repository
-	pagesMu    sync.Mutex
-}
-
-type pendingPromotion struct {
-	Preview      promotion.Preview
-	EvidenceHash [sha256.Size]byte
-}
-
-type pendingBatchPromotion struct {
-	Preview        promotion.BatchPreview
-	EvidenceHashes [][sha256.Size]byte
+	inner         *mcp.Server
+	retriever     *retrieval.Retriever
+	cfg           config.Config
+	inbox         *inbox.Inbox
+	inboxMu       sync.Mutex
+	consolidation *consolidation.Manager
+	pages         *memory.Repository
+	pagesMu       sync.Mutex
 }
 
 func New(cfg config.Config, version string) (*Server, error) {
@@ -56,80 +37,24 @@ func New(cfg config.Config, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	server := &Server{
-		retriever: retriever,
-		cfg:       cfg,
-		releases:  release.New(cfg),
-		stateRoot: cfg.StateRoot,
-		inner: mcp.NewServer(&mcp.Implementation{
-			Name:    "git-push-memories",
-			Version: version,
-		}, nil),
-	}
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_propose",
-		Description: "Add one reviewable Markdown proposal to the proposals branch of the shared repository through GitHub, in a single call that either succeeds or changes nothing.",
-	}, server.addProposal)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_search",
-		Description: "Search current memory pages recursively in configured categories and return ranked section excerpts with expandable handles.",
-	}, server.search)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_expand",
-		Description: "Expand one current memory section from a search handle within an exact byte budget.",
-	}, server.expand)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_page_read",
-		Description: "Read one whole canonical memory page with its content hash, or fail with budget_too_small; never returns a truncated page.",
-	}, server.readPage)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_proposal_list",
-		Description: "List committed Markdown proposals and configured memory categories for explicit human promotion.",
-	}, server.listProposals)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_open",
-		Description: "Open a release (locks promotion for everyone and cuts the release branch from the proposals branch) or return the one already open on this machine. Only /promote calls this, after explicit human confirmation.",
-	}, server.openRelease)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_status",
-		Description: "Report the release in progress: who opened it, the proposals it includes, and which are still pending in the release branch.",
-	}, server.releaseStatus)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_submit",
-		Description: "Send the consolidated release for review: push the release branch and open its pull request into main (or reuse the open one). Refused while proposals are still pending in the release. If the latest pull request was already merged, the release is finalized instead.",
-	}, server.submitRelease)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_preview",
-		Description: "Preview one promotion decision (create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, discard_proposal) and its bounded canonical and inbox evidence without writing. fold_proposal is not accepted here. A new preview invalidates older pending tokens for the same proposals.",
-	}, server.previewPromotion)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_apply",
-		Description: "Apply one previously previewed promotion after explicit human confirmation.",
-	}, server.applyPromotion)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_batch_preview",
-		Description: "Preview a bounded batch of promotion decisions for one atomic commit, including fold_proposal items that fold other proposals into a rewrite_page or into a create_page that carries a replacement. A new preview invalidates older pending tokens for the same proposals.",
-	}, server.previewPromotionBatch)
-	mcp.AddTool(server.inner, &mcp.Tool{
-		Name:        "memory_promote_batch_apply",
-		Description: "Apply one previously previewed promotion batch after explicit human confirmation.",
-	}, server.applyPromotionBatch)
+	server := &Server{cfg: cfg, retriever: retriever, consolidation: consolidation.New(cfg),
+		inner: mcp.NewServer(&mcp.Implementation{Name: "git-push-memories", Version: version}, nil)}
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_propose", Description: "Add one reviewable Markdown proposal to the proposals branch through GitHub, in a single call that either succeeds or changes nothing."}, server.addProposal)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_search", Description: "Search published memory in configured categories and return ranked section excerpts with expandable handles."}, server.search)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_expand", Description: "Expand one published memory section from a search handle within an exact byte budget."}, server.expand)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_page_read", Description: "Read a whole published canonical page with its content hash, or fail with budget_too_small; never truncates a page."}, server.readPage)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_proposal_list", Description: "List committed Markdown proposals and configured categories. This live inbox is separate from a promotion's fixed inputs."}, server.listProposals)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_promote_prepare", Description: "Prepare a new worktree from fetched main and fixed proposal inputs. Returns file paths and inventories for full reading and discussion before editing. Completes a previously merged publication first."}, server.preparePromotion)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_promote_check", Description: "Complete missing canonical IDs and return the diff of the current files for human review. No commit or publication occurs."}, server.checkPromotion)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_promote_submit", Description: "After explicit human approval of the current files and diff, commit only canonical changes, push the branch and open a PR into main with the approved consolidation summary."}, server.submitPromotion)
+	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_promote_finish", Description: "Confirm the published PR was merged, remove only concluded proposals with matching content, and refresh published memory."}, server.finishPromotion)
 	return server, nil
 }
 
 func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	defer s.retriever.Close()
 	defer s.closePages()
-	// A failed recovery must not take /remember and search down; it only blocks /promote.
-	if root, branch, ok := s.releases.Active(ctx); ok {
-		if _, err := promotion.Recover(ctx, s.cfg, root, branch); err != nil {
-			s.recoverErr = err
-		}
-	}
-	transport := &mcp.IOTransport{
-		Reader: io.NopCloser(input),
-		Writer: nopWriteCloser{Writer: output},
-	}
+	transport := &mcp.IOTransport{Reader: io.NopCloser(input), Writer: nopWriteCloser{Writer: output}}
 	return s.inner.Run(ctx, transport)
 }
 
@@ -137,19 +62,19 @@ type searchInput struct {
 	Query       string `json:"query" jsonschema:"retrieval query"`
 	PathPrefix  string `json:"path_prefix,omitempty" jsonschema:"optional canonical relative path scope"`
 	BudgetBytes int    `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the ContextBundle JSON"`
-	Source      string `json:"source,omitempty" jsonschema:"main (default, published memory) or release (the open release; only for /promote)"`
+	Source      string `json:"source,omitempty" jsonschema:"main (default, published memory)"`
 }
 
 type expandInput struct {
 	Handle      retrieval.Handle `json:"handle" jsonschema:"handle returned by memory_search"`
 	BudgetBytes int              `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the ContextBundle JSON"`
-	Source      string           `json:"source,omitempty" jsonschema:"must match the source of the search that returned the handle: main (default) or release"`
+	Source      string           `json:"source,omitempty" jsonschema:"main (default, published memory)"`
 }
 
 type pageReadInput struct {
 	Path        string `json:"path" jsonschema:"canonical relative memory page path inside a configured category"`
 	BudgetBytes int    `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the page JSON data object"`
-	Source      string `json:"source,omitempty" jsonschema:"main (default) or release (the open release; only for /promote)"`
+	Source      string `json:"source,omitempty" jsonschema:"main (default, published memory)"`
 }
 
 type pageReadData struct {
@@ -170,79 +95,7 @@ type addProposalInput struct {
 }
 
 type listProposalsInput struct {
-	Source string `json:"source,omitempty" jsonschema:"where to list from: proposals (default, the shared inbox) or release (the open release, only for /promote)"`
-}
-
-type previewPromotionInput struct {
-	Operation   string `json:"operation" jsonschema:"canonical operation: create_page, create_section, replace_section, remove_section, remove_page, rewrite_page, fold_proposal, or discard_proposal; fold_proposal is accepted only by memory_promote_batch_preview and must point to a rewrite_page item or to a create_page item that carries a replacement, in the same batch"`
-	ProposalID  string `json:"proposal_id" jsonschema:"identifier of one committed proposal"`
-	TargetPath  string `json:"target_path,omitempty" jsonschema:"canonical page path inside a configured memory category; omitted for fold_proposal and discard_proposal"`
-	SectionID   string `json:"section_id,omitempty" jsonschema:"leaf section identifier required by replace_section, remove_section, or remove_page"`
-	ContentHash string `json:"content_hash,omitempty" jsonschema:"observed content hash required by replace_section, remove_section, or remove_page; for rewrite_page, the content_hash returned by memory_page_read"`
-	Heading     string `json:"heading,omitempty" jsonschema:"new section heading required only by create_section"`
-	Replacement string `json:"replacement,omitempty" jsonschema:"complete replacement body required only by replace_section; for rewrite_page, the complete page Markdown; optional for create_page, the complete new page Markdown without frontmatter and without @id markers on H2 or deeper headings (the server generates them), which also lets the create_page receive fold_proposal items"`
-	FoldInto    string `json:"fold_into,omitempty" jsonschema:"proposal_id of the rewrite_page item, or of the create_page item that carries a replacement, in the same batch that absorbs this proposal; required only by fold_proposal"`
-	Reason      string `json:"reason,omitempty" jsonschema:"discard reason required only by discard_proposal: not_relevant, incorrect, sensitive, wrong_target, superseded, or duplicate"`
-}
-
-type applyPromotionInput struct {
-	PreviewToken string `json:"preview_token" jsonschema:"single-use token returned by memory_promote_preview"`
-}
-
-type previewPromotionBatchInput struct {
-	Items []previewPromotionInput `json:"items" jsonschema:"one to sixteen promotion decisions with distinct proposals; canonical items have distinct target paths, while fold_proposal items have no target path and depend on a rewrite_page or replacement-carrying create_page item in the same batch"`
-}
-
-type promotionPreview struct {
-	PreviewToken string            `json:"preview_token"`
-	Evidence     promotionEvidence `json:"evidence"`
-	promotion.Preview
-}
-
-type promotionBatchItem struct {
-	Evidence promotionEvidence `json:"evidence"`
-	promotion.Preview
-}
-
-type promotionBatchPreview struct {
-	PreviewToken string               `json:"preview_token"`
-	Items        []promotionBatchItem `json:"items"`
-	Diff         string               `json:"diff"`
-}
-
-type promotionEvidence struct {
-	CanonicalCandidates retrieval.ContextBundle    `json:"canonical_candidates"`
-	RelatedProposals    promotion.RelatedProposals `json:"related_proposals"`
-}
-
-type proposalListResponse struct {
-	SchemaVersion int             `json:"schema_version"`
-	Data          *promotion.List `json:"data,omitempty"`
-	Error         *toolError      `json:"error,omitempty"`
-}
-
-type promotionPreviewResponse struct {
-	SchemaVersion int               `json:"schema_version"`
-	Data          *promotionPreview `json:"data,omitempty"`
-	Error         *toolError        `json:"error,omitempty"`
-}
-
-type promotionApplyResponse struct {
-	SchemaVersion int               `json:"schema_version"`
-	Data          *promotion.Result `json:"data,omitempty"`
-	Error         *toolError        `json:"error,omitempty"`
-}
-
-type promotionBatchPreviewResponse struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Data          *promotionBatchPreview `json:"data,omitempty"`
-	Error         *toolError             `json:"error,omitempty"`
-}
-
-type promotionBatchApplyResponse struct {
-	SchemaVersion int                    `json:"schema_version"`
-	Data          *promotion.BatchResult `json:"data,omitempty"`
-	Error         *toolError             `json:"error,omitempty"`
+	Source string `json:"source,omitempty" jsonschema:"proposals (default, the shared inbox)"`
 }
 
 type inboxToolResponse struct {
@@ -252,7 +105,8 @@ type inboxToolResponse struct {
 }
 
 type toolError struct {
-	Code string `json:"code"`
+	Code    string `json:"code"`
+	Message string `json:"message,omitempty"`
 }
 
 type toolResponse struct {
@@ -261,69 +115,149 @@ type toolResponse struct {
 	Error         *toolError               `json:"error,omitempty"`
 }
 
-var errUnknownSource = errors.New("unknown source")
-
-// sourceRoot picks the worktree a read tool looks at. "main" (default) answers from the read
-// worktree and refreshes it in the background; "release" needs a release checked out here.
-func (s *Server) sourceRoot(ctx context.Context, source string) (string, error) {
-	switch source {
-	case "", "main":
-		return s.cfg.Workspace().ResolveRead(ctx, false)
-	case "release":
-		root, _, ok := s.releases.Active(ctx)
-		if !ok {
-			return "", release.ErrNoRelease
-		}
-		return root, nil
-	}
-	return "", errUnknownSource
+type proposalSummary struct {
+	ID      string `json:"id"`
+	Path    string `json:"path"`
+	Title   string `json:"title"`
+	Content string `json:"content"`
+}
+type proposalListData struct {
+	Categories []string          `json:"categories"`
+	Proposals  []proposalSummary `json:"proposals"`
+}
+type proposalListResponse struct {
+	SchemaVersion int               `json:"schema_version"`
+	Data          *proposalListData `json:"data,omitempty"`
+	Error         *toolError        `json:"error,omitempty"`
 }
 
+var errUnknownSource = errors.New("unknown source")
+
+func (s *Server) sourceRoot(ctx context.Context, source string) (string, error) {
+	if source != "" && source != "main" {
+		return "", errUnknownSource
+	}
+	return s.cfg.Workspace().ResolveRead(ctx, false)
+}
 func sourceErrorCode(err error, fallback string) string {
-	switch {
-	case errors.Is(err, release.ErrNoRelease):
-		return "no_release"
-	case errors.Is(err, errUnknownSource):
+	if errors.Is(err, errUnknownSource) {
 		return "invalid_source"
 	}
 	return fallback
 }
-
-// retrieverFor returns the long-lived retriever for main, or a short-lived one over the release worktree.
 func (s *Server) retrieverFor(ctx context.Context, source string) (*retrieval.Retriever, func(), error) {
-	root, err := s.sourceRoot(ctx, source)
-	if err != nil {
+	if _, err := s.sourceRoot(ctx, source); err != nil {
 		return nil, nil, err
 	}
-	if source == "" || source == "main" {
-		return s.retriever, func() {}, nil
-	}
-	retriever, err := retrieval.New(root, s.cfg.MemoryCategories...)
-	if err != nil {
-		return nil, nil, err
-	}
-	return retriever, func() { _ = retriever.Close() }, nil
+	return s.retriever, func() {}, nil
 }
-
-func retrieverFailure(err error) (*mcp.CallToolResult, toolResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, toolResponse{SchemaVersion: 1, Error: &toolError{Code: sourceErrorCode(err, retrieval.ErrorCode(err))}}, nil
-}
-
 func (s *Server) pagesFor(ctx context.Context, source string) (*memory.Repository, func(), error) {
-	root, err := s.sourceRoot(ctx, source)
-	if err != nil {
+	if _, err := s.sourceRoot(ctx, source); err != nil {
 		return nil, nil, err
 	}
-	if source == "" || source == "main" {
-		repository, err := s.pageRepository()
-		return repository, func() {}, err
-	}
-	repository, err := memory.Open(root)
-	if err != nil {
-		return nil, nil, err
-	}
-	return repository, func() { _ = repository.Close() }, nil
+	repository, err := s.pageRepository()
+	return repository, func() {}, err
 }
+
+func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, input listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
+	if input.Source != "" && input.Source != "proposals" {
+		return proposalListFailure("invalid_source")
+	}
+	box, err := s.proposalInbox()
+	if err != nil {
+		return proposalListFailure("promotion_unavailable")
+	}
+	_ = box.Refresh(ctx) // Existing live-inbox behavior: report last seen data if refresh fails.
+	snapshots, err := box.List(ctx)
+	if errors.Is(err, inbox.ErrWrongBranch) {
+		return proposalListFailure("wrong_branch")
+	}
+	if err != nil {
+		return proposalListFailure("promotion_failed")
+	}
+	listed := proposalListData{Categories: append([]string(nil), s.cfg.MemoryCategories...), Proposals: make([]proposalSummary, len(snapshots))}
+	for i, snapshot := range snapshots {
+		p := snapshot.Proposal
+		listed.Proposals[i] = proposalSummary{ID: p.ID, Path: p.Path, Title: p.Title, Content: p.Content}
+	}
+	return nil, proposalListResponse{SchemaVersion: 1, Data: &listed}, nil
+}
+
+type emptyInput struct{}
+type submitPromotionInput struct {
+	Summary string `json:"summary" jsonschema:"approved Markdown summary accounting for every initial proposal with its destinations or free-form discard justification"`
+}
+type promotionToolResponse[T any] struct {
+	SchemaVersion int        `json:"schema_version"`
+	Data          *T         `json:"data,omitempty"`
+	Error         *toolError `json:"error,omitempty"`
+}
+
+func promotionToolFailure[T any](code, message string) (*mcp.CallToolResult, promotionToolResponse[T], error) {
+	return &mcp.CallToolResult{IsError: true}, promotionToolResponse[T]{SchemaVersion: 1, Error: &toolError{Code: code, Message: message}}, nil
+}
+func consolidationFailure[T any](err error) (*mcp.CallToolResult, promotionToolResponse[T], error) {
+	code := "promotion_failed"
+	switch {
+	case errors.Is(err, consolidation.ErrNoProposals):
+		code = "no_proposals"
+	case errors.Is(err, consolidation.ErrNotPrepared):
+		code = "promotion_not_prepared"
+	case errors.Is(err, consolidation.ErrNoChanges):
+		code = "no_changes"
+	case errors.Is(err, consolidation.ErrSummary):
+		code = "invalid_summary"
+	case errors.Is(err, memory.ErrInvalidPath), errors.Is(err, memory.ErrInvalidSchema), errors.Is(err, memory.ErrInvalidID), errors.Is(err, memory.ErrSectionExists):
+		code = "invalid_memory"
+	case errors.Is(err, workspace.ErrPermission):
+		code = "push_denied"
+	case errors.Is(err, workspace.ErrNetwork):
+		code = "network_unavailable"
+	case errors.Is(err, workspace.ErrDirty):
+		code = "worktree_dirty"
+	case errors.Is(err, github.ErrUnavailable), errors.Is(err, github.ErrNotGitHub):
+		code = "gh_unavailable"
+	}
+	return promotionToolFailure[T](code, err.Error())
+}
+
+func (s *Server) preparePromotion(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, promotionToolResponse[consolidation.Prepared], error) {
+	finished, err := s.consolidation.Finish(ctx)
+	if err != nil {
+		return consolidationFailure[consolidation.Prepared](err)
+	}
+	if finished.Found && !finished.Merged {
+		return promotionToolFailure[consolidation.Prepared]("merge_pending", fmt.Sprintf("PR %s is awaiting merge", finished.PRURL))
+	}
+	prepared, err := s.consolidation.Prepare(ctx)
+	if err != nil {
+		return consolidationFailure[consolidation.Prepared](err)
+	}
+	return nil, promotionToolResponse[consolidation.Prepared]{SchemaVersion: 1, Data: &prepared}, nil
+}
+func (s *Server) checkPromotion(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, promotionToolResponse[consolidation.Checked], error) {
+	checked, err := s.consolidation.Check(ctx)
+	if err != nil {
+		return consolidationFailure[consolidation.Checked](err)
+	}
+	return nil, promotionToolResponse[consolidation.Checked]{SchemaVersion: 1, Data: &checked}, nil
+}
+func (s *Server) submitPromotion(ctx context.Context, _ *mcp.CallToolRequest, input submitPromotionInput) (*mcp.CallToolResult, promotionToolResponse[consolidation.Submitted], error) {
+	submitted, err := s.consolidation.Submit(ctx, input.Summary)
+	if err != nil {
+		return consolidationFailure[consolidation.Submitted](err)
+	}
+	return nil, promotionToolResponse[consolidation.Submitted]{SchemaVersion: 1, Data: &submitted}, nil
+}
+func (s *Server) finishPromotion(ctx context.Context, _ *mcp.CallToolRequest, _ emptyInput) (*mcp.CallToolResult, promotionToolResponse[consolidation.Finished], error) {
+	finished, err := s.consolidation.Finish(ctx)
+	if err != nil {
+		return consolidationFailure[consolidation.Finished](err)
+	}
+	return nil, promotionToolResponse[consolidation.Finished]{SchemaVersion: 1, Data: &finished}, nil
+}
+
+type nopWriteCloser struct{ io.Writer }
 
 func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searchInput) (*mcp.CallToolResult, toolResponse, error) {
 	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
@@ -333,6 +267,20 @@ func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searc
 	defer closeRetriever()
 	bundle, err := retriever.Retrieve(ctx, input.Query, retrieval.Scope{PathPrefix: input.PathPrefix}, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
+}
+
+func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
+	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
+	if err != nil {
+		return retrieverFailure(err)
+	}
+	defer closeRetriever()
+	bundle, err := retriever.Expand(ctx, input.Handle, input.BudgetBytes)
+	return retrievalResponse(bundle, err)
+}
+
+func retrieverFailure(err error) (*mcp.CallToolResult, toolResponse, error) {
+	return &mcp.CallToolResult{IsError: true}, toolResponse{SchemaVersion: 1, Error: &toolError{Code: sourceErrorCode(err, retrieval.ErrorCode(err))}}, nil
 }
 
 // readPage returns the whole page or a typed error. Codes: invalid_budget, invalid_path
@@ -415,263 +363,6 @@ func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input 
 	return nil, inboxToolResponse{SchemaVersion: 1, Data: &stored}, nil
 }
 
-func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, input listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
-	var promoter *promotion.Promoter
-	var err error
-	switch input.Source {
-	case "", "proposals":
-		// Best effort: a failed refresh lists what was last seen.
-		if proposalInbox, inboxErr := s.proposalInbox(); inboxErr == nil {
-			_ = proposalInbox.Refresh(ctx)
-		}
-		promoter, err = promotion.New(s.cfg, s.cfg.Paths.Proposals, workspace.ProposalsBranch)
-	case "release":
-		promoter, err = s.releasePromoter(ctx)
-	default:
-		return proposalListFailure("invalid_source")
-	}
-	if err != nil {
-		return proposalListFailure(releaseErrorCode(err))
-	}
-	defer promoter.Close()
-	listed, err := promoter.List(ctx)
-	if err != nil {
-		return proposalListFailure(promotionErrorCode(err))
-	}
-	return nil, proposalListResponse{SchemaVersion: 1, Data: &listed}, nil
-}
-
-func (s *Server) previewPromotion(ctx context.Context, _ *mcp.CallToolRequest, input previewPromotionInput) (*mcp.CallToolResult, promotionPreviewResponse, error) {
-	promoter, err := s.releasePromoter(ctx)
-	if err != nil {
-		return promotionPreviewFailure(releaseErrorCode(err))
-	}
-	defer promoter.Close()
-	preview, err := promoter.Preview(ctx, promotionRequest(input))
-	if err != nil {
-		return promotionPreviewFailure(promotionErrorCode(err))
-	}
-	evidence, err := s.buildPromotionEvidence(ctx, promoter, preview)
-	if err != nil {
-		return promotionPreviewFailure(promotionEvidenceErrorCode(err))
-	}
-	encodedEvidence, err := json.Marshal(evidence)
-	if err != nil {
-		return promotionPreviewFailure("promotion_unavailable")
-	}
-	evidenceHash := sha256.Sum256(encodedEvidence)
-	tokenBytes := make([]byte, 16)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return promotionPreviewFailure("promotion_unavailable")
-	}
-	token := hex.EncodeToString(tokenBytes)
-	s.promoterMu.Lock()
-	if s.previews == nil {
-		s.previews = make(map[string]pendingPromotion)
-	}
-	s.invalidatePendingLocked(proposalIDs(preview))
-	s.previews[token] = pendingPromotion{Preview: preview, EvidenceHash: evidenceHash}
-	s.promoterMu.Unlock()
-	response := promotionPreview{
-		PreviewToken: token,
-		Evidence:     evidence,
-		Preview:      preview,
-	}
-	return nil, promotionPreviewResponse{SchemaVersion: 1, Data: &response}, nil
-}
-
-func (s *Server) applyPromotion(ctx context.Context, _ *mcp.CallToolRequest, input applyPromotionInput) (*mcp.CallToolResult, promotionApplyResponse, error) {
-	s.promoterMu.Lock()
-	pending, found := s.previews[input.PreviewToken]
-	delete(s.previews, input.PreviewToken)
-	s.promoterMu.Unlock()
-	if !found {
-		return promotionApplyFailure("invalid_preview")
-	}
-	promoter, err := s.releasePromoter(ctx)
-	if err != nil {
-		return promotionApplyFailure(releaseErrorCode(err))
-	}
-	defer promoter.Close()
-	result, err := promoter.Apply(ctx, pending.Preview, func() (string, error) {
-		evidence, err := s.buildPromotionEvidence(ctx, promoter, pending.Preview)
-		if err != nil {
-			return "", promotion.ErrDrift
-		}
-		encodedEvidence, err := json.Marshal(evidence)
-		if err != nil {
-			return "", promotion.ErrDrift
-		}
-		hash := sha256.Sum256(encodedEvidence)
-		if hash != pending.EvidenceHash {
-			return "", promotion.ErrDrift
-		}
-		return "sha256:" + hex.EncodeToString(hash[:]), nil
-	})
-	if err != nil {
-		return promotionApplyFailure(promotionErrorCode(err))
-	}
-	return nil, promotionApplyResponse{SchemaVersion: 1, Data: &result}, nil
-}
-
-func (s *Server) previewPromotionBatch(ctx context.Context, _ *mcp.CallToolRequest, input previewPromotionBatchInput) (*mcp.CallToolResult, promotionBatchPreviewResponse, error) {
-	promoter, err := s.releasePromoter(ctx)
-	if err != nil {
-		return promotionBatchPreviewFailure(releaseErrorCode(err))
-	}
-	defer promoter.Close()
-	requests := make([]promotion.PreviewRequest, len(input.Items))
-	for index, item := range input.Items {
-		requests[index] = promotionRequest(item)
-	}
-	preview, err := promoter.PreviewBatch(ctx, requests)
-	if err != nil {
-		return promotionBatchPreviewFailure(promotionErrorCode(err))
-	}
-	response := promotionBatchPreview{Items: make([]promotionBatchItem, len(preview.Items)), Diff: preview.Diff}
-	hashes := make([][sha256.Size]byte, len(preview.Items))
-	for index, item := range preview.Items {
-		evidence, err := s.buildPromotionEvidence(ctx, promoter, item)
-		if err != nil {
-			return promotionBatchPreviewFailure(promotionEvidenceErrorCode(err))
-		}
-		encoded, err := json.Marshal(evidence)
-		if err != nil {
-			return promotionBatchPreviewFailure("promotion_unavailable")
-		}
-		hashes[index] = sha256.Sum256(encoded)
-		response.Items[index] = promotionBatchItem{Preview: item, Evidence: evidence}
-	}
-	tokenBytes := make([]byte, 16)
-	if _, err := rand.Read(tokenBytes); err != nil {
-		return promotionBatchPreviewFailure("promotion_unavailable")
-	}
-	response.PreviewToken = hex.EncodeToString(tokenBytes)
-	s.promoterMu.Lock()
-	if s.batches == nil {
-		s.batches = make(map[string]pendingBatchPromotion)
-	}
-	ids := make([]string, len(preview.Items))
-	for index, item := range preview.Items {
-		ids[index] = item.ProposalID
-	}
-	s.invalidatePendingLocked(ids)
-	s.batches[response.PreviewToken] = pendingBatchPromotion{Preview: preview, EvidenceHashes: hashes}
-	s.promoterMu.Unlock()
-	return nil, promotionBatchPreviewResponse{SchemaVersion: 1, Data: &response}, nil
-}
-
-func (s *Server) applyPromotionBatch(ctx context.Context, _ *mcp.CallToolRequest, input applyPromotionInput) (*mcp.CallToolResult, promotionBatchApplyResponse, error) {
-	s.promoterMu.Lock()
-	pending, found := s.batches[input.PreviewToken]
-	delete(s.batches, input.PreviewToken)
-	s.promoterMu.Unlock()
-	if !found {
-		return promotionBatchApplyFailure("invalid_preview")
-	}
-	promoter, err := s.releasePromoter(ctx)
-	if err != nil {
-		return promotionBatchApplyFailure(releaseErrorCode(err))
-	}
-	defer promoter.Close()
-	result, err := promoter.ApplyBatch(ctx, pending.Preview, func() (string, error) {
-		for index, preview := range pending.Preview.Items {
-			evidence, err := s.buildPromotionEvidence(ctx, promoter, preview)
-			if err != nil {
-				return "", promotion.ErrDrift
-			}
-			encoded, err := json.Marshal(evidence)
-			if err != nil || sha256.Sum256(encoded) != pending.EvidenceHashes[index] {
-				return "", promotion.ErrDrift
-			}
-		}
-		encodedHashes, err := json.Marshal(pending.EvidenceHashes)
-		if err != nil {
-			return "", promotion.ErrDrift
-		}
-		hash := sha256.Sum256(encodedHashes)
-		return "sha256:" + hex.EncodeToString(hash[:]), nil
-	})
-	if err != nil {
-		return promotionBatchApplyFailure(promotionErrorCode(err))
-	}
-	return nil, promotionBatchApplyResponse{SchemaVersion: 1, Data: &result}, nil
-}
-
-func proposalIDs(preview promotion.Preview) []string {
-	return []string{preview.ProposalID}
-}
-
-// invalidatePendingLocked drops every pending single or batch token that
-// contains any of the given proposals. A newer preview supersedes older ones
-// for the same proposal. The caller must hold s.promoterMu.
-func (s *Server) invalidatePendingLocked(ids []string) {
-	shared := func(other ...string) bool {
-		for _, id := range other {
-			for _, candidate := range ids {
-				if id == candidate {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	for token, pending := range s.previews {
-		if shared(pending.Preview.ProposalID) {
-			delete(s.previews, token)
-		}
-	}
-	for token, pending := range s.batches {
-		for _, item := range pending.Preview.Items {
-			if shared(item.ProposalID) {
-				delete(s.batches, token)
-				break
-			}
-		}
-	}
-}
-
-func promotionRequest(input previewPromotionInput) promotion.PreviewRequest {
-	return promotion.PreviewRequest{
-		Operation: promotion.Operation(input.Operation), ProposalID: input.ProposalID, TargetPath: input.TargetPath,
-		SectionID: input.SectionID, ContentHash: input.ContentHash, Heading: input.Heading, Replacement: input.Replacement, FoldInto: input.FoldInto, Reason: promotion.DiscardReason(input.Reason),
-	}
-}
-
-func (s *Server) buildPromotionEvidence(ctx context.Context, promoter *promotion.Promoter, preview promotion.Preview) (promotionEvidence, error) {
-	query := preview.Title + " " + preview.Content
-	retriever, closeRetriever, err := s.retrieverFor(ctx, "release")
-	if err != nil {
-		return promotionEvidence{}, err
-	}
-	defer closeRetriever()
-	canonicalCandidates, err := retriever.Retrieve(ctx, query, retrieval.Scope{}, 4096)
-	if err != nil {
-		return promotionEvidence{}, err
-	}
-	relatedProposals, err := promoter.RelatedProposals(ctx, preview, query)
-	if err != nil {
-		return promotionEvidence{}, err
-	}
-	if err := promoter.RevalidatePreview(ctx, preview); err != nil {
-		return promotionEvidence{}, err
-	}
-	return promotionEvidence{
-		CanonicalCandidates: canonicalCandidates,
-		RelatedProposals:    relatedProposals,
-	}, nil
-}
-
-func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
-	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
-	if err != nil {
-		return retrieverFailure(err)
-	}
-	defer closeRetriever()
-	bundle, err := retriever.Expand(ctx, input.Handle, input.BudgetBytes)
-	return retrievalResponse(bundle, err)
-}
-
 func (s *Server) proposalInbox() (*inbox.Inbox, error) {
 	s.inboxMu.Lock()
 	defer s.inboxMu.Unlock()
@@ -686,87 +377,12 @@ func (s *Server) proposalInbox() (*inbox.Inbox, error) {
 	return proposalInbox, nil
 }
 
-// releasePromoter opens a promoter over the release worktree for one operation; the caller closes it,
-// so it never points at a release that was aborted or finalized in between.
-func (s *Server) releasePromoter(ctx context.Context) (*promotion.Promoter, error) {
-	if s.recoverErr != nil {
-		return nil, promotion.ErrRecovery
-	}
-	root, branch, ok := s.releases.Active(ctx)
-	if !ok {
-		return nil, release.ErrNoRelease
-	}
-	return promotion.New(s.cfg, root, branch)
-}
-
-func releaseErrorCode(err error) string {
-	switch {
-	case errors.Is(err, release.ErrNoRelease):
-		return "no_release"
-	case errors.Is(err, promotion.ErrRecovery):
-		return "promotion_recovery_failed"
-	}
-	return "promotion_unavailable"
-}
-
 func inboxFailure(code string) (*mcp.CallToolResult, inboxToolResponse, error) {
 	return &mcp.CallToolResult{IsError: true}, inboxToolResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
 }
 
 func proposalListFailure(code string) (*mcp.CallToolResult, proposalListResponse, error) {
 	return &mcp.CallToolResult{IsError: true}, proposalListResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-func promotionPreviewFailure(code string) (*mcp.CallToolResult, promotionPreviewResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, promotionPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-func promotionApplyFailure(code string) (*mcp.CallToolResult, promotionApplyResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, promotionApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-func promotionBatchPreviewFailure(code string) (*mcp.CallToolResult, promotionBatchPreviewResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, promotionBatchPreviewResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-func promotionBatchApplyFailure(code string) (*mcp.CallToolResult, promotionBatchApplyResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, promotionBatchApplyResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-func promotionErrorCode(err error) string {
-	switch {
-	case errors.Is(err, inbox.ErrWrongBranch):
-		return "wrong_branch"
-	case errors.Is(err, inbox.ErrInvalidProposal):
-		return "invalid_proposal"
-	case errors.Is(err, promotion.ErrUnsupported):
-		return "unsupported_action"
-	case errors.Is(err, promotion.ErrLocked):
-		return "git_index_locked"
-	case errors.Is(err, promotion.ErrInvalidReason):
-		return "invalid_discard_reason"
-	case errors.Is(err, promotion.ErrInvalidBatch):
-		return "invalid_promotion_batch"
-	case errors.Is(err, promotion.ErrRecovery):
-		return "promotion_recovery_failed"
-	case errors.Is(err, inbox.ErrProposalDrift), errors.Is(err, promotion.ErrDrift), errors.Is(err, memory.ErrDrift), errors.Is(err, memory.ErrTargetDirty), errors.Is(err, memory.ErrTargetExists):
-		return "promotion_drift"
-	case errors.Is(err, memory.ErrInvalidPath), errors.Is(err, memory.ErrInvalidSchema), errors.Is(err, memory.ErrInvalidID), errors.Is(err, memory.ErrPageNotEligible),
-		errors.Is(err, memory.ErrSectionExists), errors.Is(err, memory.ErrSectionNotFound), errors.Is(err, memory.ErrSectionNotLeaf):
-		return "invalid_target"
-	default:
-		return "promotion_failed"
-	}
-}
-
-func promotionEvidenceErrorCode(err error) string {
-	switch {
-	case errors.Is(err, retrieval.ErrInvalidQuery), errors.Is(err, retrieval.ErrInvalidScope), errors.Is(err, retrieval.ErrInvalidBudget),
-		errors.Is(err, retrieval.ErrBudgetTooSmall), errors.Is(err, retrieval.ErrStaleHandle):
-		return retrieval.ErrorCode(err)
-	default:
-		return promotionErrorCode(err)
-	}
 }
 
 func retrievalResponse(bundle retrieval.ContextBundle, err error) (*mcp.CallToolResult, toolResponse, error) {
@@ -779,78 +395,4 @@ func retrievalResponse(bundle retrieval.ContextBundle, err error) (*mcp.CallTool
 	}, nil
 }
 
-type nopWriteCloser struct {
-	io.Writer
-}
-
 func (nopWriteCloser) Close() error { return nil }
-
-type releaseInput struct{}
-
-type releaseResponse struct {
-	SchemaVersion int             `json:"schema_version"`
-	Data          *release.Status `json:"data,omitempty"`
-	Error         *toolError      `json:"error,omitempty"`
-}
-
-func releaseFailure(err error) (*mcp.CallToolResult, releaseResponse, error) {
-	code := "release_failed"
-	switch {
-	case errors.Is(err, release.ErrActive):
-		code = "release_active"
-	case errors.Is(err, release.ErrNoProposals):
-		code = "no_proposals"
-	case errors.Is(err, release.ErrNoRelease):
-		code = "no_release"
-	case errors.Is(err, workspace.ErrPermission):
-		code = "push_denied"
-	case errors.Is(err, workspace.ErrNetwork):
-		code = "network_unavailable"
-	case errors.Is(err, workspace.ErrDirty):
-		code = "worktree_dirty"
-	case errors.Is(err, release.ErrPending):
-		code = "proposals_pending"
-	case errors.Is(err, release.ErrNothingToResume):
-		code = "release_not_local"
-	case errors.Is(err, github.ErrUnavailable), errors.Is(err, github.ErrNotGitHub):
-		code = "gh_unavailable"
-	}
-	return &mcp.CallToolResult{IsError: true}, releaseResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-// openRelease resumes the release already in progress here, or opens a new one.
-func (s *Server) openRelease(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, releaseResponse, error) {
-	status, err := s.releases.OpenOrResume(ctx)
-	if err != nil {
-		return releaseFailure(err)
-	}
-	return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
-}
-
-type submitData struct {
-	PullRequest string `json:"pull_request,omitempty"`
-	Finalized   bool   `json:"finalized"`
-}
-
-type submitResponse struct {
-	SchemaVersion int         `json:"schema_version"`
-	Data          *submitData `json:"data,omitempty"`
-	Error         *toolError  `json:"error,omitempty"`
-}
-
-func (s *Server) submitRelease(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, submitResponse, error) {
-	url, err := s.releases.Submit(ctx)
-	if err != nil {
-		result, failure, _ := releaseFailure(err)
-		return result, submitResponse{SchemaVersion: 1, Error: failure.Error}, nil
-	}
-	return nil, submitResponse{SchemaVersion: 1, Data: &submitData{PullRequest: url, Finalized: url == ""}}, nil
-}
-
-func (s *Server) releaseStatus(ctx context.Context, _ *mcp.CallToolRequest, _ releaseInput) (*mcp.CallToolResult, releaseResponse, error) {
-	status, err := s.releases.Status(ctx)
-	if err != nil {
-		return releaseFailure(err)
-	}
-	return nil, releaseResponse{SchemaVersion: 1, Data: &status}, nil
-}

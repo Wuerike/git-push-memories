@@ -217,17 +217,19 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] Expose prepare/check/submit/finish; remova open/status, previews/applies/batch, caches e startup recovery.
-- [ ] Preparar conclui primeiro a publicação anterior mergeada; PR aberto é informado sem iniciar outra promoção.
-- [ ] A listagem de propostas do inbox e a leitura publicada não dependem dos pacotes antigos; source release deixa de ser aceito.
-- [ ] Os testes de transporte que chamavam endpoints removidos são substituídos por testes dos arquivos atuais, junto da mudança.
-- [ ] TestManagedWorkflowEndToEnd passa por preparação, escrita direta, revisão/edição, PR, squash e limpeza usando serviços simulados.
-- [ ] Preservar os testes existentes de captura, setup, busca, expansão e leitura; registrar contagens e substituições explícitas.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] Expose prepare/check/submit/finish; remova open/status, previews/applies/batch, caches e startup recovery.
+- [x] Preparar conclui primeiro a publicação anterior mergeada; PR aberto é informado sem iniciar outra promoção.
+- [x] A listagem de propostas do inbox e a leitura publicada não dependem dos pacotes antigos; source release deixa de ser aceito.
+- [x] Os testes de transporte que chamavam endpoints removidos são substituídos por testes dos arquivos atuais, junto da mudança.
+- [x] TestManagedWorkflowEndToEnd passa por preparação, escrita direta, revisão/edição, PR, squash e limpeza usando serviços simulados.
+- [x] Preservar os testes existentes de captura, setup, busca, expansão e leitura; registrar contagens e substituições explícitas.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: integration/e2e; migrar testes de runtime em internal/mcpserver, tests/claudeadapter/remember_inbox_test.go e tests/e2e/phase3_test.go; incluir pelo menos 4 testes novos nomeados para contrato, relações many-to-many, preservação de captura/leitura e percurso completo.
 **Gate**: Full — go test ./...
 **Commit**: `refactor(mcp): expose file-based promotion tools`
+
+**Result**: Complete — 21 testes nomeados de MCP, runtime Claude e E2E com 17 propostas passaram; make verify verde (testes, race, vet, build). Inventário inclui Markdown 100755. Testes antigos substituídos conforme inventário em context.md.
 
 ### T8: Manter somente a conclusão explícita na CLI
 
@@ -502,8 +504,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T6 concluídas e verificadas; próxima T7. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T7 concluídas e verificadas; próxima T8. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
+**Current:** T7 concluída com gate verde; próxima T8.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 

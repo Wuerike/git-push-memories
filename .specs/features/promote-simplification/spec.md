@@ -155,7 +155,7 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | --- | --- | --- | --- |
 | PROM-01 | Preparar e compreender, AC 1 | Execute | Implementing |
 | PROM-02 | Preparar e compreender, AC 2 | Execute | Implementing |
-| PROM-03 | Preparar e compreender, AC 3 | Specify | Pending |
+| PROM-03 | Preparar e compreender, AC 3 | Execute | Implementing |
 | PROM-04 | Preparar e compreender, AC 4 | Execute | Implementing |
 | PROM-05 | Preparar e compreender, AC 5 | Execute | Implementing |
 | PROM-06 | Discutir o plano, AC 1 | Specify | Pending |
@@ -180,9 +180,9 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-25 | Publicar e concluir, AC 4 | Execute | Implementing |
 | PROM-26 | Publicar e concluir, AC 5 | Execute | Implementing |
 | PROM-27 | Publicar e concluir, AC 6 | Execute | Implementing |
-| PROM-28 | Substituir contrato, AC 1 | Specify | Pending |
+| PROM-28 | Substituir contrato, AC 1 | Execute | Implementing |
 | PROM-29 | Substituir contrato, AC 2 | Execute | Implementing |
-| PROM-30 | Substituir contrato, AC 3 | Specify | Pending |
+| PROM-30 | Substituir contrato, AC 3 | Execute | Implementing |
 | PROM-31 | Substituir contrato, AC 4 | Specify | Pending |
 | PROM-32 | Edge Cases, AC 1 | Execute | Implementing |
 | PROM-33 | Edge Cases, AC 2 | Specify | Pending |

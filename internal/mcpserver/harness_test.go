@@ -185,12 +185,6 @@ func (e *env) proposalsRoot() string { return e.m.Config.Paths.Proposals }
 
 func (e *env) readRoot() string { return e.m.Config.Paths.Read }
 
-// openRelease opens a release over the proposals sent so far and returns the release worktree root.
-func (e *env) openRelease(t *testing.T) string {
-	t.Helper()
-	return e.m.OpenRelease(t).ReleaseRoot
-}
-
 func (e *env) call(t *testing.T, name string, arguments map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	result, err := e.session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
@@ -226,35 +220,6 @@ func (e *env) search(t *testing.T, source, query string) *retrieval.ContextBundl
 	}
 	result := e.ok(t, "memory_search", arguments)
 	return decodeResponse(t, result).Data
-}
-
-// previewToken previews one decision and returns its token.
-func (e *env) previewToken(t *testing.T, arguments map[string]any) string {
-	t.Helper()
-	var preview struct {
-		Data struct {
-			PreviewToken string `json:"preview_token"`
-		} `json:"data"`
-	}
-	decodeStructured(t, e.ok(t, "memory_promote_preview", arguments), &preview)
-	if preview.Data.PreviewToken == "" {
-		t.Fatal("memory_promote_preview returned no preview_token")
-	}
-	return preview.Data.PreviewToken
-}
-
-func (e *env) batchToken(t *testing.T, items ...map[string]any) string {
-	t.Helper()
-	var preview struct {
-		Data struct {
-			PreviewToken string `json:"preview_token"`
-		} `json:"data"`
-	}
-	decodeStructured(t, e.ok(t, "memory_promote_batch_preview", map[string]any{"items": items}), &preview)
-	if preview.Data.PreviewToken == "" {
-		t.Fatal("memory_promote_batch_preview returned no preview_token")
-	}
-	return preview.Data.PreviewToken
 }
 
 func (e *env) pageRead(t *testing.T, source, path string, budget int) (*mcp.CallToolResult, pageReadResponse) {

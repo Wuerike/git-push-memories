@@ -529,7 +529,7 @@ func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTools := []string{"memory_expand", "memory_page_read", "memory_promote_apply", "memory_promote_batch_apply", "memory_promote_batch_preview", "memory_promote_open", "memory_promote_preview", "memory_promote_status", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
+	wantTools := []string{"memory_expand", "memory_page_read", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
 	}
