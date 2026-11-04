@@ -171,16 +171,18 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] Submit valida sem modificar os arquivos aprovados e cria um único commit apenas dos caminhos canônicos alterados.
-- [ ] Push abre PR para main e retorna o link; o resumo inclui IDs/destinos/justificativas como texto livre, sem decisões por proposta.
-- [ ] Somente após criar o PR é salvo Published fora do worktree, sem plano ou sessão serializada.
-- [ ] A falha de push/PR é visível e não apaga trabalho ou declara sucesso; sem retry/rollback.
-- [ ] Testes conferem árvore Git, bytes, requests ao fake gh e comprovante; registrar contagem real.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] Submit valida sem modificar os arquivos aprovados e cria um único commit apenas dos caminhos canônicos alterados.
+- [x] Push abre PR para main e retorna o link; o resumo inclui IDs/destinos/justificativas como texto livre, sem decisões por proposta.
+- [x] Somente após criar o PR é salvo Published fora do worktree, sem plano ou sessão serializada.
+- [x] A falha de push/PR é visível e não apaga trabalho ou declara sucesso; sem retry/rollback.
+- [x] Testes conferem árvore Git, bytes, requests ao fake gh e comprovante; registrar contagem real.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: integration; internal/consolidation/submit_test.go com pelo menos 5 testes de escopo do commit, edição humana, PR/base main, resumo livre e erro de publicação.
 **Gate**: Full — go test ./...
 **Commit**: `feat(consolidation): publish reviewed memory files`
+
+**Result**: Complete — 6 testes novos nomeados de publicação e gate completo passaram; comprovante mínimo fora do worktree, bytes humanos preservados e PR GitHub simulado.
 
 ### T6: Limpar propostas concluídas após merge
 
@@ -498,7 +500,7 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T4 concluídas e verificadas; próxima T5. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T5 concluídas e verificadas; próxima T6. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.

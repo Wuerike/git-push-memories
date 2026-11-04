@@ -160,7 +160,7 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-05 | Preparar e compreender, AC 5 | Execute | Implementing |
 | PROM-06 | Discutir o plano, AC 1 | Specify | Pending |
 | PROM-07 | Discutir o plano, AC 2 | Specify | Pending |
-| PROM-08 | Discutir o plano, AC 3 | Specify | Pending |
+| PROM-08 | Discutir o plano, AC 3 | Execute | Implementing |
 | PROM-09 | Discutir o plano, AC 4 | Specify | Pending |
 | PROM-10 | Discutir o plano, AC 5 | Specify | Pending |
 | PROM-11 | Discutir o plano, AC 6 | Specify | Pending |
@@ -175,8 +175,8 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-20 | Preparar e revisar, AC 9 | Specify | Pending |
 | PROM-21 | Preparar e revisar, AC 10 | Execute | Implementing |
 | PROM-22 | Publicar e concluir, AC 1 | Execute | Implementing |
-| PROM-23 | Publicar e concluir, AC 2 | Specify | Pending |
-| PROM-24 | Publicar e concluir, AC 3 | Specify | Pending |
+| PROM-23 | Publicar e concluir, AC 2 | Execute | Implementing |
+| PROM-24 | Publicar e concluir, AC 3 | Execute | Implementing |
 | PROM-25 | Publicar e concluir, AC 4 | Specify | Pending |
 | PROM-26 | Publicar e concluir, AC 5 | Specify | Pending |
 | PROM-27 | Publicar e concluir, AC 6 | Specify | Pending |

@@ -78,6 +78,7 @@ dir="$(dirname "$0")"
 case "$1 $2" in
   "auth status") exit 0 ;;
   "pr create")
+    printf '%s\0' "$@" > "$dir/create-args"
     n=$(( $(cat "$dir/count" 2>/dev/null || echo 0) + 1 )); echo $n > "$dir/count"
     echo OPEN > "$dir/state"; echo "$n" > "$dir/number"; : > "$dir/oid"
     echo "https://github.com/o/r/pull/$n" ;;
