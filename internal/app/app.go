@@ -13,6 +13,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/Wuerike/git-push-memories/internal/claudecode"
+	"github.com/Wuerike/git-push-memories/internal/codex"
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/consolidation"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
@@ -20,7 +21,7 @@ import (
 )
 
 const usage = `Usage:
-  gpm setup <repository-url> [--categories a,b] [--yes]
+  gpm setup <repository-url> [--agent claude-code|codex] [--categories a,b] [--yes]
   gpm promote --finish
   gpm mcp
   gpm version
@@ -62,7 +63,17 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 	flags.SetOutput(stderr)
 	categories := flags.String("categories", "", "comma-separated memory categories, used only when the repository is created")
 	yes := flags.Bool("yes", false, "run without prompts")
+	agent := flags.String("agent", "claude-code", "agent integration: claude-code or codex")
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+		return 2
+	}
+	preflight, install := claudecode.Preflight, claudecode.Install
+	switch *agent {
+	case "claude-code":
+	case "codex":
+		preflight, install = codex.Preflight, codex.Install
+	default:
+		fmt.Fprintf(stderr, "unknown agent %q; use claude-code or codex\n", *agent)
 		return 2
 	}
 	interactive := isTerminal(stdin)
@@ -70,7 +81,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, "setup needs a terminal for prompts; pass --yes (and --categories for a new repository)")
 		return 2
 	}
-	if err := claudecode.Preflight(); err != nil {
+	if err := preflight(); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -92,7 +103,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if err := claudecode.Install(ctx); err != nil {
+	if err := install(ctx); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -100,7 +111,12 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "Configured memory for %s. Use /remember <fact> and /promote in any Claude Code session.\n", prepared.RepoURL)
+	if *agent == "codex" {
+		fmt.Fprintf(stdout, "Configured memory for %s. Use $remember <fact> and $promote in any Codex session.\n", prepared.RepoURL)
+		fmt.Fprintf(stdout, "Memory directory for Codex --add-dir: %s\n", prepared.StateRoot)
+	} else {
+		fmt.Fprintf(stdout, "Configured memory for %s. Use /remember <fact> and /promote in any Claude Code session.\n", prepared.RepoURL)
+	}
 	return 0
 }
 
@@ -159,7 +175,7 @@ func runPromote(ctx context.Context, args []string, _ io.Reader, stdout, stderr 
 		return 2
 	}
 	if !*finish {
-		fmt.Fprintln(stderr, "promote needs --finish; start consolidation with /promote in Claude Code")
+		fmt.Fprintln(stderr, "promote needs --finish; start consolidation with /promote in Claude Code or $promote in Codex")
 		return 2
 	}
 	cfg, err := config.Load()

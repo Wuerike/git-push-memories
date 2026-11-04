@@ -3,7 +3,8 @@
 O GPM mantém conhecimento compartilhado em arquivos Markdown e usa GitHub para
 captura e publicação. As skills interpretam o conteúdo e conduzem a revisão.
 O percurso de uso está em [workflow.md](workflow.md), e a instalação da
-integração em [Claude Code](../integrations/claude-code/README.md).
+integração em [Claude Code](../integrations/claude-code/README.md) e
+[Codex](../integrations/codex/README.md).
 
 ## Repository model
 
@@ -30,30 +31,37 @@ somente `memories/<categoria-configurada>/**/*.md` da `main` publicada.
 
 | Comando | Efeito |
 | --- | --- |
-| `gpm setup <url> [--categories a,b] [--yes]` | Prepara clone/worktrees, configura `gpm.json`, registra MCP e instala skills no escopo do usuário |
+| `gpm setup <url> [--agent claude-code\|codex] [--categories a,b] [--yes]` | Prepara clone/worktrees, configura `gpm.json`, registra MCP e instala skills no escopo do usuário |
 | `gpm promote --finish` | Confirma merge pelo GitHub, limpa propostas selecionadas e atualiza a leitura local |
 | `gpm mcp` | Serve as oito ferramentas MCP por stdio |
 | `gpm version`, `gpm help` | Informam versão e ajuda |
 
-O setup exige `git`, `claude`, identidade Git e credenciais para o remoto.
+O setup exige `git`, a CLI do agente selecionado (`claude` ou `codex`),
+identidade Git e credenciais para o remoto. `--agent` aceita `claude-code`
+(padrão) ou `codex`. Repita o setup com a mesma URL para instalar cada integração.
 Categorias são exigidas para inicializar um remoto vazio. Um remoto com conteúdo
 precisa de `gpm.json` na `main`. As categorias devem ser uma lista não vazia,
 sem duplicatas e com nomes lowercase kebab-case. O arquivo usa `schema_version: 1`
 e os campos mostrados acima.
 
 A URL é salva em `<UserConfigDir>/git-push-memories/config.json`, no campo
-`repo_url`; o setup usa a mesma URL em execuções subsequentes. As skills são
-instaladas em `~/.claude/skills`. O clone bare e os worktrees ficam no diretório
-de estado do usuário.
+`repo_url`; o setup usa a mesma URL em execuções subsequentes. As skills ficam
+em `~/.claude/skills` para Claude Code e `~/.agents/skills` para Codex. O Codex
+recebe metadados de invocação explícita em `agents/openai.yaml`. A configuração
+MCP é registrada pela CLI de cada agente, preservando as demais configurações.
+O clone bare e os worktrees ficam no diretório de estado do usuário.
 
 ## Skills
 
-`/remember` investiga o assunto nas memórias publicadas e propostas pendentes,
+No Claude Code, invoque `/remember` e `/promote`; no Codex, `$remember` e
+`$promote`. As duas integrações exigem invocação explícita das skills.
+
+`remember` investiga o assunto nas memórias publicadas e propostas pendentes,
 interpreta o conhecimento e sugere ação e destino. O agente adapta buscas e
 leituras à dúvida, mostra o texto exato que será compartilhado e pede confirmação
 antes de criar a proposta pela API do GitHub.
 
-`/promote [assunto ou caminhos]` seleciona propostas, investiga as memórias
+`promote [assunto ou caminhos]` seleciona propostas, investiga as memórias
 relacionadas e discute um plano global na conversa. O agente lê integralmente
 as propostas selecionadas e as páginas que pretende editar; segue referências e
 contradições conforme necessário. Explica incertezas e limitações de cobertura.
@@ -130,8 +138,11 @@ mensagem e códigos como `promotion_not_prepared`, `no_proposals`, `no_changes`,
 - Captura e publicação exigem GitHub, rede e `gh` autenticado com escrita.
 - A leitura atualiza a `main` com TTL de 10 minutos e conserva o último estado
   conhecido quando o fetch falha. A conclusão após merge atualiza a leitura.
-- Execute uma promoção por vez. O estado de preparação pertence ao processo MCP;
-  conserve o caminho do worktree para consultar os arquivos após uma interrupção.
+- No Codex, a consolidação exige acesso de escrita ao diretório de estado.
+  O setup informa o caminho para usar com `codex --add-dir`.
+- Execute uma promoção por vez, inclusive entre agentes. O estado de preparação
+  pertence ao processo MCP; conserve o caminho do worktree para consultar os
+  arquivos após uma interrupção.
 - Um diff de memórias vazio deixa as propostas pendentes.
 - A confirmação humana decide o compartilhamento de texto livre. O agente deve
   excluir segredos, dados pessoais privados e material de sessão. Propostas

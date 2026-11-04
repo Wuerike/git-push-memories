@@ -19,13 +19,16 @@ pode usar o Markdown, os metadados e a estrutura adequados ao assunto.
 Prepare um repositório vazio no GitHub e execute:
 
 ```sh
-gpm setup https://github.com/your-team/memories.git --categories technical,product
+gpm setup https://github.com/your-team/memories.git --agent codex --categories technical,product
 ```
 
-O setup exige `git` com worktrees, CLI do `claude`, identidade Git e credenciais
-para o remoto. Instala o MCP e as skills `/remember` e `/promote` no escopo do
-usuário. Captura e publicação usam `gh` autenticado com escrita. Quem apenas lê
-um repositório preparado usa as credenciais Git para atualizá-lo.
+O setup exige `git` com worktrees, CLI do agente selecionado, identidade Git e
+credenciais para o remoto. `--agent codex` instala o MCP e as skills `$remember`
+e `$promote` no Codex; `--agent claude-code` ou a omissão da opção configura
+`/remember` e `/promote` no Claude Code. As skills têm escopo de usuário.
+Repita o setup com a mesma URL para configurar cada agente. Captura e publicação
+usam `gh` autenticado com escrita. Quem apenas lê um repositório preparado usa
+as credenciais Git para atualizá-lo.
 
 Em remoto vazio, o setup cria `gpm.json`, `main` e `proposals`. Em um repositório
 preparado, usa as categorias existentes na `main`. `--yes` permite executar sem
@@ -47,6 +50,10 @@ O clone bare e os worktrees ficam em
 | `promotions/<id>/inputs` | Cópias dos insumos selecionados |
 | `promotion-published.json` | PR, branch e caminhos/blobs selecionados para limpeza |
 
+No Codex, inicie a sessão com `codex --add-dir "<diretório-de-estado>"`, usando
+o caminho absoluto informado pelo setup, para permitir a edição dos worktrees.
+Veja o [guia do Codex](../integrations/codex/README.md#acesso-aos-arquivos).
+
 O projeto de código em que você trabalha mantém seu próprio repositório.
 O estado de edição da consolidação pertence ao processo MCP. Os arquivos ficam
 no disco para consulta após uma interrupção.
@@ -67,10 +74,10 @@ inclusive falha, atualiza o horário do TTL. Sem rede, a leitura conserva o últ
 estado conhecido. Objetos Git permitem continuar lendo uma revisão anterior
 publicada após a atualização.
 
-## Capture with /remember
+## Capture with remember
 
-Invoque `/remember <fato>`. O agente interpreta o assunto e consulta a memória
-e as propostas pendentes. Usa apenas as categorias de `gpm.json` ao sugerir um
+Invoque `$remember <fato>` no Codex ou `/remember <fato>` no Claude Code.
+O agente interpreta o assunto e consulta a memória e as propostas pendentes. Usa apenas as categorias de `gpm.json` ao sugerir um
 destino e explica inferências ou ambiguidades.
 
 Revise os campos `title` e `content` e confirme o envio ao repositório compartilhado.
@@ -81,11 +88,13 @@ destino quando conhecidos. A captura cria arquivo e commit na branch remota
 Uma falha é informada com o estado conhecido. Quando o resultado remoto for
 incerto, confira a listagem antes de repetir a captura.
 
-## Consolidate with /promote
+## Consolidate with promote
 
-Execute uma promoção por vez, com rede, identidade Git e `gh` autenticado.
+Execute uma promoção por vez, inclusive entre agentes, com rede, identidade Git
+e `gh` autenticado. Use `$promote` no Codex e `/promote` no Claude Code.
+Os passos abaixo usam o nome `promote` para as duas integrações.
 
-1. **Selecione o escopo.** Invoque `/promote` para considerar as propostas
+1. **Selecione o escopo.** Invoque `promote` para considerar as propostas
    pendentes ou indique um assunto ou caminhos. O agente consulta
    `memory_proposal_list` e seleciona os insumos relacionados. Arquivos manuais
    Markdown sob `proposals/` também participam. Caminho e blob identificam cada
@@ -121,7 +130,7 @@ Execute uma promoção por vez, com rede, identidade Git e `gh` autenticado.
    selecionadas ficam pendentes até a confirmação do merge.
 8. **Conclua a limpeza.** Na máquina que publicou, execute
    `gpm promote --finish`, peça `memory_promote_finish` ou invoque o próximo
-   `/promote`. A conclusão confirma o merge e o commit em `origin/main`, remove
+   `promote`. A conclusão confirma o merge e o commit em `origin/main`, remove
    somente caminhos selecionados cujo blob continua igual e atualiza a leitura
    publicada. Propostas novas, alteradas ou fora da seleção permanecem pendentes.
 

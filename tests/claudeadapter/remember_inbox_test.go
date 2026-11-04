@@ -171,11 +171,12 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frontmatterEnd := strings.Index(string(contents)[4:], "\n---\n")
+	text := strings.ReplaceAll(string(contents), "\r\n", "\n")
+	frontmatterEnd := strings.Index(text[4:], "\n---\n")
 	if frontmatterEnd < 0 {
 		t.Fatal("invalid skill frontmatter")
 	}
-	frontmatter := string(contents)[:frontmatterEnd+4]
+	frontmatter := text[:frontmatterEnd+4]
 	for _, tool := range []string{"memory_search", "memory_read", "memory_propose"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)

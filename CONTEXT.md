@@ -55,5 +55,5 @@ belongs to the current MCP process; files remain on disk for inspection.
 After confirmed GitHub merge and verification of the merge commit in
 `origin/main`, remove only selected proposal paths whose blobs still match.
 Preserve new, changed and unselected proposals and refresh published reads.
-Completion runs through the next `/promote`, `memory_promote_finish`, or
-`gpm promote --finish`.
+Completion runs through the next `$promote` in Codex or `/promote` in Claude Code,
+through `memory_promote_finish`, or through `gpm promote --finish`.

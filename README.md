@@ -2,9 +2,11 @@
 
 `git-push-memories` é um projeto open source para criar e manter uma memória compartilhada de domínio a partir de sessões de trabalho com agentes de programação.
 
-A integração com Claude Code oferece as skills `/remember` e `/promote`,
+As integrações com Claude Code e Codex oferecem as skills `remember` e `promote`,
 apoiadas por ferramentas MCP em Go para acessar o repositório de memória, Git
-e GitHub. As skills interpretam o conhecimento e conduzem as decisões de conteúdo.
+e GitHub. No Claude Code, invoque `/remember` e `/promote`; no Codex,
+`$remember` e `$promote`. As skills interpretam o conhecimento e conduzem
+as decisões de conteúdo.
 
 ## Problema
 
@@ -27,11 +29,11 @@ A documentação do domínio e a preservação de decisões são consequências 
 
 Um time pode trabalhar em vários repositórios de código e manter um único repositório de memória. Cada pessoa configura a ferramenta com a URL Git desse repositório.
 
-Durante uma sessão, `/remember` investiga conhecimento relacionado e apresenta
+Durante uma sessão, `remember` investiga conhecimento relacionado e apresenta
 uma proposta de texto livre para confirmação. A captura envia o Markdown para
 a branch `proposals` do repositório compartilhado.
 
-`/promote` seleciona propostas, investiga memórias relacionadas e discute um
+`promote` seleciona propostas, investiga memórias relacionadas e discute um
 plano com a pessoa. Depois da aprovação, o agente edita arquivos Markdown
 comuns, apresenta o diff e pede aprovação para abrir um PR. A pessoa faz o merge;
 a conclusão limpa apenas os insumos selecionados que continuam com o mesmo
@@ -59,7 +61,7 @@ Sessões completas, prompts, respostas e referências para sessões não devem s
 
 ### Captura explícita
 
-A pessoa invoca `/remember` e confirma o texto antes do compartilhamento.
+A pessoa invoca `remember` e confirma o texto antes do compartilhamento.
 O agente usa a conversa e a investigação de conhecimento existente para
 preparar uma proposta que faça sentido fora da sessão.
 
@@ -72,8 +74,9 @@ e alterações em conhecimento existente, com revisão e aprovação da pessoa.
 ## Documentação
 
 - [Funcionalidades](docs/features.md) — comandos, skills, ferramentas MCP e requisitos de operação.
-- [Fluxo de uso](docs/workflow.md) — branches, worktrees, setup, `/remember`, `/promote` e finalização.
+- [Fluxo de uso](docs/workflow.md) — branches, worktrees, setup, captura, consolidação e finalização.
 - [Integração com Claude Code](integrations/claude-code/README.md) — configuração e uso das skills.
+- [Integração com Codex](integrations/codex/README.md) — setup, skills e acesso aos arquivos.
 - [Glossário](CONTEXT.md) — termos do domínio.
 - Pesquisa:
   - [Panorama de projetos de memória para IA](docs/research/ai-memory-projects-overview.md)
@@ -90,13 +93,18 @@ curl -fsSL https://raw.githubusercontent.com/Wuerike/git-push-memories/main/inst
 
 Ou, a partir de um clone com Go disponível, `make install` (use `INSTALL_DIR=/outro/diretorio` para mudar o destino, padrão `~/.local/bin`).
 
-Depois, uma vez por máquina, aponte para o repositório de memória:
+Depois, uma vez por máquina, aponte para o repositório de memória. Para Codex:
 
 ```bash
-gpm setup git@github.com:org/memoria.git --categories domains,decision
+gpm setup git@github.com:org/memoria.git --agent codex --categories domains,decision
 ```
 
-Pré-requisitos, efeitos do setup e uso no dia a dia: [features](docs/features.md) e [integração com Claude Code](integrations/claude-code/README.md).
+Para Claude Code, use `--agent claude-code` ou omita `--agent`. Configure cada
+integração com a mesma URL para usar os dois agentes.
+
+Pré-requisitos, efeitos do setup e uso no dia a dia: [features](docs/features.md),
+[integração com Codex](integrations/codex/README.md) e
+[integração com Claude Code](integrations/claude-code/README.md).
 
 ## Desenvolvimento
 

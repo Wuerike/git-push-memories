@@ -13,7 +13,7 @@ func promoteSkill(t *testing.T) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return string(data)
+	return strings.ReplaceAll(string(data), "\r\n", "\n")
 }
 
 // These contracts check the instructions shipped to the agent; runtime tests

@@ -1,0 +1,3 @@
+# managed-by: git-push-memories
+policy:
+  allow_implicit_invocation: false

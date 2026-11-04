@@ -54,6 +54,15 @@ type e2eEvidence struct {
 }
 
 func TestManagedWorkflowEndToEnd(t *testing.T) {
+	testManagedWorkflowEndToEnd(t, "claude-code")
+}
+
+func TestCodexManagedWorkflowEndToEnd(t *testing.T) {
+	testManagedWorkflowEndToEnd(t, "codex")
+}
+
+func testManagedWorkflowEndToEnd(t *testing.T, agent string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Second)
 	defer cancel()
 	repositoryRoot, err := filepath.Abs(filepath.Join("..", ".."))
@@ -82,11 +91,15 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	if err := os.Mkdir(toolsRoot, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	writeExecutable(t, filepath.Join(toolsRoot, "claude"), "#!/bin/sh\nexit 0\n")
+	agentCLI, invocation := "claude", "Use /remember <fact> and /promote"
+	if agent == "codex" {
+		agentCLI, invocation = "codex", "Use $remember <fact> and $promote"
+	}
+	writeExecutable(t, filepath.Join(toolsRoot, agentCLI), "#!/bin/sh\nexit 0\n")
 	environment := gpmEnvironment(t, runRoot, toolsRoot)
 	mapURLToRemote(t, environmentValue(environment, "HOME"), remote)
-	setupOutput := commandOutput(t, ctx, repositoryRoot, environment, binary, "setup", githubURL, "--yes", "--categories", "domains,decision")
-	if !strings.Contains(setupOutput, "Use /remember <fact> and /promote") {
+	setupOutput := commandOutput(t, ctx, repositoryRoot, environment, binary, "setup", githubURL, "--agent", agent, "--yes", "--categories", "domains,decision")
+	if !strings.Contains(setupOutput, invocation) {
 		t.Fatalf("setup = %q", setupOutput)
 	}
 	paths, err := workspace.PathsFor(githubURL)
@@ -246,7 +259,7 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	freshRoot := filepath.Join(runRoot, "fresh-user")
 	freshEnvironment := gpmEnvironment(t, freshRoot, toolsRoot)
 	mapURLToRemote(t, environmentValue(freshEnvironment, "HOME"), remote)
-	commandOutput(t, ctx, repositoryRoot, freshEnvironment, binary, "setup", githubURL, "--yes")
+	commandOutput(t, ctx, repositoryRoot, freshEnvironment, binary, "setup", githubURL, "--agent", agent, "--yes")
 	freshState := filepath.Join(environmentValue(freshEnvironment, "XDG_STATE_HOME"), "git-push-memories", workspace.RepoID(githubURL))
 	refsBefore := gitOutput(t, ctx, realGit, remote, freshEnvironment, "for-each-ref")
 	inboxBefore := gitOutput(t, ctx, realGit, filepath.Join(freshState, "proposals"), freshEnvironment, "rev-parse", "HEAD")
