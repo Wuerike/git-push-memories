@@ -4,7 +4,7 @@
 // Modified by git-push-memories: anchors are strict, duplicate IDs fail parsing,
 // and frontmatter is excluded from section identity.
 
-// Package markdown implements byte-preserving Markdown parsing and editing.
+// Package markdown implements byte-preserving Markdown parsing and section reading.
 package markdown
 
 import (
@@ -135,16 +135,6 @@ func isFrontmatterDelimiter(line []byte) bool {
 
 func isFrontmatterEnd(line []byte) bool {
 	return string(bytes.TrimSuffix(bytes.TrimSuffix(line, []byte("\n")), []byte("\r"))) == "..."
-}
-
-// FindByID returns the section with id, if one exists.
-func FindByID(sections []Section, id string) (*Section, bool) {
-	for i := range sections {
-		if sections[i].AnchorID == id {
-			return &sections[i], true
-		}
-	}
-	return nil, false
 }
 
 func hashBytes(value []byte) string {

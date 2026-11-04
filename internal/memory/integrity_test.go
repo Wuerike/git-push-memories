@@ -13,7 +13,7 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/memory"
 )
 
-func TestApplyDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
+func TestReadingDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 	memoryRoot := newMemoryRoot(t, validPage)
 	outsideRoot := newMemoryRoot(t, validPage)
 	repository := openRepository(t, memoryRoot)
@@ -31,29 +31,28 @@ func TestApplyDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 		t.Fatal("Inspect() modified Git objects")
 	}
 
-	_, err = repository.Apply(context.Background(), memory.ChangeSet{
-		Target:       memory.Target{Path: snapshot.Path, SectionID: "checkout-api-operation"},
-		BaselineHash: snapshot.FileHash,
-		Replacement:  "Timeout: 3 seconds.\n",
-	})
+	page, err := repository.ReadPage(context.Background(), snapshot.Path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if page.Markdown != validPage || page.ContentHash != snapshot.FileHash {
+		t.Fatalf("ReadPage() = %+v, want the inspected page", page)
+	}
 	if got := fingerprint(t, outsideRoot); got != outsideBefore {
-		t.Fatal("Apply() modified an unrelated worktree")
+		t.Fatal("reading modified an unrelated worktree")
 	}
 	if got := fingerprint(t, filepath.Join(memoryRoot, ".git", "index")); got != indexBefore {
-		t.Fatal("Apply() modified Git index")
+		t.Fatal("ReadPage() modified Git index")
 	}
 	if got := fingerprint(t, filepath.Join(memoryRoot, ".git", "objects")); got != objectsBefore {
-		t.Fatal("Apply() modified Git objects")
+		t.Fatal("ReadPage() modified Git objects")
 	}
 	entries, err := os.ReadDir(filepath.Join(memoryRoot, "memories"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 1 || entries[0].Name() != "checkout-api.md" {
-		t.Fatalf("temporary files remain after Apply(): %v", entries)
+		t.Fatalf("unexpected files after reading: %v", entries)
 	}
 	info, err := os.Stat(filepath.Join(memoryRoot, "memories", "checkout-api.md"))
 	if err != nil {

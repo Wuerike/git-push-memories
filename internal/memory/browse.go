@@ -16,7 +16,7 @@ func (repository *Repository) MarkdownPaths(ctx context.Context, categories []st
 		categoryRoots[path.Join("memories", category)] = struct{}{}
 	}
 	var paths []string
-	err := repository.withLock(ctx, false, func() error {
+	err := repository.withLock(ctx, func() error {
 		root, err := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", repository.root.Fd()))
 		if err != nil {
 			return err

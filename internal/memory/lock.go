@@ -8,16 +8,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func (repository *Repository) withLock(ctx context.Context, exclusive bool, action func() error) error {
+func (repository *Repository) withLock(ctx context.Context, action func() error) error {
 	repository.mutex.Lock()
 	defer repository.mutex.Unlock()
 
-	operation := unix.LOCK_SH
-	if exclusive {
-		operation = unix.LOCK_EX
-	}
 	for {
-		err := unix.Flock(int(repository.root.Fd()), operation|unix.LOCK_NB)
+		err := unix.Flock(int(repository.root.Fd()), unix.LOCK_SH|unix.LOCK_NB)
 		if err == nil {
 			break
 		}

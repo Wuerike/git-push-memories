@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wuerike/git-push-memories/internal/memory"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 )
 
@@ -145,23 +144,8 @@ func TestRetrieveUsesCurrentStateAndStalesOldHandle(t *testing.T) {
 	}
 	oldHandle := before.Items[0].Handle
 
-	repository, err := memory.New(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: oldHandle.Path})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = repository.Apply(context.Background(), memory.ChangeSet{
-		Target:       memory.Target{Path: oldHandle.Path, SectionID: oldHandle.SectionID},
-		BaselineHash: snapshot.FileHash,
-		Replacement:  "\n- O timeout de requisicoes e de tres segundos.\n- O servico pertence ao `team-b`.\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := repository.Close(); err != nil {
+	updated := strings.ReplaceAll(strings.ReplaceAll(initialMemory, "cinco", "tres"), "team-a", "team-b")
+	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(oldHandle.Path)), []byte(updated), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
