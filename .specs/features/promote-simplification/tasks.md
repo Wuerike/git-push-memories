@@ -149,15 +149,17 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] A conferência não cria commit nem token e inclui arquivos novos no diff.
-- [ ] IDs são preparados antes da revisão final; documentos ou categorias inválidos impedem publicação.
-- [ ] Arquivos auxiliares não são tratados como memória; edições humanas aparecem nos bytes/diff correntes.
-- [ ] Testes de conferência e suíte completa passam; registrar contagem real.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] A conferência não cria commit nem token e inclui arquivos novos no diff.
+- [x] IDs são preparados antes da revisão final; documentos ou categorias inválidos impedem publicação.
+- [x] Arquivos auxiliares não são tratados como memória; edições humanas aparecem nos bytes/diff correntes.
+- [x] Testes de conferência e suíte completa passam; registrar contagem real.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: integration; internal/consolidation/check_test.go com pelo menos 3 testes de formato/categorias, arquivo novo e edição humana atual.
 **Gate**: Full — go test ./...
 **Commit**: `feat(consolidation): check current memory files`
+
+**Result**: Complete — 3 testes novos nomeados (6 testes/subtestes), gate completo e make verify passaram: testes comuns, race, vet e build. Nenhum teste existente removido.
 
 ### T5: Publicar um commit global e abrir PR
 
@@ -496,8 +498,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T3 concluídas e verificadas; próxima T4. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T4 concluídas e verificadas; próxima T5. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
+**Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 
 Há 14 tarefas em quatro fases. Podem ser executadas pelo principal ou, com autorização explícita, por dois trabalhadores sequenciais: fases 1+2 (7 tarefas), depois fases 3+4 (7 tarefas). A delegação desta implementação é distinta da delegação por memória prevista no produto. Nenhum trabalhador foi despachado.

@@ -1,7 +1,7 @@
 # Promote Simplification Specification
 
 **Approved**: 2026-11-03 - user: "aprovado"
-**Status:** Execução aprovada e em andamento; T1 concluída.
+**Status:** Execução aprovada e em andamento; provas finais pendentes.
 **Scope:** Large; fluxo principal entre preparação Git, skill, ferramentas de promoção e publicação GitHub.
 
 ## Problem Statement
@@ -153,11 +153,11 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 
 | Requirement ID | Story / criterion | Phase | Status |
 | --- | --- | --- | --- |
-| PROM-01 | Preparar e compreender, AC 1 | Specify | Pending |
-| PROM-02 | Preparar e compreender, AC 2 | Specify | Pending |
+| PROM-01 | Preparar e compreender, AC 1 | Execute | Implementing |
+| PROM-02 | Preparar e compreender, AC 2 | Execute | Implementing |
 | PROM-03 | Preparar e compreender, AC 3 | Specify | Pending |
-| PROM-04 | Preparar e compreender, AC 4 | Specify | Pending |
-| PROM-05 | Preparar e compreender, AC 5 | Specify | Pending |
+| PROM-04 | Preparar e compreender, AC 4 | Execute | Implementing |
+| PROM-05 | Preparar e compreender, AC 5 | Execute | Implementing |
 | PROM-06 | Discutir o plano, AC 1 | Specify | Pending |
 | PROM-07 | Discutir o plano, AC 2 | Specify | Pending |
 | PROM-08 | Discutir o plano, AC 3 | Specify | Pending |
@@ -167,26 +167,26 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-12 | Preparar e revisar, AC 1 | Specify | Pending |
 | PROM-13 | Preparar e revisar, AC 2 | Specify | Pending |
 | PROM-14 | Preparar e revisar, AC 3 | Specify | Pending |
-| PROM-15 | Preparar e revisar, AC 4 | Specify | Pending |
-| PROM-16 | Preparar e revisar, AC 5 | Specify | Pending |
-| PROM-17 | Preparar e revisar, AC 6 | Specify | Pending |
+| PROM-15 | Preparar e revisar, AC 4 | Execute | Implementing |
+| PROM-16 | Preparar e revisar, AC 5 | Execute | Implementing |
+| PROM-17 | Preparar e revisar, AC 6 | Execute | Implementing |
 | PROM-18 | Preparar e revisar, AC 7 | Specify | Pending |
-| PROM-19 | Preparar e revisar, AC 8 | Specify | Pending |
+| PROM-19 | Preparar e revisar, AC 8 | Execute | Implementing |
 | PROM-20 | Preparar e revisar, AC 9 | Specify | Pending |
-| PROM-21 | Preparar e revisar, AC 10 | Specify | Pending |
-| PROM-22 | Publicar e concluir, AC 1 | Specify | Pending |
+| PROM-21 | Preparar e revisar, AC 10 | Execute | Implementing |
+| PROM-22 | Publicar e concluir, AC 1 | Execute | Implementing |
 | PROM-23 | Publicar e concluir, AC 2 | Specify | Pending |
 | PROM-24 | Publicar e concluir, AC 3 | Specify | Pending |
 | PROM-25 | Publicar e concluir, AC 4 | Specify | Pending |
 | PROM-26 | Publicar e concluir, AC 5 | Specify | Pending |
 | PROM-27 | Publicar e concluir, AC 6 | Specify | Pending |
 | PROM-28 | Substituir contrato, AC 1 | Specify | Pending |
-| PROM-29 | Substituir contrato, AC 2 | Specify | Pending |
+| PROM-29 | Substituir contrato, AC 2 | Execute | Implementing |
 | PROM-30 | Substituir contrato, AC 3 | Specify | Pending |
 | PROM-31 | Substituir contrato, AC 4 | Specify | Pending |
-| PROM-32 | Edge Cases, AC 1 | Specify | Pending |
+| PROM-32 | Edge Cases, AC 1 | Execute | Implementing |
 | PROM-33 | Edge Cases, AC 2 | Specify | Pending |
-| PROM-34 | Edge Cases, AC 3 | Specify | Pending |
+| PROM-34 | Edge Cases, AC 3 | Execute | Implementing |
 
 **Coverage:** 34 critérios identificados e mapeados às 14 tarefas de `tasks.md`, com 34 checks e provas planejadas.
 
