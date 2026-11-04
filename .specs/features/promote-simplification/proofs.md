@@ -1,6 +1,6 @@
 # promote-simplification proofs
 
-**HEAD**: 1ac27b0
+**HEAD**: b64b9d2
 **Tree**: clean
 **Result**: 37 pass, 0 fail; mutations 3 killed, 0 not
 
@@ -37,7 +37,7 @@
 | C29 | `go test ./internal/consolidation -run '^TestPrepareAndSubmitDoNotUseSharedReleaseMarker$' -count=1` | 1 | 1 | pass |
 | C30 | `go test ./internal/mcpserver -run '^TestConsolidationPreservesRememberAndPublishedReads$' -count=1` | 1 | 1 | pass |
 | C31 | `go test ./tests/claudeadapter -run '^TestPromotionDocumentationDescribesImplementedWorkflow$' -count=1` | 1 | 1 | pass |
-| C32 | `go test ./internal/consolidation -run '^(TestConsolidationFailureStopsWithoutDeletingWork|TestSubmitFailureKee` | 3 | 3 | pass |
+| C32 | `go test ./internal/consolidation -run '^Test.*Failure.*Work$' -count=1` | 3 | 3 | pass |
 | C33 | `go test ./tests/claudeadapter -run '^TestPromoteContractStopsOnIncompleteContext$' -count=1` | 1 | 1 | pass |
 | C34 | `go test ./internal/consolidation -run '^TestPrepareWithoutProposalsDoesNotPublish$' -count=1` | 1 | 1 | pass |
 | Build | `go vet ./...` | - | - | pass |
