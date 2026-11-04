@@ -5,6 +5,7 @@ package workspace
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -30,11 +31,13 @@ const FetchTTL = 10 * time.Minute
 
 // Paths are the absolute locations under <state>/<repo-id>.
 type Paths struct {
-	State     string // <state>/<repo-id>; also the repolock root
-	Repo      string // bare clone
-	Read      string
-	Proposals string
-	Release   string
+	State      string // <state>/<repo-id>; also the repolock root
+	Repo       string // bare clone
+	Read       string
+	Proposals  string
+	Release    string
+	Promotions string
+	Published  string
 }
 
 func RepoID(url string) string {
@@ -61,17 +64,42 @@ func PathsFor(url string) (Paths, error) {
 	}
 	state := filepath.Join(base, RepoID(url))
 	return Paths{
-		State:     state,
-		Repo:      filepath.Join(state, "repo"),
-		Read:      filepath.Join(state, "read"),
-		Proposals: filepath.Join(state, "proposals"),
-		Release:   filepath.Join(state, "release"),
+		State:      state,
+		Repo:       filepath.Join(state, "repo"),
+		Read:       filepath.Join(state, "read"),
+		Proposals:  filepath.Join(state, "proposals"),
+		Release:    filepath.Join(state, "release"),
+		Promotions: filepath.Join(state, "promotions"),
+		Published:  filepath.Join(state, "promotion-published.json"),
 	}, nil
 }
 
 type Workspace struct {
 	URL   string
 	Paths Paths
+}
+
+// PromotionPaths locates a fresh worktree and its separate, read-only inputs.
+type PromotionPaths struct {
+	Worktree, InputsRoot, Branch string
+}
+
+// NewPromotion creates a new branch at base without moving any existing worktree.
+func (w *Workspace) NewPromotion(ctx context.Context, base string) (PromotionPaths, error) {
+	id := time.Now().UTC().Format("20060102T150405Z") + "-" + strings.ToLower(rand.Text()[:8])
+	root := filepath.Join(w.Paths.Promotions, id)
+	paths := PromotionPaths{
+		Worktree:   filepath.Join(root, "worktree"),
+		InputsRoot: filepath.Join(root, "inputs"),
+		Branch:     "promote/" + id,
+	}
+	if err := os.MkdirAll(paths.InputsRoot, 0o700); err != nil {
+		return PromotionPaths{}, err
+	}
+	if _, err := w.Repo().Output(ctx, "worktree", "add", "-b", paths.Branch, paths.Worktree, base); err != nil {
+		return PromotionPaths{}, err
+	}
+	return paths, nil
 }
 
 func Open(url string) (*Workspace, error) {

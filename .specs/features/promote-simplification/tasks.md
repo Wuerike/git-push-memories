@@ -106,14 +106,16 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] NewPromotion cria branch promote/<UTC>-<random> em uma revisão explícita e retorna worktree e inputs separados.
-- [ ] Paths centraliza Promotions e Published; não faz push, merge, reset ou remoção de trabalho anterior.
-- [ ] Testes conferem HEAD e os caminhos absolutos; registrar contagem real.
-- [ ] Gate da tarefa passa: `go test ./internal/workspace`.
+- [x] NewPromotion cria branch promote/<UTC>-<random> em uma revisão explícita e retorna worktree e inputs separados.
+- [x] Paths centraliza Promotions e Published; não faz push, merge, reset ou remoção de trabalho anterior.
+- [x] Testes conferem HEAD e os caminhos absolutos; registrar contagem real.
+- [x] Gate da tarefa passa: `go test ./internal/workspace`.
 
 **Tests**: integration; ampliar internal/workspace/workspace_test.go com pelo menos 2 testes de base exata e caminhos de insumos/comprovante fora do worktree.
 **Gate**: Quick — go test ./internal/workspace
 **Commit**: `feat(workspace): prepare isolated promotion worktrees`
+
+**Result**: Complete — workspace gate: 8 testes/subtestes passaram, incluindo 2 testes novos; zero falhas.
 
 ### T3: Capturar propostas fixas e inventário de memórias
 
@@ -492,7 +494,7 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** 2026-11-03 - user: "aprovado", aprovando tarefas e execução sequencial proposta pelo principal. T1 concluída: documentos canônicos e 139 testes/subtestes verdes. Próxima: T2. Nenhum trabalhador de implementação autorizado ou despachado.
+**Settled mid-build:** T1–T2 concluídas e verificadas; próxima T3. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 

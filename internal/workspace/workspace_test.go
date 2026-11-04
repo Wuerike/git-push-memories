@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,55 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/workspace"
 	wt "github.com/Wuerike/git-push-memories/internal/workspace/workspacetest"
 )
+
+func TestNewPromotionStartsAtExactBase(t *testing.T) {
+	w, remote := setup(t)
+	base := wt.Git(t, w.Paths.Repo, "rev-parse", "origin/main")
+	wt.Seed(t, remote, "main", map[string]string{"memories/later.md": "Later.\n"})
+	if err := w.Fetch(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	prepared, err := w.NewPromotion(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wt.Git(t, prepared.Worktree, "rev-parse", "HEAD"); got != base {
+		t.Fatalf("HEAD = %s, want pinned base %s", got, base)
+	}
+	if branch := wt.Git(t, prepared.Worktree, "branch", "--show-current"); branch != prepared.Branch || !strings.HasPrefix(branch, "promote/") {
+		t.Fatalf("branch = %q, preparation = %+v", branch, prepared)
+	}
+	if _, err := os.Stat(filepath.Join(prepared.Worktree, "memories", "later.md")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("later memory leaked into pinned worktree: %v", err)
+	}
+	if refs := wt.Git(t, remote, "for-each-ref", "--format=%(refname)", "refs/heads/promote/"); refs != "" {
+		t.Fatalf("preparation pushed a branch: %s", refs)
+	}
+}
+
+func TestPromotionInputsAndPublicationRecordStayOutsideWorktree(t *testing.T) {
+	w, _ := setup(t)
+	base := wt.Git(t, w.Paths.Repo, "rev-parse", "origin/main")
+	prepared, err := w.NewPromotion(context.Background(), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.Paths.Promotions != filepath.Join(w.Paths.State, "promotions") || w.Paths.Published != filepath.Join(w.Paths.State, "promotion-published.json") {
+		t.Fatalf("promotion layout = %+v", w.Paths)
+	}
+	if filepath.Dir(prepared.InputsRoot) != filepath.Dir(prepared.Worktree) || filepath.Base(prepared.InputsRoot) != "inputs" {
+		t.Fatalf("inputs must be a sibling of worktree: %+v", prepared)
+	}
+	for _, outside := range []string{prepared.InputsRoot, w.Paths.Published} {
+		relative, err := filepath.Rel(prepared.Worktree, outside)
+		if err != nil || !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			t.Fatalf("auxiliary path %s is not outside %s", outside, prepared.Worktree)
+		}
+	}
+	if dirty := wt.Git(t, prepared.Worktree, "status", "--porcelain"); dirty != "" {
+		t.Fatalf("new worktree is dirty: %q", dirty)
+	}
+}
 
 func setup(t *testing.T) (*workspace.Workspace, string) {
 	t.Helper()
