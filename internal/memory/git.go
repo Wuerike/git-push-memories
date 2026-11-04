@@ -9,25 +9,25 @@ import (
 	"strings"
 )
 
-func (repository *Repository) gitIdentity(ctx context.Context, relativePath string) (string, string, error) {
+func (repository *Repository) validateGitIdentity(ctx context.Context, relativePath string) error {
 	head, err := repository.gitOutput(ctx, "rev-parse", "--verify", "HEAD")
 	if err != nil {
-		return "", "", fmt.Errorf("read Git HEAD: %w", ErrInvalidSchema)
+		return fmt.Errorf("read Git HEAD: %w", ErrInvalidSchema)
 	}
 	headID := strings.TrimSpace(string(head))
 	treeEntry, err := repository.gitOutput(ctx, "ls-tree", "-z", headID, "--", relativePath)
 	if err != nil || len(treeEntry) == 0 {
-		return "", "", fmt.Errorf("read Git blob: %w", ErrInvalidSchema)
+		return fmt.Errorf("read Git blob: %w", ErrInvalidSchema)
 	}
 	tab := bytes.IndexByte(treeEntry, '\t')
 	if tab < 0 {
-		return "", "", fmt.Errorf("read Git blob: %w", ErrInvalidSchema)
+		return fmt.Errorf("read Git blob: %w", ErrInvalidSchema)
 	}
 	fields := strings.Fields(string(treeEntry[:tab]))
 	if len(fields) != 3 || fields[1] != "blob" {
-		return "", "", fmt.Errorf("read Git blob: %w", ErrInvalidSchema)
+		return fmt.Errorf("read Git blob: %w", ErrInvalidSchema)
 	}
-	return headID, fields[2], nil
+	return nil
 }
 
 func (repository *Repository) gitOutput(ctx context.Context, args ...string) ([]byte, error) {

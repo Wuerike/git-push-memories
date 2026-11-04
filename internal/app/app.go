@@ -3,7 +3,6 @@ package app
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,8 +16,6 @@ import (
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/consolidation"
 	"github.com/Wuerike/git-push-memories/internal/mcpserver"
-	"github.com/Wuerike/git-push-memories/internal/protocol"
-	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"github.com/Wuerike/git-push-memories/internal/setup"
 )
 
@@ -26,7 +23,6 @@ const usage = `Usage:
   gpm setup <repository-url> [--categories a,b] [--yes]
   gpm promote --finish
   gpm mcp
-  gpm retrieve <query> --budget-bytes <n>
   gpm version
   gpm help
 `
@@ -50,8 +46,6 @@ func Run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		return runPromote(ctx, args[1:], stdin, stdout, stderr)
 	case "mcp":
 		return runMCP(ctx, args[1:], stdin, stdout, stderr, version)
-	case "retrieve":
-		return runRetrieve(ctx, args[1:], stdout, stderr)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n%s", args[0], usage)
 		return 2
@@ -98,7 +92,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	if _, err := claudecode.Install(ctx); err != nil {
+	if err := claudecode.Install(ctx); err != nil {
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
@@ -106,7 +100,7 @@ func runSetup(ctx context.Context, args []string, stdin io.Reader, stdout, stder
 		fmt.Fprintln(stderr, err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "Configured memory for %s. Use /remember <fact> and /promote in any Claude Code session.\n", prepared.Config.RepoURL)
+	fmt.Fprintf(stdout, "Configured memory for %s. Use /remember <fact> and /promote in any Claude Code session.\n", prepared.RepoURL)
 	return 0
 }
 
@@ -127,51 +121,6 @@ func isTerminal(reader io.Reader) bool {
 	}
 	_, err := unix.IoctlGetTermios(int(file.Fd()), unix.TCGETS)
 	return err == nil
-}
-
-func runRetrieve(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) == 0 || args[0] == "" {
-		fmt.Fprintln(stderr, "retrieve query is required")
-		return 2
-	}
-	query := args[0]
-	flags := flag.NewFlagSet("retrieve", flag.ContinueOnError)
-	flags.SetOutput(stderr)
-	budget := flags.Int("budget-bytes", 0, "maximum UTF-8 bytes for the ContextBundle JSON")
-	pathPrefix := flags.String("path-prefix", "", "optional canonical relative path scope")
-	if err := flags.Parse(args[1:]); err != nil {
-		return 2
-	}
-	if flags.NArg() != 0 {
-		fmt.Fprintln(stderr, "retrieve accepts exactly one query")
-		return 2
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 2
-	}
-	readRoot, err := cfg.Workspace().ResolveRead(ctx, true)
-	if err != nil {
-		fmt.Fprintln(stderr, err)
-		return 1
-	}
-	retriever, err := retrieval.New(readRoot, cfg.MemoryCategories...)
-	if err != nil {
-		fmt.Fprintln(stderr, "retrieval could not initialize")
-		return 1
-	}
-	defer retriever.Close()
-	bundle, err := retriever.Retrieve(ctx, query, retrieval.Scope{PathPrefix: *pathPrefix}, *budget)
-	if err != nil {
-		fmt.Fprintln(stderr, retrieval.ErrorCode(err))
-		return 1
-	}
-	if err := json.NewEncoder(stdout).Encode(protocol.NewEnvelope(bundle)); err != nil {
-		fmt.Fprintln(stderr, "write retrieval response failed")
-		return 1
-	}
-	return 0
 }
 
 func runMCP(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, version string) int {

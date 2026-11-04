@@ -192,8 +192,8 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	if gitOutput(t, ctx, realGit, remote, environment, "rev-parse", "main") != mainBefore {
 		t.Fatal("submit merged its own PR")
 	}
-	beforeMerge := commandOutput(t, ctx, repositoryRoot, environment, binary, "retrieve", "checkout nine team-blue", "--budget-bytes", "4096")
-	if strings.Contains(beforeMerge, "nine seconds") {
+	beforeMerge := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, session, "memory_search", map[string]any{"query": "checkout nine team-blue", "budget_bytes": 4096})))
+	if len(beforeMerge.Items) != 0 {
 		t.Fatal("unmerged memory is visible to readers")
 	}
 	open := requireData(t, decodeTool[consolidation.Finished](t, callTool(t, ctx, session, "memory_promote_finish", map[string]any{})))
@@ -224,9 +224,13 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	if got := gitOutput(t, ctx, realGit, remote, environment, "show", "main:"+checkoutPath); got != strings.TrimSuffix(string(human), "\n") {
 		t.Fatalf("merged page differs from reviewed human file: %q", got)
 	}
-	mergedRead := commandOutput(t, ctx, repositoryRoot, environment, binary, "retrieve", "checkout nine team-blue", "--budget-bytes", "4096")
-	if !strings.Contains(mergedRead, "nine seconds") || !strings.Contains(mergedRead, "authorization only") {
-		t.Fatalf("published read lost current facts: %s", mergedRead)
+	reader := connectMCP(t, ctx, binary, environment, "e2e-published-reader")
+	mergedRead := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, reader, "memory_search", map[string]any{"query": "checkout nine team-blue", "budget_bytes": 4096})))
+	if !bundleContains(*mergedRead, "nine seconds") || !bundleContains(*mergedRead, "authorization only") {
+		t.Fatalf("published read lost current facts: %+v", mergedRead)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatal(err)
 	}
 
 	for _, value := range []string{privateSourceMarker, rejectedSecret, sourceRoot} {

@@ -20,7 +20,7 @@ func TestReadingDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 	outsideBefore := fingerprint(t, outsideRoot)
 	indexBefore := fingerprint(t, filepath.Join(memoryRoot, ".git", "index"))
 	objectsBefore := fingerprint(t, filepath.Join(memoryRoot, ".git", "objects"))
-	snapshot, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
+	_, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -31,21 +31,8 @@ func TestReadingDoesNotWriteOutsideRootGitIndexOrObjects(t *testing.T) {
 		t.Fatal("Inspect() modified Git objects")
 	}
 
-	page, err := repository.ReadPage(context.Background(), snapshot.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Markdown != validPage || page.ContentHash != snapshot.FileHash {
-		t.Fatalf("ReadPage() = %+v, want the inspected page", page)
-	}
 	if got := fingerprint(t, outsideRoot); got != outsideBefore {
 		t.Fatal("reading modified an unrelated worktree")
-	}
-	if got := fingerprint(t, filepath.Join(memoryRoot, ".git", "index")); got != indexBefore {
-		t.Fatal("ReadPage() modified Git index")
-	}
-	if got := fingerprint(t, filepath.Join(memoryRoot, ".git", "objects")); got != objectsBefore {
-		t.Fatal("ReadPage() modified Git objects")
 	}
 	entries, err := os.ReadDir(filepath.Join(memoryRoot, "memories"))
 	if err != nil {

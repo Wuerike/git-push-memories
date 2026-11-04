@@ -36,6 +36,32 @@ func TestInspectRejectsPathsOutsideMemoryRoot(t *testing.T) {
 	}
 }
 
+func TestInspectRequiresCommittedMemory(t *testing.T) {
+	for _, withHead := range []bool{false, true} {
+		name := "without HEAD"
+		if withHead {
+			name = "untracked page"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			runGit(t, root, "init", "--quiet")
+			if withHead {
+				runGit(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "initial")
+			}
+			if err := os.Mkdir(filepath.Join(root, "memories"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(root, "memories", "checkout-api.md"), []byte(validPage), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			repository := openRepository(t, root)
+			if _, err := repository.Inspect(context.Background(), memory.Scope{Path: "memories/checkout-api.md"}); !errors.Is(err, memory.ErrInvalidSchema) {
+				t.Fatalf("Inspect() error = %v, want ErrInvalidSchema", err)
+			}
+		})
+	}
+}
+
 func TestInspectAcceptsNestedMemoryPages(t *testing.T) {
 	root := newEmptyMemoryRoot(t)
 	for _, name := range []string{"memories/page.md", "memories/nested/page.md", "page.md"} {

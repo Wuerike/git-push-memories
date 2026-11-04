@@ -1,12 +1,12 @@
 package mcpserver_test
 
 import (
-	"context"
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type listedProposals struct {
@@ -46,10 +46,12 @@ func TestMemoryReadFollowsPublishedMain(t *testing.T) {
 	if err := os.Remove(filepath.Join(e.m.Config.Paths.State, "fetch-attempt")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.m.Config.Workspace().ResolveRead(context.Background(), true); err != nil {
-		t.Fatal(err)
-	}
+	deadline := time.Now().Add(5 * time.Second)
 	search := e.search(t, "", "settlement retry failures")
+	for len(search.Items) == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		search = e.search(t, "", "settlement retry failures")
+	}
 	if len(search.Items) != 1 || search.Items[0].Handle.Path != "memories/domains/settlement.md" {
 		t.Fatalf("search after refresh = %+v", search)
 	}
@@ -65,9 +67,6 @@ func TestReadToolsRejectUnavailableOrUnknownSource(t *testing.T) {
 	if !expand.IsError || errorCode(t, expand) != "invalid_source" {
 		t.Fatalf("release expand without release = %+v, code %q", expand, errorCode(t, expand))
 	}
-	if result, page := e.pageRead(t, "release", checkoutPath, 4096); !result.IsError || page.Error == nil || page.Error.Code != "invalid_source" {
-		t.Fatalf("release page_read without release = %+v, %+v", result, page)
-	}
 	list := e.call(t, "memory_proposal_list", map[string]any{"source": "release"})
 	if !list.IsError || errorCode(t, list) != "invalid_source" {
 		t.Fatalf("release proposal list without release = %+v, code %q", list, errorCode(t, list))
@@ -79,9 +78,6 @@ func TestReadToolsRejectUnavailableOrUnknownSource(t *testing.T) {
 		if result := e.call(t, name, arguments); !result.IsError || errorCode(t, result) != "invalid_source" {
 			t.Fatalf("%s with unknown source = %+v, code %q", name, result, errorCode(t, result))
 		}
-	}
-	if result, page := e.pageRead(t, "elsewhere", checkoutPath, 4096); !result.IsError || page.Error == nil || page.Error.Code != "invalid_source" {
-		t.Fatalf("page_read with unknown source = %+v, %+v", result, page)
 	}
 }
 
@@ -163,39 +159,5 @@ func TestProposalListIsReadOnly(t *testing.T) {
 	}
 	if status := gitOutput(t, e.proposalsRoot(), "status", "--porcelain"); status != "" {
 		t.Fatalf("proposal list dirtied the worktree: %q", status)
-	}
-}
-
-func TestPageReadToolReturnsWholePage(t *testing.T) {
-	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
-	result, response := e.pageRead(t, "", checkoutPath, 4096)
-	if result.IsError || response.Data == nil || response.Data.Markdown != memoryPage || response.Data.Path != checkoutPath || !strings.HasPrefix(response.Data.ContentHash, "sha256:") {
-		t.Fatalf("memory_page_read result = %+v, response = %+v", result, response)
-	}
-}
-
-func TestPageReadToolFailsWhenPageExceedsBudget(t *testing.T) {
-	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
-	result, response := e.pageRead(t, "", checkoutPath, len(memoryPage))
-	if !result.IsError || response.Error == nil || response.Error.Code != "budget_too_small" || response.Data != nil {
-		t.Fatalf("oversized result = %+v, response = %+v", result, response)
-	}
-}
-
-func TestPageReadToolRejectsInvalidRequests(t *testing.T) {
-	e := newEnv(t, map[string]string{checkoutPath: memoryPage, "memories/notes/fact.md": memoryPage})
-	for _, test := range []struct {
-		path   string
-		budget int
-		code   string
-	}{
-		{"memories/notes/fact.md", 4096, "invalid_path"},
-		{"memories/domains/missing.md", 4096, "invalid_path"},
-		{checkoutPath, 0, "invalid_budget"},
-	} {
-		result, response := e.pageRead(t, "", test.path, test.budget)
-		if !result.IsError || response.Error == nil || response.Error.Code != test.code || response.Data != nil {
-			t.Fatalf("%+v result = %+v, response = %+v", test, result, response)
-		}
 	}
 }

@@ -2,8 +2,6 @@ package memory
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -19,11 +17,6 @@ import (
 type Repository struct {
 	root  *os.File
 	mutex sync.Mutex
-}
-
-type repositoryState struct {
-	snapshot Snapshot
-	source   []byte
 }
 
 // Open opens a memory repository for reading without modifying its files.
@@ -55,12 +48,9 @@ func (repository *Repository) Close() error {
 func (repository *Repository) Inspect(ctx context.Context, scope Scope) (Snapshot, error) {
 	var snapshot Snapshot
 	err := repository.withLock(ctx, func() error {
-		state, err := repository.load(ctx, scope.Path)
-		if err != nil {
-			return err
-		}
-		snapshot = state.snapshot
-		return nil
+		var err error
+		snapshot, err = repository.load(ctx, scope.Path)
+		return err
 	})
 	if err != nil {
 		return Snapshot{}, err
@@ -68,43 +58,35 @@ func (repository *Repository) Inspect(ctx context.Context, scope Scope) (Snapsho
 	return snapshot, nil
 }
 
-func (repository *Repository) load(ctx context.Context, requestedPath string) (repositoryState, error) {
+func (repository *Repository) load(ctx context.Context, requestedPath string) (Snapshot, error) {
 	canonicalPath, source, err := repository.read(requestedPath)
 	if err != nil {
-		return repositoryState{}, err
+		return Snapshot{}, err
 	}
 	parsed, err := validateDocument(source)
 	if err != nil {
-		return repositoryState{}, err
+		return Snapshot{}, err
 	}
-	head, blob, err := repository.gitIdentity(ctx, canonicalPath)
-	if err != nil {
-		return repositoryState{}, err
+	if err := repository.validateGitIdentity(ctx, canonicalPath); err != nil {
+		return Snapshot{}, err
 	}
 
 	sections := make([]Section, len(parsed))
 	for i, parsedSection := range parsed {
 		body, err := markdown.SectionContent(source, parsedSection)
 		if err != nil {
-			return repositoryState{}, fmt.Errorf("read section content: %w", ErrInvalidSchema)
+			return Snapshot{}, fmt.Errorf("read section content: %w", ErrInvalidSchema)
 		}
 		leaf := i+1 >= len(parsed) || parsed[i+1].ByteStart >= parsedSection.ByteEnd
 		sections[i] = Section{
 			ID:          parsedSection.AnchorID,
 			Heading:     parsedSection.HeadingText,
-			Level:       parsedSection.HeadingLevel,
 			Body:        string(body),
 			ContentHash: parsedSection.ContentHash,
 			Leaf:        leaf,
 		}
 	}
-	return repositoryState{snapshot: Snapshot{
-		Path:     canonicalPath,
-		FileHash: hash(source),
-		Head:     head,
-		Blob:     blob,
-		Sections: sections,
-	}, source: source}, nil
+	return Snapshot{Path: canonicalPath, Sections: sections}, nil
 }
 
 func (repository *Repository) read(requestedPath string) (string, []byte, error) {
@@ -151,9 +133,4 @@ func canonicalRelativePath(requestedPath string) (string, error) {
 		return "", ErrInvalidPath
 	}
 	return clean, nil
-}
-
-func hash(value []byte) string {
-	sum := sha256.Sum256(value)
-	return "sha256:" + hex.EncodeToString(sum[:])
 }

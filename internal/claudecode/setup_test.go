@@ -25,15 +25,14 @@ func TestSetupConfiguresGlobalMCPAndSkill(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(root, "claude-config"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(root, "config"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "state"))
-	result, err := Install(context.Background())
-	if err != nil {
+	if err := Install(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	contents, err := os.ReadFile(result.SkillPath)
+	contents, err := os.ReadFile(filepath.Join(root, "claude-config", "skills", "remember", "SKILL.md"))
 	if err != nil || !strings.Contains(string(contents), managedMarker) {
 		t.Fatalf("installed skill = %q, %v", contents, err)
 	}
-	promoteContents, err := os.ReadFile(result.PromoteSkillPath)
+	promoteContents, err := os.ReadFile(filepath.Join(root, "claude-config", "skills", "promote", "SKILL.md"))
 	if err != nil || !strings.Contains(string(promoteContents), managedMarker) {
 		t.Fatalf("installed promote skill = %q, %v", promoteContents, err)
 	}
@@ -44,7 +43,7 @@ func TestSetupConfiguresGlobalMCPAndSkill(t *testing.T) {
 	if strings.Contains(string(log), "code-root") || !strings.Contains(string(log), "mcp add --transport stdio --scope user git-push-memories") || !strings.Contains(string(log), "mcp get git-push-memories") {
 		t.Fatalf("Claude commands = %s", log)
 	}
-	if _, err := Install(context.Background()); err != nil {
+	if err := Install(context.Background()); err != nil {
 		t.Fatalf("repeated Setup() failed: %v", err)
 	}
 }

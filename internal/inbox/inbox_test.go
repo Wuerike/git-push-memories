@@ -161,11 +161,6 @@ func gitOutput(t *testing.T, root string, arguments ...string) string {
 	return strings.TrimSpace(string(output))
 }
 
-func gitSucceeds(root string, arguments ...string) bool {
-	command := exec.Command("git", append([]string{"-C", root}, arguments...)...)
-	return command.Run() == nil
-}
-
 func TestAddFailureLeavesNothingBehind(t *testing.T) {
 	box, root, m := newBox(t)
 	before := gitOutput(t, m.Remote, "rev-parse", "proposals")

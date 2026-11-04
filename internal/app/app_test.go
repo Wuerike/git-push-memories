@@ -240,7 +240,7 @@ func TestMCPDoesNotExposeConfiguredURL(t *testing.T) {
 	if err := config.Save(secretURL); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"mcp"}, {"retrieve", "query", "--budget-bytes", "1024"}, {"promote", "--finish"}} {
+	for _, args := range [][]string{{"mcp"}, {"promote", "--finish"}} {
 		code, stdout, stderr := run(args...)
 		if code == 0 {
 			t.Fatalf("%v: exit code = 0, want failure", args)
@@ -254,66 +254,6 @@ func TestMCPDoesNotExposeConfiguredURL(t *testing.T) {
 }
 
 const checkoutPage = "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\ntimeout team-b\n"
-
-func TestRetrieveReturnsVersionedReadOnlyContextFromReadWorktree(t *testing.T) {
-	managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": checkoutPage})
-	cfg := managed.Config
-	beforeRead, beforeProposals := treeFingerprint(t, cfg.Paths.Read), treeFingerprint(t, cfg.Paths.Proposals)
-	beforeRemote := remoteRef(t, managed.Remote, "refs/heads/proposals")
-
-	code, stdout, stderr := run("retrieve", "checkout timeout team", "--budget-bytes", "2048")
-	if code != 0 {
-		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr)
-	}
-	var response struct {
-		SchemaVersion int                     `json:"schema_version"`
-		Data          retrieval.ContextBundle `json:"data"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
-		t.Fatal(err)
-	}
-	if response.SchemaVersion != 1 || len(response.Data.Items) != 1 {
-		t.Fatalf("retrieve response = %+v", response)
-	}
-	if stderr != "" {
-		t.Fatalf("stderr = %q, want empty", stderr)
-	}
-	if treeFingerprint(t, cfg.Paths.Read) != beforeRead {
-		t.Fatal("retrieve changed the read worktree")
-	}
-	if treeFingerprint(t, cfg.Paths.Proposals) != beforeProposals || remoteRef(t, managed.Remote, "refs/heads/proposals") != beforeRemote {
-		t.Fatal("retrieve touched proposals")
-	}
-}
-
-func TestRetrieveSeesProposalsOnlyAfterTheyAreMerged(t *testing.T) {
-	managed := wt.Setup(t, nil)
-	managed.Remember(t, "Checkout timeout team-b")
-	retrieve := func() int {
-		code, stdout, stderr := run("retrieve", "checkout timeout team", "--budget-bytes", "2048")
-		if code != 0 {
-			t.Fatalf("exit code = %d, stderr = %q", code, stderr)
-		}
-		var response struct {
-			Data retrieval.ContextBundle `json:"data"`
-		}
-		if err := json.Unmarshal([]byte(stdout), &response); err != nil {
-			t.Fatal(err)
-		}
-		return len(response.Data.Items)
-	}
-	if got := retrieve(); got != 0 {
-		t.Fatalf("retrieve returned %d items for an unmerged proposal", got)
-	}
-	// Publishing to main and letting the refresh interval pass makes retrieve fetch the new main.
-	managed.PublishMain(t, map[string]string{"memories/domains/checkout-api.md": checkoutPage})
-	if err := os.Remove(filepath.Join(managed.Config.Paths.State, "fetch-attempt")); err != nil && !errors.Is(err, os.ErrNotExist) {
-		t.Fatal(err)
-	}
-	if got := retrieve(); got != 1 {
-		t.Fatalf("retrieve returned %d items after main was published, want 1", got)
-	}
-}
 
 func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
 	managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": checkoutPage})
@@ -342,7 +282,7 @@ func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTools := []string{"memory_expand", "memory_page_read", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
+	wantTools := []string{"memory_expand", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
 	}

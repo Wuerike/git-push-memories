@@ -28,18 +28,6 @@ const memoryPage = `# checkout-api
 - owner: team-b
 `
 
-const removableMemoryPage = `# Checkout API
-<!-- @id: checkout-api -->
-
-## Operation
-<!-- @id: checkout-api-operation -->
-Timeout is three seconds.
-
-## Ownership
-<!-- @id: checkout-api-ownership -->
-Owned by team-b.
-`
-
 const checkoutPath = "memories/domains/checkout-api.md"
 
 type response struct {
@@ -56,17 +44,6 @@ type inboxResponse struct {
 	Error         *struct {
 		Code string `json:"code"`
 	} `json:"error,omitempty"`
-}
-
-type pageReadResponse struct {
-	Data *struct {
-		Path        string `json:"path"`
-		ContentHash string `json:"content_hash"`
-		Markdown    string `json:"markdown"`
-	} `json:"data"`
-	Error *struct {
-		Code string `json:"code"`
-	} `json:"error"`
 }
 
 func decodeResponse(t *testing.T, result *mcp.CallToolResult) response {
@@ -112,11 +89,6 @@ func errorCode(t *testing.T, result *mcp.CallToolResult) string {
 func gitOutput(t *testing.T, root string, arguments ...string) string {
 	t.Helper()
 	return workspacetest.Git(t, root, arguments...)
-}
-
-func runGit(t *testing.T, root string, arguments ...string) {
-	t.Helper()
-	workspacetest.Git(t, root, arguments...)
 }
 
 // startServer runs an MCP server for the managed repository over in-memory pipes.
@@ -183,8 +155,6 @@ func newEnv(t *testing.T, files map[string]string) *env {
 
 func (e *env) proposalsRoot() string { return e.m.Config.Paths.Proposals }
 
-func (e *env) readRoot() string { return e.m.Config.Paths.Read }
-
 func (e *env) call(t *testing.T, name string, arguments map[string]any) *mcp.CallToolResult {
 	t.Helper()
 	result, err := e.session.CallTool(context.Background(), &mcp.CallToolParams{Name: name, Arguments: arguments})
@@ -222,18 +192,6 @@ func (e *env) search(t *testing.T, source, query string) *retrieval.ContextBundl
 	return decodeResponse(t, result).Data
 }
 
-func (e *env) pageRead(t *testing.T, source, path string, budget int) (*mcp.CallToolResult, pageReadResponse) {
-	t.Helper()
-	arguments := map[string]any{"path": path, "budget_bytes": budget}
-	if source != "" {
-		arguments["source"] = source
-	}
-	result := e.call(t, "memory_page_read", arguments)
-	var decoded pageReadResponse
-	decodeStructured(t, result, &decoded)
-	return result, decoded
-}
-
 func readFile(t *testing.T, root, relative string) string {
 	t.Helper()
 	contents, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(relative)))
@@ -241,18 +199,6 @@ func readFile(t *testing.T, root, relative string) string {
 		t.Fatal(err)
 	}
 	return string(contents)
-}
-
-func exists(root, relative string) bool {
-	_, err := os.Stat(filepath.Join(root, filepath.FromSlash(relative)))
-	return err == nil
-}
-
-func writeFile(t *testing.T, root, relative, contents string) {
-	t.Helper()
-	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(relative)), []byte(contents), 0o644); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // publishExecutable commits the executable bit of path on the remote main.

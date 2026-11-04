@@ -60,12 +60,12 @@ no disco; esta versão não retoma uma consolidação interrompida.
 
 ## Published reads
 
-`memory_search`, `memory_expand`, `memory_page_read` e `gpm retrieve` leem a
-`main` publicada. Propostas pendentes e arquivos em revisão não entram na busca.
+`memory_search` e `memory_expand` leem a `main` publicada. Propostas pendentes e
+arquivos em revisão não entram na busca.
 
-O worktree `read` faz fetch com TTL de 10 minutos. No MCP, a leitura usa o estado
-atual e dispara atualização assíncrona se necessário; na CLI a atualização é
-síncrona. Uma tentativa de fetch, inclusive falha, atualiza o horário do TTL.
+O worktree `read` faz fetch com TTL de 10 minutos. A leitura usa o estado
+atual e dispara atualização assíncrona se necessário. Uma tentativa de fetch,
+inclusive falha, atualiza o horário do TTL.
 Sem rede, a leitura conserva a última versão conhecida. Handles de conteúdo
 alterado são rejeitados como obsoletos na expansão.
 

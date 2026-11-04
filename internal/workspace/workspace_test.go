@@ -89,8 +89,8 @@ func TestHappyPath(t *testing.T) {
 	if err := w.EnsureWorktree(ctx, w.Paths.Proposals, workspace.ProposalsBranch, "origin/main"); err != nil {
 		t.Fatal(err)
 	}
-	if exists, err := w.RemoteBranchExists(ctx, "proposals"); err != nil || exists {
-		t.Fatalf("RemoteBranchExists before push = %v, %v", exists, err)
+	if refs := wt.Git(t, remote, "for-each-ref", "refs/heads/proposals"); refs != "" {
+		t.Fatalf("unexpected remote proposals branch: %s", refs)
 	}
 	os.MkdirAll(filepath.Join(w.Paths.Proposals, "proposals"), 0o755)
 	os.WriteFile(filepath.Join(w.Paths.Proposals, "proposals", "1.md"), []byte("p1\n"), 0o644)
@@ -103,7 +103,7 @@ func TestHappyPath(t *testing.T) {
 	if err := w.Push(ctx, w.Paths.Proposals, "proposals"); err != nil {
 		t.Fatal(err)
 	}
-	if exists, _ := w.RemoteBranchExists(ctx, "proposals"); !exists {
+	if refs := wt.Git(t, remote, "for-each-ref", "refs/heads/proposals"); refs == "" {
 		t.Fatal("proposals not on remote")
 	}
 
@@ -194,18 +194,11 @@ func TestGitHub(t *testing.T) {
 	if err := client.AuthStatus(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if pr, err := client.PRFind(ctx, "release/x"); err != nil || pr != nil {
-		t.Fatalf("PRFind none = %v, %v", pr, err)
-	}
 	if _, err := client.PRCreate(ctx, "main", "release/x", "t", "b"); err != nil {
 		t.Fatal(err)
 	}
 	gh.SetPR(t, "MERGED", "abc")
-	pr, err := client.PRFind(ctx, "release/x")
-	if err != nil || pr == nil || pr.State != "MERGED" || pr.MergeCommit.OID != "abc" {
-		t.Fatalf("PRFind = %+v, %v", pr, err)
-	}
-	if view, err := client.PRView(ctx, pr.Number); err != nil || view.State != "MERGED" {
+	if view, err := client.PRView(ctx, 1); err != nil || view.State != "MERGED" || view.MergeCommit.OID != "abc" {
 		t.Fatalf("PRView = %+v, %v", view, err)
 	}
 }

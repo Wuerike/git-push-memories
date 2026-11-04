@@ -2,7 +2,6 @@ package mcpserver
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,8 +24,6 @@ type Server struct {
 	inbox         *inbox.Inbox
 	inboxMu       sync.Mutex
 	consolidation *consolidation.Manager
-	pages         *memory.Repository
-	pagesMu       sync.Mutex
 }
 
 func New(cfg config.Config, version string) (*Server, error) {
@@ -42,7 +39,6 @@ func New(cfg config.Config, version string) (*Server, error) {
 	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_propose", Description: "Add one reviewable Markdown proposal to the proposals branch through GitHub, in a single call that either succeeds or changes nothing."}, server.addProposal)
 	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_search", Description: "Search published memory in configured categories and return ranked section excerpts with expandable handles."}, server.search)
 	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_expand", Description: "Expand one published memory section from a search handle within an exact byte budget."}, server.expand)
-	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_page_read", Description: "Read a whole published canonical page with its content hash, or fail with budget_too_small; never truncates a page."}, server.readPage)
 	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_proposal_list", Description: "List committed Markdown proposals and configured categories. This live inbox is separate from a promotion's fixed inputs."}, server.listProposals)
 	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_promote_prepare", Description: "Prepare a new worktree from fetched main and fixed proposal inputs. Returns file paths and inventories for full reading and discussion before editing. Completes a previously merged publication first."}, server.preparePromotion)
 	mcp.AddTool(server.inner, &mcp.Tool{Name: "memory_promote_check", Description: "Complete missing canonical IDs and return the diff of the current files for human review. No commit or publication occurs."}, server.checkPromotion)
@@ -53,7 +49,6 @@ func New(cfg config.Config, version string) (*Server, error) {
 
 func (s *Server) Run(ctx context.Context, input io.Reader, output io.Writer) error {
 	defer s.retriever.Close()
-	defer s.closePages()
 	transport := &mcp.IOTransport{Reader: io.NopCloser(input), Writer: nopWriteCloser{Writer: output}}
 	return s.inner.Run(ctx, transport)
 }
@@ -69,24 +64,6 @@ type expandInput struct {
 	Handle      retrieval.Handle `json:"handle" jsonschema:"handle returned by memory_search"`
 	BudgetBytes int              `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the ContextBundle JSON"`
 	Source      string           `json:"source,omitempty" jsonschema:"main (default, published memory)"`
-}
-
-type pageReadInput struct {
-	Path        string `json:"path" jsonschema:"canonical relative memory page path inside a configured category"`
-	BudgetBytes int    `json:"budget_bytes" jsonschema:"maximum UTF-8 bytes for the page JSON data object"`
-	Source      string `json:"source,omitempty" jsonschema:"main (default, published memory)"`
-}
-
-type pageReadData struct {
-	Path        string `json:"path"`
-	ContentHash string `json:"content_hash"`
-	Markdown    string `json:"markdown"`
-}
-
-type pageReadResponse struct {
-	SchemaVersion int           `json:"schema_version"`
-	Data          *pageReadData `json:"data,omitempty"`
-	Error         *toolError    `json:"error,omitempty"`
 }
 
 type addProposalInput struct {
@@ -133,30 +110,18 @@ type proposalListResponse struct {
 
 var errUnknownSource = errors.New("unknown source")
 
-func (s *Server) sourceRoot(ctx context.Context, source string) (string, error) {
+func (s *Server) refreshRead(source string) error {
 	if source != "" && source != "main" {
-		return "", errUnknownSource
+		return errUnknownSource
 	}
-	return s.cfg.Workspace().ResolveRead(ctx, false)
+	_, err := s.cfg.Workspace().ResolveRead()
+	return err
 }
 func sourceErrorCode(err error, fallback string) string {
 	if errors.Is(err, errUnknownSource) {
 		return "invalid_source"
 	}
 	return fallback
-}
-func (s *Server) retrieverFor(ctx context.Context, source string) (*retrieval.Retriever, func(), error) {
-	if _, err := s.sourceRoot(ctx, source); err != nil {
-		return nil, nil, err
-	}
-	return s.retriever, func() {}, nil
-}
-func (s *Server) pagesFor(ctx context.Context, source string) (*memory.Repository, func(), error) {
-	if _, err := s.sourceRoot(ctx, source); err != nil {
-		return nil, nil, err
-	}
-	repository, err := s.pageRepository()
-	return repository, func() {}, err
 }
 
 func (s *Server) listProposals(ctx context.Context, _ *mcp.CallToolRequest, input listProposalsInput) (*mcp.CallToolResult, proposalListResponse, error) {
@@ -260,88 +225,23 @@ func (s *Server) finishPromotion(ctx context.Context, _ *mcp.CallToolRequest, _ 
 type nopWriteCloser struct{ io.Writer }
 
 func (s *Server) search(ctx context.Context, _ *mcp.CallToolRequest, input searchInput) (*mcp.CallToolResult, toolResponse, error) {
-	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
-	if err != nil {
+	if err := s.refreshRead(input.Source); err != nil {
 		return retrieverFailure(err)
 	}
-	defer closeRetriever()
-	bundle, err := retriever.Retrieve(ctx, input.Query, retrieval.Scope{PathPrefix: input.PathPrefix}, input.BudgetBytes)
+	bundle, err := s.retriever.Retrieve(ctx, input.Query, retrieval.Scope{PathPrefix: input.PathPrefix}, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
 }
 
 func (s *Server) expand(ctx context.Context, _ *mcp.CallToolRequest, input expandInput) (*mcp.CallToolResult, toolResponse, error) {
-	retriever, closeRetriever, err := s.retrieverFor(ctx, input.Source)
-	if err != nil {
+	if err := s.refreshRead(input.Source); err != nil {
 		return retrieverFailure(err)
 	}
-	defer closeRetriever()
-	bundle, err := retriever.Expand(ctx, input.Handle, input.BudgetBytes)
+	bundle, err := s.retriever.Expand(ctx, input.Handle, input.BudgetBytes)
 	return retrievalResponse(bundle, err)
 }
 
 func retrieverFailure(err error) (*mcp.CallToolResult, toolResponse, error) {
 	return &mcp.CallToolResult{IsError: true}, toolResponse{SchemaVersion: 1, Error: &toolError{Code: sourceErrorCode(err, retrieval.ErrorCode(err))}}, nil
-}
-
-// readPage returns the whole page or a typed error. Codes: invalid_budget, invalid_path
-// (outside categories, missing, or not a canonical page path), invalid_page (schema), budget_too_small, page_read_failed.
-func (s *Server) readPage(ctx context.Context, _ *mcp.CallToolRequest, input pageReadInput) (*mcp.CallToolResult, pageReadResponse, error) {
-	if input.BudgetBytes <= 0 {
-		return pageReadFailure("invalid_budget")
-	}
-	if !s.cfg.IsMemoryPath(input.Path) {
-		return pageReadFailure("invalid_path")
-	}
-	repository, closeRepository, err := s.pagesFor(ctx, input.Source)
-	if err != nil {
-		return pageReadFailure(sourceErrorCode(err, "page_read_failed"))
-	}
-	defer closeRepository()
-	page, err := repository.ReadPage(ctx, input.Path)
-	if err != nil {
-		switch {
-		case errors.Is(err, memory.ErrInvalidPath):
-			return pageReadFailure("invalid_path")
-		case errors.Is(err, memory.ErrInvalidSchema):
-			return pageReadFailure("invalid_page")
-		}
-		return pageReadFailure("page_read_failed")
-	}
-	data := pageReadData{Path: page.Path, ContentHash: page.ContentHash, Markdown: page.Markdown}
-	encoded, err := json.Marshal(data)
-	if err != nil {
-		return pageReadFailure("page_read_failed")
-	}
-	if len(encoded) > input.BudgetBytes {
-		return pageReadFailure("budget_too_small")
-	}
-	return nil, pageReadResponse{SchemaVersion: 1, Data: &data}, nil
-}
-
-func pageReadFailure(code string) (*mcp.CallToolResult, pageReadResponse, error) {
-	return &mcp.CallToolResult{IsError: true}, pageReadResponse{SchemaVersion: 1, Error: &toolError{Code: code}}, nil
-}
-
-func (s *Server) pageRepository() (*memory.Repository, error) {
-	s.pagesMu.Lock()
-	defer s.pagesMu.Unlock()
-	if s.pages != nil {
-		return s.pages, nil
-	}
-	repository, err := memory.Open(s.cfg.MemoryRoot)
-	if err != nil {
-		return nil, err
-	}
-	s.pages = repository
-	return repository, nil
-}
-
-func (s *Server) closePages() {
-	s.pagesMu.Lock()
-	defer s.pagesMu.Unlock()
-	if s.pages != nil {
-		_ = s.pages.Close()
-	}
 }
 
 func (s *Server) addProposal(ctx context.Context, _ *mcp.CallToolRequest, input addProposalInput) (*mcp.CallToolResult, inboxToolResponse, error) {

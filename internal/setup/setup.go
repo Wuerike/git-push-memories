@@ -17,82 +17,71 @@ type Options struct {
 	Categories func() ([]string, error)
 }
 
-type Result struct {
-	Created bool
-	Config  config.Config
-}
-
 var errProtected = errors.New("the initial push was refused; if main is protected, enable the protection only after setup")
 
-func Prepare(ctx context.Context, options Options) (Result, error) {
+func Prepare(ctx context.Context, options Options) (config.Config, error) {
 	if options.URL == "" {
-		return Result{}, errors.New("repository URL is required")
+		return config.Config{}, errors.New("repository URL is required")
 	}
 	if err := workspace.CheckIdentity(ctx); err != nil {
-		return Result{}, err
+		return config.Config{}, err
 	}
 	stored, err := config.StoredURL()
 	if err != nil {
-		return Result{}, err
+		return config.Config{}, err
 	}
 	if stored != "" && stored != options.URL {
-		return Result{}, fmt.Errorf("already configured for %s; remove the state directory to switch repositories", stored)
+		return config.Config{}, fmt.Errorf("already configured for %s; remove the state directory to switch repositories", stored)
 	}
 	w, err := workspace.Open(options.URL)
 	if err != nil {
-		return Result{}, err
+		return config.Config{}, err
 	}
 	if err := w.Clone(ctx); err != nil {
-		return Result{}, fmt.Errorf("repository could not be cloned: %w", err)
+		return config.Config{}, fmt.Errorf("repository could not be cloned: %w", err)
 	}
 	if err := w.Fetch(ctx); err != nil {
-		return Result{}, err
+		return config.Config{}, err
 	}
 
-	created := false
 	switch {
 	case w.RefExists(ctx, "refs/remotes/origin/main"):
 		contents, err := w.ShowFile(ctx, "refs/remotes/origin/main", "gpm.json")
 		if err != nil {
-			return Result{}, errors.New("the repository has content but main has no gpm.json")
+			return config.Config{}, errors.New("the repository has content but main has no gpm.json")
 		}
 		if _, err := config.ParseRepositoryConfig(contents); err != nil {
-			return Result{}, err
+			return config.Config{}, err
 		}
 	case w.HasRemoteRefs(ctx):
-		return Result{}, errors.New("the repository has content but main has no gpm.json")
+		return config.Config{}, errors.New("the repository has content but main has no gpm.json")
 	default:
 		if options.Categories == nil {
-			return Result{}, errors.New("memory categories are required to initialize an empty repository")
+			return config.Config{}, errors.New("memory categories are required to initialize an empty repository")
 		}
 		categories, err := options.Categories()
 		if err != nil {
-			return Result{}, err
+			return config.Config{}, err
 		}
 		contents, err := config.RepositoryConfigJSON(categories)
 		if err != nil {
-			return Result{}, err
+			return config.Config{}, err
 		}
 		if err := w.CreateMain(ctx, map[string][]byte{"gpm.json": contents}); err != nil {
 			if errors.Is(err, workspace.ErrPermission) {
-				return Result{}, errProtected
+				return config.Config{}, errProtected
 			}
-			return Result{}, err
+			return config.Config{}, err
 		}
-		created = true
 	}
 
 	if err := ensureProposals(ctx, w); err != nil {
-		return Result{}, err
+		return config.Config{}, err
 	}
 	if err := w.EnsureRead(ctx); err != nil {
-		return Result{}, err
+		return config.Config{}, err
 	}
-	cfg, err := config.Resolve(options.URL)
-	if err != nil {
-		return Result{}, err
-	}
-	return Result{Created: created, Config: cfg}, nil
+	return config.Resolve(options.URL)
 }
 
 func ensureProposals(ctx context.Context, w *workspace.Workspace) error {

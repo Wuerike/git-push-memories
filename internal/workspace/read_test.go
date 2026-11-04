@@ -29,7 +29,10 @@ func TestReadFollowsMainAndStaleHandleIsDetected(t *testing.T) {
 	if err := w.EnsureRead(ctx); err != nil {
 		t.Fatal(err)
 	}
-	root, err := w.ResolveRead(ctx, true)
+	if err := w.Refresh(ctx); err != nil {
+		t.Fatal(err)
+	}
+	root, err := w.ResolveRead()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +48,7 @@ func TestReadFollowsMainAndStaleHandleIsDetected(t *testing.T) {
 
 	wt.Seed(t, remote, "main", map[string]string{"memories/domains/checkout-api.md": page("dez")})
 	os.Remove(filepath.Join(w.Paths.State, "fetch-attempt")) // TTL expired
-	if _, err := w.ResolveRead(ctx, true); err != nil {
+	if err := w.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := retriever.Expand(ctx, first.Items[0].Handle, 4096); !errors.Is(err, retrieval.ErrStaleHandle) {
@@ -64,7 +67,10 @@ func TestResolveReadOfflineKeepsLastCheckout(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Rename(remote, remote+".gone")
-	if root, err := w.ResolveRead(ctx, true); err != nil || root != w.Paths.Read {
+	if err := w.Refresh(ctx); !errors.Is(err, workspace.ErrNetwork) {
+		t.Fatalf("Refresh offline = %v, want ErrNetwork", err)
+	}
+	if root, err := w.ResolveRead(); err != nil || root != w.Paths.Read {
 		t.Fatalf("ResolveRead offline = %q, %v", root, err)
 	}
 	if _, err := os.Stat(filepath.Join(w.Paths.Read, "memories", "a.md")); err != nil {

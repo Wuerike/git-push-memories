@@ -103,9 +103,9 @@ Veja a [documentação de subagentes](https://code.claude.com/docs/en/sub-agents
 
 ## MCP tools
 
-O servidor expõe nove ferramentas:
+O servidor expõe oito ferramentas:
 
-- `memory_search`, `memory_expand` e `memory_page_read`: leitura da `main`.
+- `memory_search` e `memory_expand`: leitura da `main`.
 - `memory_propose` e `memory_proposal_list`: captura e consulta de propostas.
 - `memory_promote_prepare`: worktree e inventários fixos.
 - `memory_promote_check`: formato canônico e diff dos arquivos atuais.

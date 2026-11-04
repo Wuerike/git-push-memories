@@ -20,7 +20,6 @@ type Scope struct {
 type Section struct {
 	ID          string
 	Heading     string
-	Level       int
 	Body        string
 	ContentHash string
 	Leaf        bool
@@ -28,15 +27,5 @@ type Section struct {
 
 type Snapshot struct {
 	Path     string
-	FileHash string
-	Head     string
-	Blob     string
 	Sections []Section
-}
-
-// Page is one whole canonical page; ContentHash is the file hash used by Snapshot.FileHash.
-type Page struct {
-	Path        string
-	Markdown    string
-	ContentHash string
 }

@@ -73,7 +73,7 @@ func TestPromotionToolContractUsesFiles(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"memory_expand", "memory_page_read", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
+	want := []string{"memory_expand", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tools = %v, want %v", names, want)
 	}

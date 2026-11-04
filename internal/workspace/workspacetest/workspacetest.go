@@ -69,7 +69,7 @@ func Seed(t *testing.T, remote, branch string, files map[string]string) {
 	Git(t, clone, "push", "-q", "origin", branch)
 }
 
-// GH is a fake gh: auth always succeeds, "api" commits files to the remote in GPM_FAKE_REMOTE, and the last PR of any head is whatever the test sets.
+// GH is a fake gh: auth always succeeds, "api" commits files to the remote in GPM_FAKE_REMOTE, and "pr view" returns the PR state the test sets.
 type GH struct{ dir string }
 
 const fakeGH = `#!/usr/bin/env bash
@@ -81,10 +81,9 @@ case "$1 $2" in
     n=$(( $(cat "$dir/count" 2>/dev/null || echo 0) + 1 )); echo $n > "$dir/count"
     echo OPEN > "$dir/state"; echo "$n" > "$dir/number"; : > "$dir/oid"
     echo "https://github.com/o/r/pull/$n" ;;
-  "pr list"|"pr view")
-    [ -f "$dir/state" ] || { [ "$2" = list ] && echo '[]' && exit 0; exit 1; }
-    pr="{\"number\":$(cat "$dir/number"),\"state\":\"$(cat "$dir/state")\",\"url\":\"https://github.com/o/r/pull/$(cat "$dir/number")\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"mergeCommit\":{\"oid\":\"$(cat "$dir/oid")\"}}"
-    if [ "$2" = list ]; then echo "[$pr]"; else echo "$pr"; fi ;;
+  "pr view")
+    [ -f "$dir/state" ] || exit 1
+    echo "{\"state\":\"$(cat "$dir/state")\",\"mergeCommit\":{\"oid\":\"$(cat "$dir/oid")\"}}" ;;
   "api -X")
     # PUT repos/o/r/contents/<path> with a JSON body: commits the file to the branch of the bare remote in $GPM_FAKE_REMOTE.
     [ -z "$GPM_FAKE_API_FAIL" ] || { echo "gh: $GPM_FAKE_API_FAIL" >&2; exit 1; }
@@ -168,7 +167,7 @@ func Setup(t *testing.T, files map[string]string) *Managed {
 	if err := config.Save(GitHubURL); err != nil {
 		t.Fatal(err)
 	}
-	return &Managed{Remote: remote, Config: prepared.Config}
+	return &Managed{Remote: remote, Config: prepared}
 }
 
 // PublishMain commits files to the remote main, as a merged release PR would.

@@ -163,11 +163,6 @@ func matchScore(queryTerms []string, content string) int {
 	return score
 }
 
-// LexicalScore returns the deterministic distinct-term overlap used by retrieval ranking.
-func LexicalScore(query, content string) int {
-	return matchScore(tokenize(query), content)
-}
-
 func canonicalScope(requested string) (string, error) {
 	if requested == "" {
 		return "", nil

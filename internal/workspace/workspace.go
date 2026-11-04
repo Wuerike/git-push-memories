@@ -161,12 +161,6 @@ func (w *Workspace) FetchIfStale(ctx context.Context, ttl time.Duration) (bool, 
 	return true, w.Fetch(ctx)
 }
 
-// RemoteBranchExists asks the remote directly (ls-remote), without fetching.
-func (w *Workspace) RemoteBranchExists(ctx context.Context, branch string) (bool, error) {
-	out, err := w.Repo().Net(ctx, "ls-remote", "--heads", "origin", "refs/heads/"+branch)
-	return out != "", err
-}
-
 // RefExists reports whether a ref resolves in the bare clone.
 func (w *Workspace) RefExists(ctx context.Context, ref string) bool {
 	return w.Repo().Ok(ctx, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
@@ -240,15 +234,11 @@ func (w *Workspace) Refresh(ctx context.Context) error {
 
 var refreshing atomic.Bool
 
-// ResolveRead returns the read worktree root right away. When the TTL expired it
-// refreshes: synchronously for one-shot commands, in the background for the MCP.
-func (w *Workspace) ResolveRead(ctx context.Context, wait bool) (string, error) {
+// ResolveRead returns the read worktree root right away and refreshes it in the
+// background when the fetch TTL has expired.
+func (w *Workspace) ResolveRead() (string, error) {
 	if _, err := os.Stat(filepath.Join(w.Paths.Read, ".git")); err != nil {
 		return "", errors.New("memory repository is not prepared; run setup")
-	}
-	if wait {
-		_ = w.Refresh(ctx) // offline: keep using the last known checkout
-		return w.Paths.Read, nil
 	}
 	if refreshing.CompareAndSwap(false, true) {
 		go func() {

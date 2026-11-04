@@ -13,7 +13,7 @@ import (
 
 const validPage = "# Checkout API\n<!-- @id: checkout-api -->\nOverview.\n\n## Operation\n<!-- @id: checkout-api-operation -->\nTimeout: 5 seconds.\n"
 
-func TestInspectReturnsCanonicalSnapshotAndGitIdentity(t *testing.T) {
+func TestInspectReturnsCanonicalSections(t *testing.T) {
 	root := newMemoryRoot(t, validPage)
 	repository := openRepository(t, root)
 
@@ -23,15 +23,6 @@ func TestInspectReturnsCanonicalSnapshotAndGitIdentity(t *testing.T) {
 	}
 	if snapshot.Path != "memories/checkout-api.md" {
 		t.Fatalf("Path = %q", snapshot.Path)
-	}
-	if snapshot.FileHash != "sha256:43e8ee2e48f3d539cc731b0c5fd196b32bb89e8d10e69e9c6f2ef444af5e4456" {
-		t.Fatalf("FileHash = %q", snapshot.FileHash)
-	}
-	if snapshot.Head != gitOutput(t, root, "rev-parse", "HEAD") {
-		t.Fatalf("Head = %q", snapshot.Head)
-	}
-	if snapshot.Blob != gitOutput(t, root, "rev-parse", "HEAD:memories/checkout-api.md") {
-		t.Fatalf("Blob = %q", snapshot.Blob)
 	}
 	if len(snapshot.Sections) != 2 {
 		t.Fatalf("Sections = %+v", snapshot.Sections)
@@ -67,13 +58,6 @@ func TestRepositoryPinsMemoryRootAcrossPathReplacement(t *testing.T) {
 	}
 	if snapshot.Sections[1].Body != "Timeout: 5 seconds.\n" {
 		t.Fatalf("Inspect() followed replacement root: %q", snapshot.Sections[1].Body)
-	}
-	page, err := repository.ReadPage(context.Background(), snapshot.Path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page.Markdown != validPage {
-		t.Fatalf("ReadPage() followed replacement root: %q", page.Markdown)
 	}
 	decoyAfter, err := os.ReadFile(filepath.Join(root, "memories", "checkout-api.md"))
 	if err != nil {
@@ -136,14 +120,4 @@ func runGit(t *testing.T, root string, args ...string) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, output)
 	}
-}
-
-func gitOutput(t *testing.T, root string, args ...string) string {
-	t.Helper()
-	command := exec.Command("git", append([]string{"-C", root}, args...)...)
-	output, err := command.Output()
-	if err != nil {
-		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
-	}
-	return strings.TrimSpace(string(output))
 }

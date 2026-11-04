@@ -29,13 +29,14 @@ func TestEmptyRemoteIsInitializedAndRerunIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !result.Created || asked != 1 || !slices.Equal(result.Config.MemoryCategories, []string{"domains", "decision"}) {
+	if asked != 1 || !slices.Equal(result.MemoryCategories, []string{"domains", "decision"}) {
 		t.Fatalf("result = %+v, asked %d", result, asked)
 	}
-	if got := wt.Git(t, remote, "rev-parse", "main", "proposals"); strings.Count(got, "\n") != 1 {
-		t.Fatalf("remote refs = %q", got)
+	refs := wt.Git(t, remote, "rev-parse", "main", "proposals")
+	if strings.Count(refs, "\n") != 1 {
+		t.Fatalf("remote refs = %q", refs)
 	}
-	for _, dir := range []string{result.Config.Paths.Read, result.Config.Paths.Proposals} {
+	for _, dir := range []string{result.Paths.Read, result.Paths.Proposals} {
 		if _, err := os.Stat(filepath.Join(dir, "gpm.json")); err != nil {
 			t.Fatalf("worktree %s: %v", dir, err)
 		}
@@ -44,8 +45,11 @@ func TestEmptyRemoteIsInitializedAndRerunIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	again, err := setup.Prepare(ctx, setup.Options{URL: remote, Categories: categories(t, &asked)})
-	if err != nil || again.Created || asked != 1 {
+	if err != nil || asked != 1 || !slices.Equal(again.MemoryCategories, result.MemoryCategories) {
 		t.Fatalf("rerun = %+v, %v, asked %d", again, err, asked)
+	}
+	if got := wt.Git(t, remote, "rev-parse", "main", "proposals"); got != refs {
+		t.Fatalf("repeated setup changed remote refs: %q, want %q", got, refs)
 	}
 }
 
@@ -56,10 +60,10 @@ func TestSecondMachineUsesExistingProposals(t *testing.T) {
 	wt.Seed(t, remote, "proposals", map[string]string{"proposals/1-x.md": "p\n"})
 	asked := 0
 	result, err := setup.Prepare(context.Background(), setup.Options{URL: remote, Categories: categories(t, &asked)})
-	if err != nil || result.Created || asked != 0 {
+	if err != nil || asked != 0 {
 		t.Fatalf("Prepare = %+v, %v, asked %d", result, err, asked)
 	}
-	if _, err := os.Stat(filepath.Join(result.Config.Paths.Proposals, "proposals", "1-x.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(result.Paths.Proposals, "proposals", "1-x.md")); err != nil {
 		t.Fatalf("proposals worktree lost remote proposal: %v", err)
 	}
 }

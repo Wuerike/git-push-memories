@@ -21,9 +21,8 @@ fica no estado do usuário, com worktrees separados. O MCP usa stdio.
 | Comando | Efeito |
 | --- | --- |
 | `gpm setup <url> [--categories a,b] [--yes]` | Prepara clone/worktrees, valida ou cria `gpm.json`, configura MCP e instala skills no escopo do usuário |
-| `gpm retrieve <query> --budget-bytes <n> [--path-prefix <p>]` | Busca textual na `main` publicada e imprime JSON |
 | `gpm promote --finish` | Confirma merge pelo GitHub, limpa propostas correspondentes e atualiza a leitura local |
-| `gpm mcp` | Serve as nove ferramentas MCP por stdio |
+| `gpm mcp` | Serve as oito ferramentas MCP por stdio |
 | `gpm version`, `gpm help` | Informam versão e ajuda sem configuração |
 
 O setup exige `git`, `claude`, identidade Git e credenciais para o remoto. Em
@@ -64,13 +63,12 @@ memórias. O agente e a pessoa decidem o significado da consolidação.
 
 ## MCP tools
 
-Há cinco ferramentas de captura/leitura e quatro de promoção:
+Há quatro ferramentas de captura/leitura e quatro de promoção:
 
 | Ferramenta | Entrada | Resultado/efeito |
 | --- | --- | --- |
 | `memory_search` | `query`, `budget_bytes`, `path_prefix` opcional, `source` opcional | Busca textual com trechos e handles expansíveis |
 | `memory_expand` | `handle`, `budget_bytes`, `source` opcional | Expande uma seção publicada dentro do orçamento |
-| `memory_page_read` | `path`, `budget_bytes`, `source` opcional | Página integral e `content_hash`, ou erro de orçamento; nunca trunca |
 | `memory_proposal_list` | `source` opcional | Categorias e propostas com ID, caminho, título e conteúdo livres |
 | `memory_propose` | `title`, `content` | Cria arquivo e commit na `proposals` remota pela API do GitHub |
 | `memory_promote_prepare` | `{}` | Fetch, worktree sobre a `main`, categorias, revisões e inventários completos |

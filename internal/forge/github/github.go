@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"time"
 )
@@ -51,10 +50,7 @@ func New(url string) (Client, error) {
 }
 
 type PR struct {
-	Number      int       `json:"number"`
-	State       string    `json:"state"` // OPEN, MERGED, CLOSED
-	URL         string    `json:"url"`
-	CreatedAt   time.Time `json:"createdAt"`
+	State       string `json:"state"` // OPEN, MERGED, CLOSED
 	MergeCommit struct {
 		OID string `json:"oid"`
 	} `json:"mergeCommit"`
@@ -103,31 +99,9 @@ func (client Client) PRCreate(ctx context.Context, base, head, title, body strin
 	return client.run(ctx, "pr", "create", "-R", client.Repo, "--base", base, "--head", head, "--title", title, "--body", body)
 }
 
-// PRFind returns the most recent PR of head in any state, or nil when there is none.
-func (client Client) PRFind(ctx context.Context, head string) (*PR, error) {
-	out, err := client.run(ctx, "pr", "list", "-R", client.Repo, "--head", head, "--state", "all", "--limit", "100", "--json", "number,state,url,createdAt,mergeCommit")
-	if err != nil {
-		return nil, err
-	}
-	var prs []PR
-	if err := json.Unmarshal([]byte(out), &prs); err != nil {
-		return nil, fmt.Errorf("%w: unreadable pr list", ErrCommandFailed)
-	}
-	if len(prs) == 0 {
-		return nil, nil
-	}
-	sort.SliceStable(prs, func(i, j int) bool {
-		if prs[i].CreatedAt.Equal(prs[j].CreatedAt) {
-			return prs[i].Number > prs[j].Number
-		}
-		return prs[i].CreatedAt.After(prs[j].CreatedAt)
-	})
-	return &prs[0], nil
-}
-
 // PRView returns the state and merge commit of one PR.
 func (client Client) PRView(ctx context.Context, number int) (*PR, error) {
-	out, err := client.run(ctx, "pr", "view", fmt.Sprint(number), "-R", client.Repo, "--json", "number,state,url,createdAt,mergeCommit")
+	out, err := client.run(ctx, "pr", "view", fmt.Sprint(number), "-R", client.Repo, "--json", "state,mergeCommit")
 	if err != nil {
 		return nil, err
 	}

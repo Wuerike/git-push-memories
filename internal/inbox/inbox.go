@@ -18,7 +18,6 @@ import (
 
 var (
 	ErrInvalidProposal = errors.New("invalid proposal")
-	ErrProposalDrift   = errors.New("proposal drifted")
 	ErrWrongBranch     = errors.New("memory worktree is not on the expected branch")
 )
 

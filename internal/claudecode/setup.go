@@ -14,11 +14,6 @@ import (
 
 const managedMarker = "<!-- managed-by: git-push-memories -->"
 
-type Result struct {
-	SkillPath        string
-	PromoteSkillPath string
-}
-
 // Preflight fails before any repository work when Claude Code is missing.
 func Preflight() error {
 	if _, err := exec.LookPath("claude"); err != nil {
@@ -28,50 +23,50 @@ func Preflight() error {
 }
 
 // Install registers the MCP server and installs the skills.
-func Install(ctx context.Context) (Result, error) {
+func Install(ctx context.Context) error {
 	if err := Preflight(); err != nil {
-		return Result{}, err
+		return err
 	}
 	executable, err := os.Executable()
 	if err != nil {
-		return Result{}, errors.New("executable path could not be resolved")
+		return errors.New("executable path could not be resolved")
 	}
 	executable, err = filepath.EvalSymlinks(executable)
 	if err != nil {
-		return Result{}, errors.New("executable path could not be resolved")
+		return errors.New("executable path could not be resolved")
 	}
 	rememberPath, err := rememberSkillPath()
 	if err != nil {
-		return Result{}, errors.New("Claude Code skill path could not be resolved")
+		return errors.New("Claude Code skill path could not be resolved")
 	}
 	promoteSkillPath, err := skillPath("promote")
 	if err != nil {
-		return Result{}, errors.New("Claude Code skill path could not be resolved")
+		return errors.New("Claude Code skill path could not be resolved")
 	}
 	if err := ensureSkillCanBeManaged(rememberPath, claudeintegration.RememberSkill, "/remember"); err != nil {
-		return Result{}, err
+		return err
 	}
 	if err := ensureSkillCanBeManaged(promoteSkillPath, claudeintegration.PromoteSkill, "/promote"); err != nil {
-		return Result{}, err
+		return err
 	}
 	if err := installSkill(rememberPath, claudeintegration.RememberSkill); err != nil {
-		return Result{}, err
+		return err
 	}
 	if err := installSkill(promoteSkillPath, claudeintegration.PromoteSkill); err != nil {
-		return Result{}, err
+		return err
 	}
 
 	remove := exec.CommandContext(ctx, "claude", "mcp", "remove", "--scope", "user", "git-push-memories")
 	_ = remove.Run()
 	add := exec.CommandContext(ctx, "claude", "mcp", "add", "--transport", "stdio", "--scope", "user", "git-push-memories", "--", executable, "mcp")
 	if output, err := add.CombinedOutput(); err != nil {
-		return Result{}, fmt.Errorf("Claude Code MCP registration failed: %s", bytes.TrimSpace(output))
+		return fmt.Errorf("Claude Code MCP registration failed: %s", bytes.TrimSpace(output))
 	}
 	check := exec.CommandContext(ctx, "claude", "mcp", "get", "git-push-memories")
 	if output, err := check.CombinedOutput(); err != nil {
-		return Result{}, fmt.Errorf("Claude Code MCP health check failed: %s", bytes.TrimSpace(output))
+		return fmt.Errorf("Claude Code MCP health check failed: %s", bytes.TrimSpace(output))
 	}
-	return Result{SkillPath: rememberPath, PromoteSkillPath: promoteSkillPath}, nil
+	return nil
 }
 
 func rememberSkillPath() (string, error) {
