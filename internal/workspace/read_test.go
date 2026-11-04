@@ -17,7 +17,7 @@ func page(timeout string) string {
 	return "# checkout-api\n<!-- @id: checkout-api -->\n\n## Operacao\n<!-- @id: checkout-api-operation -->\n\n- O timeout e de " + timeout + " segundos.\n"
 }
 
-func TestReadFollowsMainAndStaleHandleIsDetected(t *testing.T) {
+func TestReadFollowsMainAndPinnedRevisionRemainsReadable(t *testing.T) {
 	ctx := context.Background()
 	wt.Env(t)
 	remote := wt.Remote(t)
@@ -41,7 +41,7 @@ func TestReadFollowsMainAndStaleHandleIsDetected(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer retriever.Close()
-	first, err := retriever.Retrieve(ctx, "timeout cinco", retrieval.Scope{}, 4096)
+	first, err := retriever.Retrieve(ctx, "timeout cinco", retrieval.Scope{}, 20)
 	if err != nil || len(first.Items) != 1 {
 		t.Fatalf("first search = %+v, %v", first, err)
 	}
@@ -51,10 +51,11 @@ func TestReadFollowsMainAndStaleHandleIsDetected(t *testing.T) {
 	if err := w.Refresh(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := retriever.Expand(ctx, first.Items[0].Handle, 4096); !errors.Is(err, retrieval.ErrStaleHandle) {
-		t.Fatalf("Expand old handle = %v, want ErrStaleHandle", err)
+	old, err := retriever.Read(ctx, first.Items[0].Path, first.Revision, 1, 200)
+	if err != nil || !strings.Contains(old.Content, "cinco") || strings.Contains(old.Content, "dez") {
+		t.Fatalf("pinned revision read = %+v, %v", old, err)
 	}
-	second, err := retriever.Retrieve(ctx, "timeout dez", retrieval.Scope{}, 4096)
+	second, err := retriever.Retrieve(ctx, "timeout dez", retrieval.Scope{}, 20)
 	if err != nil || len(second.Items) != 1 || !strings.Contains(second.Items[0].Content, "dez") {
 		t.Fatalf("second search = %+v, %v", second, err)
 	}

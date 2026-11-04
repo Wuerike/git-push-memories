@@ -1,0 +1,23 @@
+[
+  {
+    "file": "internal/memory/repository.go",
+    "old": "\tif explicit {",
+    "new": "\tif !explicit {",
+    "proof": "/tmp/promote-tools/go/bin/go test -count=1 ./internal/retrieval -run '^TestReadRejectsUnpublishedRevision$'",
+    "label": "R2: skip published ancestry verification for explicit revisions"
+  },
+  {
+    "file": "internal/consolidation/finish.go",
+    "old": "if blob, exists := blobs[proposal.Path]; !exists || blob != proposal.Blob {",
+    "new": "if blob, exists := blobs[proposal.Path]; !exists || blob == \"\" {",
+    "proof": "/tmp/promote-tools/go/bin/go test -count=1 ./internal/consolidation -run '^TestFinishAfterSquashPreservesNewAndChangedProposals$'",
+    "label": "R7: delete selected proposals despite changed nonempty blobs"
+  },
+  {
+    "file": "internal/consolidation/prepare.go",
+    "old": "if _, ok := wanted[entry.path]; !ok {",
+    "new": "if _, ok := wanted[entry.path]; !ok && len(selected) == 0 {",
+    "proof": "/tmp/promote-tools/go/bin/go test -count=1 ./internal/consolidation -run '^TestPrepareSelectsManualProposalPathsWithoutInterpretingContent$'",
+    "label": "R6: include unrelated proposals in explicit path selection"
+  }
+]

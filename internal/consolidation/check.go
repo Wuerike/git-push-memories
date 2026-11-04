@@ -3,16 +3,10 @@ package consolidation
 import (
 	"bytes"
 	"context"
-	"errors"
-	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 
-	"github.com/Wuerike/git-push-memories/internal/memory"
-	"github.com/Wuerike/git-push-memories/internal/unifieddiff"
+	"github.com/Wuerike/git-push-memories/internal/workspace"
 )
 
 type Checked struct {
@@ -20,104 +14,69 @@ type Checked struct {
 	Diff  string   `json:"diff"`
 }
 
-// Check prepares IDs before review, then describes the current files, not a preview.
+// Check observes current files using a temporary Git index outside the worktree.
 func (m *Manager) Check(ctx context.Context) (Checked, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.changes(ctx, true)
+	return m.changes(ctx)
 }
 
-func (m *Manager) changes(ctx context.Context, prepare bool) (Checked, error) {
+func (m *Manager) changes(ctx context.Context) (Checked, error) {
 	if m.current == nil {
 		return Checked{}, ErrNotPrepared
 	}
 	p := m.current
-	canonical := m.cfg
-	canonical.MemoryCategories = p.Categories
-	paths := make(map[string]bool, len(p.MemoryPaths))
-	baselinePaths := make(map[string]bool, len(p.MemoryPaths))
-	for _, path := range p.MemoryPaths {
-		paths[path], baselinePaths[path] = true, true
-	}
-	err := filepath.WalkDir(filepath.Join(p.Worktree, "memories"), func(full string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			if errors.Is(err, os.ErrNotExist) {
-				return nil
-			}
-			return err
-		}
-		if entry.IsDir() || filepath.Ext(full) != ".md" {
-			return nil
-		}
-		relative, err := filepath.Rel(p.Worktree, full)
-		if err != nil {
-			return err
-		}
-		path := filepath.ToSlash(relative)
-		if !canonical.IsMemoryPath(path) || !entry.Type().IsRegular() {
-			return fmt.Errorf("%w: %s", memory.ErrInvalidPath, path)
-		}
-		paths[path] = true
-		return nil
-	})
+	index, err := os.CreateTemp(m.cfg.StateRoot, "review-index-*")
 	if err != nil {
 		return Checked{}, err
 	}
-	ordered := make([]string, 0, len(paths))
-	for path := range paths {
-		ordered = append(ordered, path)
+	name := index.Name()
+	index.Close()
+	os.Remove(name)
+	defer os.Remove(name)
+	git := workspace.Git{Dir: p.Worktree, IndexFile: name}
+	if _, err := git.Output(ctx, "read-tree", p.MainSHA); err != nil {
+		return Checked{}, err
 	}
-	sort.Strings(ordered)
-	result := Checked{Paths: []string{}}
-	var diff strings.Builder
-	for _, path := range ordered {
-		if err := ctx.Err(); err != nil {
-			return Checked{}, err
-		}
-		var baseline []byte
-		if baselinePaths[path] {
-			baseline, err = m.ws.Repo().Bytes(ctx, "show", p.MainSHA+":"+path)
-			if err != nil {
-				return Checked{}, err
-			}
-		}
-		full := filepath.Join(p.Worktree, filepath.FromSlash(path))
-		current, readErr := os.ReadFile(full)
-		if errors.Is(readErr, os.ErrNotExist) {
-			if baselinePaths[path] {
-				result.Paths = append(result.Paths, path)
-				diff.WriteString(unifieddiff.Delete(path, baseline))
-			}
-			continue
-		}
-		if readErr != nil {
-			return Checked{}, readErr
-		}
-		if baselinePaths[path] && bytes.Equal(current, baseline) {
-			continue
-		}
-		normalized, err := memory.PrepareDocument(path, baseline, current)
-		if err != nil {
-			return Checked{}, fmt.Errorf("%s: %w", path, err)
-		}
-		if !bytes.Equal(current, normalized) {
-			if !prepare {
-				return Checked{}, fmt.Errorf("%s needs a new check and review before publication", path)
-			}
-			if err := os.WriteFile(full, normalized, 0o644); err != nil {
-				return Checked{}, err
-			}
-		}
-		if baselinePaths[path] && bytes.Equal(normalized, baseline) {
-			continue
-		}
-		result.Paths = append(result.Paths, path)
-		if baselinePaths[path] {
-			diff.WriteString(unifieddiff.Between(path, baseline, normalized))
-		} else {
-			diff.WriteString(unifieddiff.Create(path, normalized))
+	candidates, err := git.Bytes(ctx, "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", "memories")
+	if err != nil {
+		return Checked{}, err
+	}
+	if len(candidates) == 0 {
+		return Checked{Paths: []string{}}, nil
+	}
+	rawPaths := []string{}
+	seen := map[string]bool{}
+	for _, encoded := range bytes.Split(candidates, []byte{0}) {
+		name := string(encoded)
+		if name != "" && filepath.Ext(name) == ".md" && !seen[name] {
+			rawPaths = append(rawPaths, name)
+			seen[name] = true
 		}
 	}
-	result.Diff = diff.String()
-	return result, nil
+	if err := git.StageFiles(ctx, rawPaths...); err != nil {
+		return Checked{}, err
+	}
+	changed, err := git.Bytes(ctx, "diff", "--cached", "--no-renames", "--name-only", "-z", p.MainSHA, "--")
+	if err != nil {
+		return Checked{}, err
+	}
+	paths := []string{}
+	for _, encoded := range bytes.Split(changed, []byte{0}) {
+		name := string(encoded)
+		if name == "" || filepath.Ext(name) != ".md" {
+			continue
+		}
+
+		paths = append(paths, name)
+	}
+	if len(paths) == 0 {
+		return Checked{Paths: paths}, nil
+	}
+	arguments := append([]string{"diff", "--cached", "--no-renames", "--no-ext-diff", "--no-textconv", "--no-color", p.MainSHA, "--"}, paths...)
+	diff, err := git.Bytes(ctx, arguments...)
+	if err != nil {
+		return Checked{}, err
+	}
+	return Checked{Paths: paths, Diff: string(diff)}, nil
 }

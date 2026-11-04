@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -30,7 +31,7 @@ func TestRememberContractSearchesThenCommitsConfirmedProposalToRemote(t *testing
 	defer stop()
 
 	searchResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout", "budget_bytes": 2048},
+		Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout", "limit": 20},
 	})
 	if err != nil || searchResult.IsError {
 		t.Fatalf("memory_search = %+v, %v", searchResult, err)
@@ -40,7 +41,7 @@ func TestRememberContractSearchesThenCommitsConfirmedProposalToRemote(t *testing
 		t.Fatalf("memory_search items = %+v", bundle.Items)
 	}
 	if _, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name: "memory_expand", Arguments: map[string]any{"handle": bundle.Items[0].Handle, "budget_bytes": 4096},
+		Name: "memory_read", Arguments: map[string]any{"path": bundle.Items[0].Path, "revision": bundle.Revision},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -74,22 +75,22 @@ func TestRememberContractSearchesThenCommitsConfirmedProposalToRemote(t *testing
 	}
 }
 
-func TestRememberReadingAndBudgetFailureDoNotModifyProposals(t *testing.T) {
-	for _, budget := range []int{2048, 1} {
-		t.Run(string(rune('a'+budget%2)), func(t *testing.T) {
+func TestRememberReadingAndInvalidLimitDoNotModifyProposals(t *testing.T) {
+	for _, limit := range []int{20, -1} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			managed := wt.Setup(t, map[string]string{"memories/domains/checkout-api.md": populatedPage})
 			proposals := managed.Config.Paths.Proposals
 			beforeProposals := wt.Git(t, proposals, "rev-parse", "HEAD")
 			beforeRemote := wt.Git(t, managed.Remote, "for-each-ref")
 			session, stop := startMCP(t, managed.Config)
 			result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-				Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout", "budget_bytes": budget},
+				Name: "memory_search", Arguments: map[string]any{"query": "checkout timeout", "limit": limit},
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if budget == 1 && !result.IsError {
-				t.Fatal("insufficient budget succeeded")
+			if limit == -1 && !result.IsError {
+				t.Fatal("invalid limit succeeded")
 			}
 			stop()
 			if got := wt.Git(t, proposals, "rev-parse", "HEAD"); got != beforeProposals {
@@ -113,7 +114,7 @@ func TestPromoteCreateFlowUsesFinalFilesAndSendsPR(t *testing.T) {
 	content := "# Checkout timeout\n\nCreate a memory about checkout timeout: five seconds.\n"
 	proposal := decodeProposal(t, callOK(t, session, "memory_propose", map[string]any{"title": "Checkout timeout", "content": content}))
 	prepared := decodeEnvelope[consolidation.Prepared](t, callOK(t, session, "memory_promote_prepare", map[string]any{}))
-	if prepared.MainSHA != mainBefore || len(prepared.Proposals) != 1 || prepared.Proposals[0].ID != proposal.ID {
+	if prepared.MainSHA != mainBefore || len(prepared.Proposals) != 1 || prepared.Proposals[0].Path != proposal.Path {
 		t.Fatalf("prepare = %+v", prepared)
 	}
 	input, err := os.ReadFile(prepared.Proposals[0].InputPath)
@@ -175,7 +176,7 @@ func TestRememberSkillGrantsOnlyReadAndInboxTools(t *testing.T) {
 		t.Fatal("invalid skill frontmatter")
 	}
 	frontmatter := string(contents)[:frontmatterEnd+4]
-	for _, tool := range []string{"memory_search", "memory_expand", "memory_propose"} {
+	for _, tool := range []string{"memory_search", "memory_read", "memory_propose"} {
 		if strings.Count(frontmatter, tool) != 1 {
 			t.Fatalf("frontmatter tool %q count != 1", tool)
 		}

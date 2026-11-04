@@ -16,7 +16,7 @@ import (
 
 func proposalSummary(p consolidation.Prepared) string {
 	return fmt.Sprintf("## Consolidation\n\n%s and %s update %s.\n%s is discarded because the current policy already contains this knowledge.\n",
-		p.Proposals[0].ID, p.Proposals[1].ID, checkoutPath, p.Proposals[2].ID)
+		p.Proposals[0].Path, p.Proposals[1].Path, checkoutPath, p.Proposals[2].Path)
 }
 
 func reviewedChange(t *testing.T, manager *consolidation.Manager, p consolidation.Prepared) string {
@@ -178,5 +178,94 @@ func TestPrepareAndSubmitDoNotUseSharedReleaseMarker(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(p.Worktree, "release.lock.json")); !os.IsNotExist(err) {
 		t.Fatalf("release marker leaked into promotion: %v", err)
+	}
+}
+
+func TestSubmitPublishesSelectedOrdinaryMarkdownBytes(t *testing.T) {
+	manager, m, p := preparedManager(t)
+	const selected = "memories/domains/*.md"
+	const unselected = "memories/domains/later.md"
+	const body = "---\nowner: team-green\n---\nA plain fact without headings or IDs.\n"
+	writeMemory(t, p, selected, body)
+	writeMemory(t, p, unselected, "A separate pending edit.\n")
+	result, err := manager.Submit(context.Background(), "Selected proposals contribute to the plain fact.", selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths := wt.Git(t, m.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", result.Commit); paths != selected {
+		t.Fatalf("published paths = %q", paths)
+	}
+	data, err := m.Config.Workspace().Repo().Bytes(context.Background(), "show", result.Commit+":"+selected)
+	if err != nil || string(data) != body {
+		t.Fatalf("published bytes = %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(p.Worktree, unselected)); err != nil || string(data) != "A separate pending edit.\n" {
+		t.Fatalf("unselected edit = %q, %v", data, err)
+	}
+}
+
+func TestSubmitPreservesRawMarkdownUnderGitConversionAndCleanFilters(t *testing.T) {
+	for _, setup := range []string{"autocrlf", "attributes"} {
+		t.Run(setup, func(t *testing.T) {
+			manager, m, p := preparedManager(t)
+			if setup == "autocrlf" {
+				wt.Git(t, p.Worktree, "config", "core.autocrlf", "input")
+			} else {
+				writeMemory(t, p, ".gitattributes", "*.md text filter=erase\n")
+				wt.Git(t, p.Worktree, "config", "filter.erase.clean", "tr a-z A-Z")
+			}
+			const selected = "memories/domains/raw.md"
+			const body = "Plain knowledge.\r\nAnother fact.\r\n"
+			writeMemory(t, p, selected, body)
+			// Preserve unrelated human staging as well as the working file itself.
+			writeMemory(t, p, "human.txt", "An unrelated staged edit.\n")
+			wt.Git(t, p.Worktree, "add", "--", "human.txt")
+			beforeIndex := wt.Git(t, p.Worktree, "write-tree")
+			checked, err := manager.Check(context.Background())
+			if err != nil || !strings.Contains(checked.Diff, "+Plain knowledge.\r\n") {
+				t.Fatalf("raw check = %+v, %v", checked, err)
+			}
+			if wt.Git(t, p.Worktree, "write-tree") != beforeIndex {
+				t.Fatal("check changed human staging")
+			}
+			result, err := manager.Submit(context.Background(), "Publish reviewed raw Markdown.", selected)
+			if err != nil {
+				t.Fatal(err)
+			}
+			data, err := m.Config.Workspace().Repo().Bytes(context.Background(), "show", result.Commit+":"+selected)
+			if err != nil || string(data) != body {
+				t.Fatalf("published bytes = %q, %v", data, err)
+			}
+			if names := wt.Git(t, m.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", result.Commit); names != selected {
+				t.Fatalf("commit included unrelated staging: %q", names)
+			}
+			if staged := wt.Git(t, p.Worktree, "diff", "--cached", "--name-only"); staged != "human.txt" {
+				t.Fatalf("human staging changed: %q", staged)
+			}
+			current, err := os.ReadFile(filepath.Join(p.Worktree, selected))
+			if err != nil || string(current) != body {
+				t.Fatalf("working bytes = %q, %v", current, err)
+			}
+		})
+	}
+}
+
+func TestSubmitPublishesMemoryDeletion(t *testing.T) {
+	manager, m, p := preparedManager(t)
+	if err := os.Remove(filepath.Join(p.Worktree, checkoutPath)); err != nil {
+		t.Fatal(err)
+	}
+	result, err := manager.Submit(context.Background(), "The selected proposals retire the outdated checkout page.", checkoutPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths := wt.Git(t, m.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", result.Commit); paths != checkoutPath {
+		t.Fatalf("deleted paths = %q", paths)
+	}
+	if m.Config.Workspace().Repo().Ok(context.Background(), "cat-file", "-e", result.Commit+":"+checkoutPath) {
+		t.Fatal("deleted page remains in published commit")
+	}
+	if status := wt.Git(t, p.Worktree, "status", "--porcelain"); status != "" {
+		t.Fatalf("deletion left stale staging: %q", status)
 	}
 }

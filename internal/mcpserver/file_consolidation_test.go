@@ -32,7 +32,7 @@ func filePromotionRoundTrip(t *testing.T, baseline map[string]string, proposals 
 	}
 	summary := "The reviewed proposal set consolidates into " + path + "."
 	for _, proposal := range p.Proposals {
-		summary += "\n" + proposal.ID + " contributes to the final page."
+		summary += "\n" + proposal.Path + " contributes to the final page."
 	}
 	e2eCall(t, session, "memory_promote_submit", map[string]any{"summary": summary})
 	if err := session.Close(); err != nil {
@@ -57,14 +57,14 @@ func filePromotionRoundTrip(t *testing.T, baseline map[string]string, proposals 
 	}
 	fresh := h.connect(t, "fresh-published-reader")
 	defer fresh.Close()
-	response := decodeResponse(t, e2eCall(t, fresh, "memory_search", map[string]any{"query": query, "budget_bytes": 8192}))
+	response := decodeResponse(t, e2eCall(t, fresh, "memory_search", map[string]any{"query": query, "limit": 20}))
 	if response.Data == nil || len(response.Data.Items) == 0 {
 		t.Fatalf("fresh search = %+v", response)
 	}
 	var found strings.Builder
 	for _, item := range response.Data.Items {
-		if item.Handle.Path != path {
-			t.Fatalf("unexpected retrieved path %s", item.Handle.Path)
+		if item.Path != path {
+			t.Fatalf("unexpected retrieved path %s", item.Path)
 		}
 		found.WriteString(item.Content)
 	}

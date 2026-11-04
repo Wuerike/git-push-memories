@@ -282,7 +282,7 @@ func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTools := []string{"memory_expand", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
+	wantTools := []string{"memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_read", "memory_search"}
 	if len(result.Tools) != len(wantTools) {
 		t.Fatalf("ListTools() = %+v, want %v", result.Tools, wantTools)
 	}
@@ -293,7 +293,7 @@ func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
 	}
 	toolResult, err := session.CallTool(context.Background(), &mcp.CallToolParams{
 		Name:      "memory_search",
-		Arguments: map[string]any{"query": "checkout timeout", "budget_bytes": 2048},
+		Arguments: map[string]any{"query": "checkout timeout", "limit": 20},
 	})
 	if err != nil {
 		t.Fatal(err)

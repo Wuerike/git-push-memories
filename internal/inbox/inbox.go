@@ -28,10 +28,11 @@ type Request struct {
 }
 
 type Proposal struct {
-	ID      string `json:"id"`
+	Blob    string `json:"blob,omitempty"`
+	ID      string `json:"id,omitempty"`
 	Path    string `json:"path"`
-	Commit  string `json:"commit"`
-	Title   string `json:"title"`
+	Commit  string `json:"commit,omitempty"`
+	Title   string `json:"title,omitempty"`
 	Content string `json:"content"`
 }
 

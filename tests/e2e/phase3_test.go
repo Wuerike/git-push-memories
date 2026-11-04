@@ -192,7 +192,7 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	if gitOutput(t, ctx, realGit, remote, environment, "rev-parse", "main") != mainBefore {
 		t.Fatal("submit merged its own PR")
 	}
-	beforeMerge := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, session, "memory_search", map[string]any{"query": "checkout nine team-blue", "budget_bytes": 4096})))
+	beforeMerge := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, session, "memory_search", map[string]any{"query": "checkout nine team-blue", "limit": 20})))
 	if len(beforeMerge.Items) != 0 {
 		t.Fatal("unmerged memory is visible to readers")
 	}
@@ -225,7 +225,7 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 		t.Fatalf("merged page differs from reviewed human file: %q", got)
 	}
 	reader := connectMCP(t, ctx, binary, environment, "e2e-published-reader")
-	mergedRead := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, reader, "memory_search", map[string]any{"query": "checkout nine team-blue", "budget_bytes": 4096})))
+	mergedRead := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, reader, "memory_search", map[string]any{"query": "checkout nine team-blue", "limit": 20})))
 	if !bundleContains(*mergedRead, "nine seconds") || !bundleContains(*mergedRead, "authorization only") {
 		t.Fatalf("published read lost current facts: %+v", mergedRead)
 	}
@@ -251,12 +251,12 @@ func TestManagedWorkflowEndToEnd(t *testing.T) {
 	refsBefore := gitOutput(t, ctx, realGit, remote, freshEnvironment, "for-each-ref")
 	inboxBefore := gitOutput(t, ctx, realGit, filepath.Join(freshState, "proposals"), freshEnvironment, "rev-parse", "HEAD")
 	fresh := connectMCP(t, ctx, binary, freshEnvironment, "e2e-fresh-reader")
-	handle := searchOne(t, ctx, fresh, "checkout nine team-blue", "")
-	expanded := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, fresh, "memory_expand", map[string]any{"handle": handle, "budget_bytes": 4096})))
-	if !bundleContains(*expanded, "nine seconds") || !bundleContains(*expanded, "authorization only") || bundleContains(*expanded, "three seconds") {
+	handle := searchOne(t, ctx, fresh, "checkout nine team-blue")
+	expanded := requireData(t, decodeTool[retrieval.FileContent](t, callTool(t, ctx, fresh, "memory_read", map[string]any{"path": handle.Path, "revision": handle.Revision})))
+	if !strings.Contains(expanded.Content, "nine seconds") || !strings.Contains(expanded.Content, "authorization only") || strings.Contains(expanded.Content, "three seconds") {
 		t.Fatal("fresh reader did not recover the current reviewed fact")
 	}
-	unpublished := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, fresh, "memory_search", map[string]any{"query": "settlement retries failures", "budget_bytes": 2048})))
+	unpublished := requireData(t, decodeTool[retrieval.ContextBundle](t, callTool(t, ctx, fresh, "memory_search", map[string]any{"query": "settlement retries failures", "limit": 20})))
 	if len(unpublished.Items) != 0 {
 		t.Fatal("fresh reading returned a pending proposal")
 	}
@@ -374,18 +374,16 @@ func requireData[T any](t *testing.T, response toolEnvelope[T]) *T {
 	return response.Data
 }
 
-func searchOne(t *testing.T, ctx context.Context, session *mcp.ClientSession, query, source string) retrieval.Handle {
+func searchOne(t *testing.T, ctx context.Context, session *mcp.ClientSession, query string) retrieval.FileContent {
 	t.Helper()
-	arguments := map[string]any{"query": query, "budget_bytes": 4096}
-	if source != "" {
-		arguments["source"] = source
-	}
+	arguments := map[string]any{"query": query, "limit": 20}
+
 	result := callTool(t, ctx, session, "memory_search", arguments)
 	bundle := requireData(t, decodeTool[retrieval.ContextBundle](t, result))
 	if len(bundle.Items) != 1 {
 		t.Fatalf("memory_search(%q) returned %d items", query, len(bundle.Items))
 	}
-	return bundle.Items[0].Handle
+	return retrieval.FileContent{Path: bundle.Items[0].Path, Revision: bundle.Revision}
 }
 
 func assertCommitPaths(t *testing.T, ctx context.Context, git, root string, environment []string, commit string, expected []string) {

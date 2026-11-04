@@ -1,54 +1,59 @@
 # Git Push Memories
 
-Proposed knowledge becomes reviewable, current memory through conversation,
+Shared knowledge becomes reviewable, current memory through conversation,
 ordinary Markdown files, and Git publication.
 
 ## Language
 
 **Proposal**:
-Free Markdown captured on the `proposals` branch for later discussion. A title
-names the file; suggested actions, destinations, and relevant origin belong in
-the text. A proposal is pending input, outside published memory searches.
+A regular Markdown file under `proposals/` on the `proposals` branch, pending
+consolidation. Path and Git blob identify the input. The agent interprets the
+subject, title, suggested action and destination from its free content. Capture
+generates a unique path; people can also add Markdown files manually.
 
 **Canonical memory**:
-A Markdown page under a configured category in `memories/`, with the existing
-canonical heading IDs and format. Published memory is the version on `main`.
+An ordinary Markdown page under `memories/`. The agent chooses destinations from
+the categories in `gpm.json` and organizes the content to fit the subject.
+Published reading uses configured categories on `main`.
+
+**Published read**:
+A text search or file read from an immutable Git revision in the published
+checkout's history. Search returns file paths, line intervals and the revision.
+The agent can read related files or successive line windows at that revision.
 
 **Consolidation**:
-The agent and person read every proposal in a fixed input set and every memory
-in the selected base, agree on a global plan in conversation, and prepare final
-pages. Proposals and pages can relate in both directions: many proposals can
-feed one page, and one proposal can feed many pages. Every input has destinations
-or a free-form exclusion justification. The person approves the plan before
-editing starts and the current files and diff before publication.
+The agent and person select proposals, investigate related knowledge and agree
+on a global plan in conversation. Every selected proposal receives destinations
+or a free-form exclusion justification. The agent reads selected inputs and
+pages to be edited completely, and follows related knowledge as needed. The
+person approves the plan before editing and current files and diff before
+publication. Uncertainty and investigation limits are explicit.
 
 **Promotion worktree**:
-An editable checkout on a fresh `promote/<UTC>-<random>` branch based on fetched
+An editable checkout on a fresh `promote/<UTC>-<random>` branch from fetched
 `origin/main`. Fixed proposal inputs live outside the worktree. Agents and the
-person review the same final files. The principal owns Git and publication,
-assigns one owner per delegated file, and reviews coherence across pages.
-All agent writing pauses during human editing; adjustments preserve current
-human edits outside the requested change.
+person review the same files. The principal assigns one owner per delegated
+file, reviews cross-page coherence and conducts publication. All agent writing
+pauses during human editing; requested adjustments preserve human changes.
 
-**Canonical check**:
-Validation of current files against configured categories and the existing
-memory format. It preserves retained section IDs, fills IDs on new headings,
-and returns the current diff before human publication approval.
+**Memory check**:
+Read-only observation of added, edited and deleted Markdown memory paths. Git
+produces the diff using a temporary index outside the worktree. The agent reviews
+editorial quality, references, categories and agreement with the approved plan.
 
 **Publication**:
-One global commit containing only canonical changes, pushed as a pull request
-into `main`. Its free-form summary accounts for every initial proposal. The
-person reviews and merges the PR; inputs remain pending until merge confirmation.
+One commit containing the reviewed memory paths, pushed as a pull request into
+`main`. Its summary accounts for every selected proposal. The person reviews
+and merges the PR; selected inputs remain pending until merge confirmation.
 
 **Publication record**:
-Local linkage between the PR, branch, and the paths and Git blobs of its initial
-proposals. It supports post-merge cleanup on the publishing machine. It stores
-neither a global plan nor an editing session and does not resume interrupted
-consolidation.
+Local linkage between the PR, branch, and selected proposal paths and Git blobs.
+It supports post-merge cleanup on the publishing machine. Prepared editing state
+belongs to the current MCP process; files remain on disk for inspection.
 
 **Completion**:
-After confirmed GitHub merge and verification that the merge commit is in
-`origin/main`, remove only concluded proposal paths whose blobs still match.
-Preserve new or changed proposals and refresh local published reads. Completion
-runs through the next `/promote`, `memory_promote_finish`, or
-`gpm promote --finish`; it does not run in a background service.
+After confirmed GitHub merge and verification of the merge commit in
+`origin/main`, remove only selected proposal paths whose blobs still match.
+Preserve new, changed and unselected proposals and refresh published reads.
+Completion runs through the next `/promote`, `memory_promote_finish`, or
+`gpm promote --finish`.

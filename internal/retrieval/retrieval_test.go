@@ -3,390 +3,203 @@ package retrieval_test
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strings"
+	"reflect"
 	"testing"
 
 	"github.com/Wuerike/git-push-memories/internal/retrieval"
 )
 
-const initialMemory = `# checkout-api
-<!-- @id: checkout-api -->
-
-## Operacao
-<!-- @id: checkout-api-operation -->
-
-- O timeout de requisicoes e de cinco segundos.
-- O servico pertence ao ` + "`team-a`" + `.
-`
-
-func TestRetrieveFindsOperationSection(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/checkout-api.md": initialMemory,
-	})
-	retriever, err := retrieval.New(root, "domains")
+func openRetriever(t *testing.T, root string) *retrieval.Retriever {
+	t.Helper()
+	r, err := retrieval.New(root, "domains", "decision")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if err := retriever.Close(); err != nil {
+		if err := r.Close(); err != nil {
 			t.Error(err)
 		}
 	})
-
-	bundle, err := retriever.Retrieve(context.Background(), "checkout timeout team", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bundle.Truncated {
-		t.Fatal("Retrieve() unexpectedly truncated the corpus result")
-	}
-	if len(bundle.Items) != 1 {
-		t.Fatalf("Retrieve() returned %d items, want 1", len(bundle.Items))
-	}
-	item := bundle.Items[0]
-	if item.Handle.Path != "memories/domains/checkout-api.md" || item.Handle.SectionID != "checkout-api-operation" {
-		t.Fatalf("Retrieve() handle = %+v", item.Handle)
-	}
-	if item.Heading != "Operacao" || item.Score != 3 {
-		t.Fatalf("Retrieve() item = %+v", item)
-	}
-	wantExcerpt := "- O timeout de requisicoes e de cinco segundos.\n- O servico pertence ao `team-a`."
-	if item.Content != wantExcerpt {
-		t.Fatalf("Retrieve() content = %q, want %q", item.Content, wantExcerpt)
-	}
+	return r
 }
 
-func TestRetrieveSearchesRecursivelyOnlyInConfiguredCategories(t *testing.T) {
+func TestRetrieveSearchesOrdinaryMarkdownWithPathsAndLines(t *testing.T) {
 	root := newMemoryRoot(t, map[string]string{
-		"README.md":                        "",
-		"root.md":                          initialMemory,
-		"memories/checkout-api.md":         initialMemory,
-		"memories/domains/checkout-api.md": initialMemory,
-		"memories/decision/platform/checkout-api.md": initialMemory,
-		"memories/notes/checkout-api.md":             initialMemory,
-		"proposals/draft.md":                         "not a memory page",
+		"memories/domains/checkout.md": "---\nowner: blue\n---\n# Checkout\nIntro timeout policy.\n## Rules\nThe timeout is five seconds.\n",
+		"memories/domains/plain.md":    "Plain Unicode cobrança without headings.\n",
+		"memories/domains/broken.md":   "# Multiple\n# Titles\n",
 	})
-	retriever, err := retrieval.New(root, "domains", "decision")
-	if err != nil {
-		t.Fatal(err)
+	r := openRetriever(t, root)
+	result, err := r.Retrieve(context.Background(), "timeout", retrieval.Scope{}, 20)
+	if err != nil || len(result.Items) != 1 || result.Revision == "" || result.Truncated {
+		t.Fatalf("search = %+v, %v", result, err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-
-	bundle, err := retriever.Retrieve(context.Background(), "checkout timeout team", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
+	item := result.Items[0]
+	if item.Path != "memories/domains/checkout.md" || item.StartLine != 2 || item.EndLine != 7 || item.Content != "owner: blue\n---\n# Checkout\nIntro timeout policy.\n## Rules\nThe timeout is five seconds.\n" {
+		t.Fatalf("excerpt = %+v", item)
 	}
-	got := make([]string, len(bundle.Items))
-	for index, item := range bundle.Items {
-		got[index] = item.Handle.Path
-	}
-	want := []string{"memories/decision/platform/checkout-api.md", "memories/domains/checkout-api.md"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("Retrieve() paths = %v, want %v", got, want)
+	unicode, err := r.Retrieve(context.Background(), "COBRANÇA", retrieval.Scope{}, 20)
+	if err != nil || len(unicode.Items) != 1 || unicode.Items[0].Path != "memories/domains/plain.md" {
+		t.Fatalf("unicode = %+v, %v", unicode, err)
 	}
 }
 
-func TestExpandWorksAfterRestart(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/checkout-api.md": initialMemory,
-	})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
+func TestRetrieveScopesCategoriesAndReportsLimitedResults(t *testing.T) {
+	files := map[string]string{}
+	for _, name := range []string{"memories/domains/a.md", "memories/domains/nested/b.md", "memories/decision/c.md", "memories/notes/d.md", "proposals/e.md", "README.md"} {
+		files[name] = "A common fact.\n"
 	}
-	bundle, err := retriever.Retrieve(context.Background(), "timeout", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
+	root := newMemoryRoot(t, files)
+	r := openRetriever(t, root)
+	result, err := r.Retrieve(context.Background(), "common", retrieval.Scope{}, 2)
+	if err != nil || !result.Truncated || len(result.Items) != 2 {
+		t.Fatalf("limited = %+v, %v", result, err)
 	}
-	handle := bundle.Items[0].Handle
-	if err := retriever.Close(); err != nil {
-		t.Fatal(err)
+	if result.Items[0].Path != "memories/decision/c.md" || result.Items[1].Path != "memories/domains/a.md" {
+		t.Fatalf("order = %+v", result.Items)
 	}
-
-	restarted, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
+	scoped, err := r.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "memories/domains/nested"}, 20)
+	if err != nil || len(scoped.Items) != 1 || scoped.Items[0].Path != "memories/domains/nested/b.md" {
+		t.Fatalf("scoped = %+v, %v", scoped, err)
 	}
-	t.Cleanup(func() {
-		if err := restarted.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	expanded, err := restarted.Expand(context.Background(), handle, 4096)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(expanded.Items) != 1 || expanded.Truncated {
-		t.Fatalf("Expand() = %+v", expanded)
-	}
-	want := "\n- O timeout de requisicoes e de cinco segundos.\n- O servico pertence ao `team-a`.\n"
-	if expanded.Items[0].Content != want {
-		t.Fatalf("Expand() content = %q, want %q", expanded.Items[0].Content, want)
+	full, err := r.Retrieve(context.Background(), "common", retrieval.Scope{}, 3)
+	if err != nil || full.Truncated || len(full.Items) != 3 {
+		t.Fatalf("full = %+v, %v", full, err)
 	}
 }
 
-func TestRetrieveUsesCurrentStateAndStalesOldHandle(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
+func TestReadPreservesBytesAndPaginatesWithoutMarkdownParsing(t *testing.T) {
+	const name = "memories/domains/plain.md"
+	const body = "---\r\nowner: blue\r\n---\r\n# First\r\n# Second\r\nLast line"
+	root := newMemoryRoot(t, map[string]string{name: body})
+	r := openRetriever(t, root)
+	whole, err := r.Read(context.Background(), name, "", 0, 0)
+	if err != nil || whole.Content != body || whole.StartLine != 1 || whole.EndLine != 6 || whole.Truncated {
+		t.Fatalf("whole = %+v, %v", whole, err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-	before, err := retriever.Retrieve(context.Background(), "cinco team-a", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
+	first, err := r.Read(context.Background(), name, whole.Revision, 2, 2)
+	if err != nil || first.Content != "owner: blue\r\n---\r\n" || first.StartLine != 2 || first.EndLine != 3 || !first.Truncated {
+		t.Fatalf("window = %+v, %v", first, err)
 	}
-	oldHandle := before.Items[0].Handle
-
-	updated := strings.ReplaceAll(strings.ReplaceAll(initialMemory, "cinco", "tres"), "team-a", "team-b")
-	if err := os.WriteFile(filepath.Join(root, filepath.FromSlash(oldHandle.Path)), []byte(updated), 0o644); err != nil {
-		t.Fatal(err)
+	end, err := r.Read(context.Background(), name, whole.Revision, 6, 1)
+	if err != nil || end.Content != "Last line" || end.Truncated {
+		t.Fatalf("last = %+v, %v", end, err)
 	}
-
-	current, err := retriever.Retrieve(context.Background(), "tres team-b", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(current.Items) != 1 || strings.Contains(current.Items[0].Content, "cinco") || strings.Contains(current.Items[0].Content, "team-a") {
-		t.Fatalf("Retrieve() returned stale authority: %+v", current)
-	}
-	if _, err := retriever.Expand(context.Background(), oldHandle, 4096); !errors.Is(err, retrieval.ErrStaleHandle) {
-		t.Fatalf("Expand() error = %v, want ErrStaleHandle", err)
+	beyond, err := r.Read(context.Background(), name, whole.Revision, 99, 1)
+	if err != nil || beyond.Content != "" || beyond.Truncated {
+		t.Fatalf("beyond = %+v, %v", beyond, err)
 	}
 }
 
-func TestRetrieveTieOrderIsDeterministic(t *testing.T) {
-	page := func(name, firstID, secondID string) string {
-		return fmt.Sprintf("# %s\n<!-- @id: %s -->\n\n## First\n<!-- @id: %s -->\ncommon\n\n## Second\n<!-- @id: %s -->\ncommon\n", name, name, firstID, secondID)
+func TestReadSearchRevisionSurvivesUpdatesAndRestart(t *testing.T) {
+	const name = "memories/domains/fact.md"
+	root := newMemoryRoot(t, map[string]string{name: "Old timeout.\n"})
+	r := openRetriever(t, root)
+	before, err := r.Retrieve(context.Background(), "timeout", retrieval.Scope{}, 20)
+	if err != nil || len(before.Items) != 1 {
+		t.Fatalf("before = %+v, %v", before, err)
 	}
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/b.md": page("b", "b-first", "b-second"),
-		"memories/domains/a.md": page("a", "a-first", "a-second"),
-	})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
+	if err := os.WriteFile(filepath.Join(root, name), []byte("New timeout.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-
-	bundle, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{}, 4096)
-	if err != nil {
-		t.Fatal(err)
+	// Working files do not enter published reads.
+	unchanged, err := r.Read(context.Background(), name, "", 1, 200)
+	if err != nil || unchanged.Content != "Old timeout.\n" {
+		t.Fatalf("dirty read = %+v, %v", unchanged, err)
 	}
-	got := make([]string, len(bundle.Items))
-	for i, item := range bundle.Items {
-		got[i] = item.Handle.Path + ":" + item.Handle.SectionID
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "publish new timeout")
+	restarted := openRetriever(t, root)
+	old, err := restarted.Read(context.Background(), name, before.Revision, 1, 200)
+	if err != nil || old.Content != "Old timeout.\n" || old.Revision != before.Revision {
+		t.Fatalf("old revision = %+v, %v", old, err)
 	}
-	want := []string{"memories/domains/a.md:a-first", "memories/domains/a.md:a-second", "memories/domains/b.md:b-first", "memories/domains/b.md:b-second"}
-	if fmt.Sprint(got) != fmt.Sprint(want) {
-		t.Fatalf("Retrieve() order = %v, want %v", got, want)
+	current, err := restarted.Read(context.Background(), name, "", 1, 200)
+	if err != nil || current.Content != "New timeout.\n" || current.Revision == old.Revision {
+		t.Fatalf("current = %+v, %v", current, err)
 	}
 }
 
-func TestRetrieveReportsWholeResultTruncation(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/a.md": "# a\n<!-- @id: a -->\n\n## One\n<!-- @id: a-one -->\ncommon first\n",
-		"memories/domains/b.md": "# b\n<!-- @id: b -->\n\n## Two\n<!-- @id: b-two -->\ncommon second\n",
-	})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
+func TestReadRejectsUnpublishedRevision(t *testing.T) {
+	const name = "memories/domains/fact.md"
+	root := newMemoryRoot(t, map[string]string{name: "Published.\n"})
+	runGit(t, root, "checkout", "-qb", "draft")
+	if err := os.WriteFile(filepath.Join(root, name), []byte("Unpublished.\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-	full, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{}, 4096)
-	if err != nil {
-		t.Fatal(err)
-	}
-	oneItem := retrieval.ContextBundle{Items: full.Items[:1], Truncated: true}
-	oneItemJSON, err := json.Marshal(oneItem)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	limited, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{}, len(oneItemJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !limited.Truncated || len(limited.Items) != 1 || limited.Items[0].Handle.Path != "memories/domains/a.md" {
-		t.Fatalf("Retrieve() limited bundle = %+v", limited)
-	}
-	encoded, err := json.Marshal(limited)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(encoded) > len(oneItemJSON) {
-		t.Fatalf("Retrieve() used %d bytes with budget %d", len(encoded), len(oneItemJSON))
+	runGit(t, root, "commit", "-qam", "draft")
+	runGit(t, root, "checkout", "-")
+	r := openRetriever(t, root)
+	if _, err := r.Read(context.Background(), name, "draft", 1, 200); err == nil {
+		t.Fatal("unpublished revision was readable")
 	}
 }
 
-func TestRetrieveScopesToCanonicalPathPrefix(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/a.md": "# a\n<!-- @id: a -->\n\n## One\n<!-- @id: a-one -->\ncommon\n",
-		"memories/domains/b.md": "# b\n<!-- @id: b -->\n\n## Two\n<!-- @id: b-two -->\ncommon\n",
-	})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
+func TestRetrievalRejectsEscapesAndSymlinksAndDoesNotChangeFiles(t *testing.T) {
+	const name = "memories/domains/fact.md"
+	root := newMemoryRoot(t, map[string]string{name: "Common fact.\n", "proposals/private.md": "common private\n"})
+	if err := os.Symlink("/etc/passwd", filepath.Join(root, "memories/domains/link.md")); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-
-	bundle, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "memories/domains/a.md"}, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/domains/a.md" {
-		t.Fatalf("Retrieve() scoped bundle = %+v", bundle)
-	}
-	if _, err := retriever.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "../services"}, 2048); !errors.Is(err, retrieval.ErrInvalidScope) {
-		t.Fatalf("Retrieve() scope error = %v, want ErrInvalidScope", err)
-	}
-}
-
-func TestRetrieveAndExpandEnforceExactJSONBudget(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = retriever.Close() })
-
-	search, err := retriever.Retrieve(context.Background(), "timeout", retrieval.Scope{}, 4096)
-	if err != nil {
-		t.Fatal(err)
-	}
-	searchJSON, err := json.Marshal(search)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := retriever.Retrieve(context.Background(), "timeout", retrieval.Scope{}, len(searchJSON)); err != nil {
-		t.Fatalf("Retrieve() rejected exact budget: %v", err)
-	}
-	if _, err := retriever.Retrieve(context.Background(), "timeout", retrieval.Scope{}, len(searchJSON)-1); !errors.Is(err, retrieval.ErrBudgetTooSmall) {
-		t.Fatalf("Retrieve() error = %v, want ErrBudgetTooSmall", err)
-	}
-
-	expanded, err := retriever.Expand(context.Background(), search.Items[0].Handle, 4096)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expandJSON, err := json.Marshal(expanded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := retriever.Expand(context.Background(), search.Items[0].Handle, len(expandJSON)); err != nil {
-		t.Fatalf("Expand() rejected exact budget: %v", err)
-	}
-	if _, err := retriever.Expand(context.Background(), search.Items[0].Handle, len(expandJSON)-1); !errors.Is(err, retrieval.ErrBudgetTooSmall) {
-		t.Fatalf("Expand() error = %v, want ErrBudgetTooSmall", err)
-	}
-}
-
-func TestRetrievalIsReadOnlyAndExcludesReservedState(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/checkout-api.md":                         initialMemory,
-		"proposals/private.md":                                     "not valid memory",
-		"receipts/private.md":                                      "not valid memory",
-		".git-push-memories/private.md":                            "not valid memory",
-		"notes.txt":                                                "timeout team",
-		".git-push-memories-0123456789abcdef.tmp":                  "interrupted",
-		"memories/domains/.git-push-memories-abcdefabcdef1234.tmp": "interrupted",
-	})
+	runGit(t, root, "add", ".")
+	runGit(t, root, "commit", "-qm", "link")
 	before := treeFingerprint(t, root)
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
+	r := openRetriever(t, root)
+	result, err := r.Retrieve(context.Background(), "common", retrieval.Scope{}, 20)
+	if err != nil || len(result.Items) != 1 || result.Items[0].Path != name {
+		t.Fatalf("search = %+v, %v", result, err)
 	}
-	bundle, err := retriever.Retrieve(context.Background(), "timeout team", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"../etc/passwd", "/etc/passwd", "memories/domains/../../proposals/private.md", "memories/domains/link.md", "memories/notes/fact.md"} {
+		if _, err := r.Read(context.Background(), name, "", 1, 200); err == nil {
+			t.Fatalf("read accepted %q", name)
+		}
 	}
-	if len(bundle.Items) != 1 {
-		t.Fatalf("Retrieve() returned %d items, want 1", len(bundle.Items))
-	}
-	if _, err := retriever.Expand(context.Background(), bundle.Items[0].Handle, 4096); err != nil {
-		t.Fatal(err)
-	}
-	if err := retriever.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if after := treeFingerprint(t, root); after != before {
-		t.Fatalf("retrieval changed memory root: before %s, after %s", before, after)
+	if after := treeFingerprint(t, root); before != after {
+		t.Fatalf("read changed repository: %s -> %s", before, after)
 	}
 }
 
 func TestRetrievalPinsMemoryRootAcrossPathReplacement(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
+	root := newMemoryRoot(t, map[string]string{"memories/domains/fact.md": "Common fact.\n"})
+	r := openRetriever(t, root)
+	moved := root + "-moved"
+	if err := os.Rename(root, moved); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-	movedRoot := root + "-moved"
-	if err := os.Rename(root, movedRoot); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(movedRoot) })
+	t.Cleanup(func() { os.RemoveAll(moved) })
 	if err := os.Mkdir(root, 0o755); err != nil {
 		t.Fatal(err)
 	}
-
-	bundle, err := retriever.Retrieve(context.Background(), "checkout timeout team", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(bundle.Items) != 1 || bundle.Items[0].Handle.Path != "memories/domains/checkout-api.md" {
-		t.Fatalf("Retrieve() followed replacement root: %+v", bundle)
+	got, err := r.Retrieve(context.Background(), "common", retrieval.Scope{}, 20)
+	if err != nil || len(got.Items) != 1 || got.Items[0].Content != "Common fact.\n" {
+		t.Fatalf("pinned read = %+v, %v", got, err)
 	}
 }
 
-func TestRetrieveDoesNotTraverseReservedDirectories(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{
-		"memories/domains/checkout-api.md": initialMemory,
-		"proposals/private.md":             "not valid memory",
-	})
-	proposals := filepath.Join(root, "proposals")
-	if err := os.Chmod(proposals, 0); err != nil {
-		t.Fatal(err)
+func TestRetrievalReportsInvalidArgumentsAndEmptyResults(t *testing.T) {
+	root := newMemoryRoot(t, map[string]string{"memories/domains/empty.md": ""})
+	r := openRetriever(t, root)
+	if _, err := r.Retrieve(context.Background(), " ", retrieval.Scope{}, 20); !errors.Is(err, retrieval.ErrInvalidQuery) {
+		t.Fatalf("query = %v", err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(proposals, 0o755) })
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
+	if _, err := r.Retrieve(context.Background(), "common", retrieval.Scope{PathPrefix: "../private"}, 20); !errors.Is(err, retrieval.ErrInvalidScope) {
+		t.Fatalf("scope = %v", err)
 	}
-	t.Cleanup(func() { _ = retriever.Close() })
-
-	bundle, err := retriever.Retrieve(context.Background(), "timeout", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := r.Read(context.Background(), "memories/domains/empty.md", "", -1, 1); !errors.Is(err, retrieval.ErrInvalidRange) {
+		t.Fatalf("range = %v", err)
 	}
-	if len(bundle.Items) != 1 {
-		t.Fatalf("Retrieve() returned %d items, want 1", len(bundle.Items))
+	result, err := r.Retrieve(context.Background(), "missing", retrieval.Scope{}, 20)
+	if err != nil || !reflect.DeepEqual(result.Items, []retrieval.Item{}) || result.Truncated {
+		t.Fatalf("empty = %+v, %v", result, err)
 	}
-}
-
-func TestExpandTreatsMissingTargetAsStaleHandle(t *testing.T) {
-	root := newMemoryRoot(t, map[string]string{"memories/domains/checkout-api.md": initialMemory})
-	retriever, err := retrieval.New(root, "domains")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = retriever.Close() })
-	bundle, err := retriever.Retrieve(context.Background(), "timeout", retrieval.Scope{}, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(root, "memories", "domains", "checkout-api.md")); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, err := retriever.Expand(context.Background(), bundle.Items[0].Handle, 4096); !errors.Is(err, retrieval.ErrStaleHandle) {
-		t.Fatalf("Expand() error = %v, want ErrStaleHandle", err)
+	empty, err := r.Read(context.Background(), "memories/domains/empty.md", "", 1, 200)
+	if err != nil || empty.Content != "" || empty.EndLine != 0 || empty.Truncated {
+		t.Fatalf("empty read = %+v, %v", empty, err)
 	}
 }
 

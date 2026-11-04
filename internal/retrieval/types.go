@@ -3,11 +3,9 @@ package retrieval
 import "errors"
 
 var (
-	ErrInvalidQuery   = errors.New("invalid retrieval query")
-	ErrInvalidScope   = errors.New("invalid retrieval scope")
-	ErrInvalidBudget  = errors.New("invalid retrieval budget")
-	ErrBudgetTooSmall = errors.New("retrieval budget too small")
-	ErrStaleHandle    = errors.New("stale retrieval handle")
+	ErrInvalidQuery = errors.New("query must contain text")
+	ErrInvalidScope = errors.New("invalid memory path scope")
+	ErrInvalidRange = errors.New("invalid line range or result limit")
 )
 
 func ErrorCode(err error) string {
@@ -16,14 +14,10 @@ func ErrorCode(err error) string {
 		return "invalid_query"
 	case errors.Is(err, ErrInvalidScope):
 		return "invalid_scope"
-	case errors.Is(err, ErrInvalidBudget):
-		return "invalid_budget"
-	case errors.Is(err, ErrBudgetTooSmall):
-		return "budget_too_small"
-	case errors.Is(err, ErrStaleHandle):
-		return "stale_handle"
+	case errors.Is(err, ErrInvalidRange):
+		return "invalid_range"
 	default:
-		return "retrieval_failed"
+		return "read_failed"
 	}
 }
 
@@ -31,20 +25,24 @@ type Scope struct {
 	PathPrefix string `json:"path_prefix,omitempty"`
 }
 
-type Handle struct {
-	Path        string `json:"path"`
-	SectionID   string `json:"section_id"`
-	ContentHash string `json:"content_hash"`
-}
-
 type Item struct {
-	Handle  Handle `json:"handle"`
-	Heading string `json:"heading"`
-	Content string `json:"content"`
-	Score   int    `json:"score,omitempty"`
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Content   string `json:"content"`
 }
 
 type ContextBundle struct {
+	Revision  string `json:"revision"`
 	Items     []Item `json:"items"`
+	Truncated bool   `json:"truncated"`
+}
+
+type FileContent struct {
+	Revision  string `json:"revision"`
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Content   string `json:"content"`
 	Truncated bool   `json:"truncated"`
 }

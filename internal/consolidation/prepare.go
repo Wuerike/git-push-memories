@@ -1,5 +1,5 @@
 // Package consolidation supports an agent-led promotion over ordinary files.
-// It manages Git and canonical formatting, never content decisions per proposal.
+// It manages Git and files; the agent makes content decisions.
 package consolidation
 
 import (
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -23,12 +22,8 @@ var (
 	ErrNotPrepared = errors.New("prepare a promotion first")
 )
 
-var proposalName = regexp.MustCompile(`^proposals/([0-9a-f]{32})-([a-z0-9]+(?:-[a-z0-9]+)*)\.md$`)
-
 type ProposalInput struct {
-	ID        string `json:"id"`
 	Path      string `json:"path"`
-	Title     string `json:"title"`
 	Blob      string `json:"blob"`
 	InputPath string `json:"input_path"`
 }
@@ -75,7 +70,7 @@ func (m *Manager) entries(ctx context.Context, revision, root string) ([]treeEnt
 	return entries, nil
 }
 
-func (m *Manager) Prepare(ctx context.Context) (Prepared, error) {
+func (m *Manager) Prepare(ctx context.Context, selected ...string) (Prepared, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.current != nil {
@@ -106,26 +101,33 @@ func (m *Manager) Prepare(ctx context.Context) (Prepared, error) {
 	if err != nil {
 		return Prepared{}, err
 	}
+	wanted := make(map[string]bool, len(selected))
+	for _, name := range selected {
+		wanted[name] = false
+	}
 	var proposals []ProposalInput
 	contents := make(map[string][]byte)
 	for _, entry := range proposalEntries {
-		match := proposalName.FindStringSubmatch(entry.path)
-		if match == nil || entry.mode != "100644" || entry.kind != "blob" {
+		if !strings.HasSuffix(entry.path, ".md") || !(entry.mode == "100644" || entry.mode == "100755") || entry.kind != "blob" {
 			continue
+		}
+		if len(selected) > 0 {
+			if _, ok := wanted[entry.path]; !ok {
+				continue
+			}
+			wanted[entry.path] = true
 		}
 		data, err := m.ws.Repo().Bytes(ctx, "cat-file", "blob", entry.blob)
 		if err != nil {
 			return Prepared{}, fmt.Errorf("read proposal %s: %w", entry.path, err)
 		}
-		title := match[2]
-		for _, line := range strings.Split(string(data), "\n") {
-			if heading, ok := strings.CutPrefix(line, "# "); ok && strings.TrimSpace(heading) != "" {
-				title = strings.TrimSpace(heading)
-				break
-			}
-		}
-		proposals = append(proposals, ProposalInput{ID: match[1], Path: entry.path, Title: title, Blob: entry.blob})
+		proposals = append(proposals, ProposalInput{Path: entry.path, Blob: entry.blob})
 		contents[entry.path] = data
+	}
+	for name, found := range wanted {
+		if !found {
+			return Prepared{}, fmt.Errorf("selected proposal not found: %s", name)
+		}
 	}
 	if len(proposals) == 0 {
 		return Prepared{}, ErrNoProposals

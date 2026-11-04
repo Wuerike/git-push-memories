@@ -65,7 +65,7 @@ func TestPromotionToolContractUsesFiles(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			for _, obsolete := range []string{"proposal_id", "operation", "preview_token", "fold_into", "items"} {
+			for _, obsolete := range []string{"proposal_id", "operation", "preview_token", "fold_into"} {
 				if strings.Contains(string(data), `"`+obsolete+`"`) {
 					t.Fatalf("old input %s in %s", obsolete, tool.Name)
 				}
@@ -73,7 +73,7 @@ func TestPromotionToolContractUsesFiles(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	want := []string{"memory_expand", "memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_search"}
+	want := []string{"memory_promote_check", "memory_promote_finish", "memory_promote_prepare", "memory_promote_submit", "memory_proposal_list", "memory_propose", "memory_read", "memory_search"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tools = %v, want %v", names, want)
 	}
@@ -96,7 +96,7 @@ func TestConsolidationSupportsManyToManyMapping(t *testing.T) {
 	if !reflect.DeepEqual(checked.Paths, []string{owners, team}) {
 		t.Fatalf("changed paths = %v", checked.Paths)
 	}
-	summary := p.Proposals[0].ID + " contributes to " + team + " and " + owners + "; " + p.Proposals[1].ID + " also contributes to " + team + "; " + p.Proposals[2].ID + " also contributes to " + owners + "."
+	summary := p.Proposals[0].Path + " contributes to " + team + " and " + owners + "; " + p.Proposals[1].Path + " also contributes to " + team + "; " + p.Proposals[2].Path + " also contributes to " + owners + "."
 	submitted := decodePromotion[consolidation.Submitted](t, e.ok(t, "memory_promote_submit", map[string]any{"summary": summary}))
 	actual := strings.Fields(wt.Git(t, e.m.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", submitted.Commit))
 	if !reflect.DeepEqual(actual, []string{owners, team}) {
@@ -123,7 +123,7 @@ func TestConsolidationPreservesRememberAndPublishedReads(t *testing.T) {
 	current := strings.ReplaceAll(memoryPage, "tres segundos", "nove segundos")
 	writePreparedFile(t, p, checkoutPath, current)
 	e.ok(t, "memory_promote_check", map[string]any{})
-	before := e.search(t, "", "checkout timeout")
+	before := e.search(t, "checkout timeout")
 	if len(before.Items) != 1 || !strings.Contains(before.Items[0].Content, "tres segundos") {
 		t.Fatalf("unpublished read = %+v", before)
 	}
@@ -140,7 +140,7 @@ func TestConsolidationPreservesRememberAndPublishedReads(t *testing.T) {
 	if !finished.Merged || !reflect.DeepEqual(finished.Removed, []string{proposal.Path}) {
 		t.Fatalf("finish = %+v", finished)
 	}
-	after := e.search(t, "", "checkout timeout")
+	after := e.search(t, "checkout timeout")
 	if len(after.Items) != 1 || !strings.Contains(after.Items[0].Content, "nove segundos") || strings.Contains(after.Items[0].Content, "tres segundos") {
 		t.Fatalf("published read = %+v", after)
 	}
@@ -164,8 +164,9 @@ func TestPromotionRequiresPreparedFilesAndReportsLimits(t *testing.T) {
 		t.Fatalf("empty publication = %+v", result)
 	}
 	writePreparedFile(t, p, "memories/domains/fact.md", "# One\n# Two\n")
-	if result := e.call(t, "memory_promote_check", map[string]any{}); !result.IsError || errorCode(t, result) != "invalid_memory" {
-		t.Fatalf("invalid document = %+v", result)
+	result := decodePromotion[consolidation.Checked](t, e.ok(t, "memory_promote_check", map[string]any{}))
+	if !strings.Contains(result.Diff, "+# One") || !strings.Contains(result.Diff, "+# Two") {
+		t.Fatalf("ordinary Markdown diff = %+v", result)
 	}
 }
 
@@ -179,10 +180,55 @@ func TestPrepareFinishesMergedPublicationBeforeNewSnapshot(t *testing.T) {
 	later := e.propose(t, map[string]any{"title": "Later", "content": "# Later\nLater fact.\n"})
 	merged := squashPublished(t, e.m, p.Branch)
 	next := decodePromotion[consolidation.Prepared](t, e.ok(t, "memory_promote_prepare", map[string]any{}))
-	if next.Worktree == p.Worktree || next.MainSHA != merged || len(next.Proposals) != 1 || next.Proposals[0].ID != later.ID {
+	if next.Worktree == p.Worktree || next.MainSHA != merged || len(next.Proposals) != 1 || next.Proposals[0].Path != later.Path {
 		t.Fatalf("next preparation = %+v", next)
 	}
 	if _, err := os.Stat(e.m.Config.Paths.Published); !os.IsNotExist(err) {
 		t.Fatalf("cleanup record remains: %v", err)
+	}
+}
+
+func TestMCPSelectsManualProposalsAndReviewedMemoryPaths(t *testing.T) {
+	e := newEnv(t, nil)
+	const selected = "proposals/billing/manual note.md"
+	const pending = "proposals/unrelated.md"
+	wt.Seed(t, e.m.Remote, "proposals", map[string]string{selected: "A billing fact without a heading.\n", pending: "Another subject.\n"})
+	var listed struct {
+		Data struct {
+			Categories []string `json:"categories"`
+			Proposals  []struct {
+				Path    string `json:"path"`
+				Blob    string `json:"blob"`
+				Content string `json:"content"`
+			} `json:"proposals"`
+		} `json:"data"`
+	}
+	decodeStructured(t, e.ok(t, "memory_proposal_list", map[string]any{}), &listed)
+	if !reflect.DeepEqual(listed.Data.Categories, []string{"domains", "decision"}) || len(listed.Data.Proposals) != 2 || listed.Data.Proposals[0].Path != selected || listed.Data.Proposals[0].Blob == "" || listed.Data.Proposals[0].Content != "A billing fact without a heading.\n" {
+		t.Fatalf("list = %+v", listed)
+	}
+	p := decodePromotion[consolidation.Prepared](t, e.ok(t, "memory_promote_prepare", map[string]any{"proposal_paths": []string{selected}}))
+	if len(p.Proposals) != 1 || p.Proposals[0].Path != selected || p.Proposals[0].Blob != listed.Data.Proposals[0].Blob {
+		t.Fatalf("prepared = %+v", p)
+	}
+	const target = "memories/domains/billing.md"
+	const other = "memories/domains/later.md"
+	writePreparedFile(t, p, target, "The billing fact.\n")
+	writePreparedFile(t, p, other, "An edit for later review.\n")
+	submitted := decodePromotion[consolidation.Submitted](t, e.ok(t, "memory_promote_submit", map[string]any{"summary": selected + " contributes to " + target, "paths": []string{target}}))
+	if names := wt.Git(t, e.m.Remote, "diff-tree", "--no-commit-id", "--name-only", "-r", submitted.Commit); names != target {
+		t.Fatalf("published = %q", names)
+	}
+	squashPublished(t, e.m, p.Branch)
+	finished := decodePromotion[consolidation.Finished](t, e.ok(t, "memory_promote_finish", map[string]any{}))
+	if !finished.Merged || !reflect.DeepEqual(finished.Removed, []string{selected}) {
+		t.Fatalf("finish = %+v", finished)
+	}
+	if remaining := wt.Git(t, e.m.Remote, "ls-tree", "-r", "--name-only", "proposals", "--", "proposals"); remaining != pending {
+		t.Fatalf("pending = %q", remaining)
+	}
+	data, err := os.ReadFile(filepath.Join(p.Worktree, other))
+	if err != nil || string(data) != "An edit for later review.\n" {
+		t.Fatalf("unselected memory changed: %q, %v", data, err)
 	}
 }

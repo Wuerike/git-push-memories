@@ -26,6 +26,8 @@ var NetworkTimeout = 60 * time.Second
 // selection, no prompts, no hooks, no replace refs.
 type Git struct {
 	Dir string
+	// IndexFile isolates staging used to inspect a worktree without changing its index.
+	IndexFile string
 }
 
 // ponytail: denylist of the GIT_* variables that retarget or reconfigure Git; add more if one leaks.
@@ -57,7 +59,7 @@ func environment() []string {
 	return append(out, "GIT_TERMINAL_PROMPT=0", "GIT_SSH_COMMAND="+sshCommand+" -o BatchMode=yes")
 }
 
-var baseArguments = []string{"--no-optional-locks", "--no-replace-objects", "-c", "core.hooksPath=/dev/null"}
+var baseArguments = []string{"--no-optional-locks", "--no-replace-objects", "--literal-pathspecs", "-c", "core.hooksPath=/dev/null"}
 
 func (git Git) run(ctx context.Context, input []byte, arguments ...string) (string, error) {
 	out, err := git.bytes(ctx, input, arguments...)
@@ -73,6 +75,9 @@ func (git Git) bytes(ctx context.Context, input []byte, arguments ...string) ([]
 	command := exec.CommandContext(ctx, "git", append(append([]string{}, baseArguments...), arguments...)...)
 	command.Dir = git.Dir
 	command.Env = environment()
+	if git.IndexFile != "" {
+		command.Env = append(command.Env, "GIT_INDEX_FILE="+git.IndexFile)
+	}
 	if input != nil {
 		command.Stdin = bytes.NewReader(input)
 	}

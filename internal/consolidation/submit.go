@@ -40,7 +40,7 @@ type Submitted struct {
 
 // Submit commits the current files. The caller conducts approval of their diff;
 // this method never reapplies a stored preview or changes the reviewed prose.
-func (m *Manager) Submit(ctx context.Context, summary string) (Submitted, error) {
+func (m *Manager) Submit(ctx context.Context, summary string, selected ...string) (Submitted, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.current == nil {
@@ -54,12 +54,27 @@ func (m *Manager) Submit(ctx context.Context, summary string) (Submitted, error)
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return Submitted{}, err
 	}
-	checked, err := m.changes(ctx, false)
+	checked, err := m.changes(ctx)
 	if err != nil {
 		return Submitted{}, err
 	}
 	if len(checked.Paths) == 0 {
 		return Submitted{}, ErrNoChanges
+	}
+	if len(selected) > 0 {
+		available := make(map[string]bool, len(checked.Paths))
+		for _, name := range checked.Paths {
+			available[name] = true
+		}
+		paths := []string{}
+		for _, name := range selected {
+			if !available[name] {
+				return Submitted{}, fmt.Errorf("selected memory is not changed: %s", name)
+			}
+			paths = append(paths, name)
+			delete(available, name)
+		}
+		checked.Paths = paths
 	}
 	client, err := github.New(m.cfg.RepoURL)
 	if err != nil {
@@ -69,7 +84,7 @@ func (m *Manager) Submit(ctx context.Context, summary string) (Submitted, error)
 		return Submitted{}, err
 	}
 	p := m.current
-	if err := m.ws.Commit(ctx, p.Worktree, "memory: consolidate proposals", checked.Paths...); err != nil {
+	if err := m.ws.CommitFiles(ctx, p.Worktree, "memory: consolidate proposals", checked.Paths...); err != nil {
 		return Submitted{}, err
 	}
 	commit, err := workspace.Rev(ctx, p.Worktree, "HEAD")

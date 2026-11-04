@@ -13,70 +13,56 @@ type listedProposals struct {
 	Data struct {
 		Categories []string `json:"categories"`
 		Proposals  []struct {
-			ID    string `json:"id"`
-			Title string `json:"title"`
+			Path string `json:"path"`
+			Blob string `json:"blob"`
 		} `json:"proposals"`
 	} `json:"data"`
 }
 
-func TestMemorySearchAndExpandConfiguredCategory(t *testing.T) {
+func TestMemorySearchAndReadConfiguredCategory(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
 
-	search := e.search(t, "", "checkout timeout team")
-	if search == nil || len(search.Items) != 1 || search.Items[0].Handle.Path != checkoutPath {
+	search := e.search(t, "checkout timeout team")
+	if search == nil || len(search.Items) != 1 || search.Items[0].Path != checkoutPath {
 		t.Fatalf("memory_search = %+v", search)
 	}
-	expandResult := e.ok(t, "memory_expand", map[string]any{"handle": search.Items[0].Handle, "budget_bytes": 4096})
-	expanded := decodeResponse(t, expandResult)
-	if expanded.Data == nil || len(expanded.Data.Items) != 1 || !strings.Contains(expanded.Data.Items[0].Content, "timeout: tres segundos") {
-		t.Fatalf("memory_expand response = %+v", expanded)
+	result := e.ok(t, "memory_read", map[string]any{"path": search.Items[0].Path, "revision": search.Revision})
+	read := decodePromotion[retrieval.FileContent](t, result)
+	if read.Path != checkoutPath || read.Revision != search.Revision || !strings.Contains(read.Content, "timeout: tres segundos") {
+		t.Fatalf("memory_read = %+v", read)
 	}
 }
 
 func TestMemoryReadFollowsPublishedMain(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
-	if search := e.search(t, "main", "settlement retry failures"); len(search.Items) != 0 {
+	if search := e.search(t, "settlement retry failures"); len(search.Items) != 0 {
 		t.Fatalf("search before publication = %+v", search)
 	}
 	e.m.PublishMain(t, map[string]string{"memories/domains/settlement.md": "# Settlement\n<!-- @id: settlement -->\n\n## Retry\n<!-- @id: settlement-retry -->\nSettlement retries stop after three failures.\n"})
 	// The read worktree answers from the last refresh until the TTL expires.
-	if search := e.search(t, "", "settlement retry failures"); len(search.Items) != 0 {
+	if search := e.search(t, "settlement retry failures"); len(search.Items) != 0 {
 		t.Fatalf("search before refresh = %+v", search)
 	}
 	if err := os.Remove(filepath.Join(e.m.Config.Paths.State, "fetch-attempt")); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
-	search := e.search(t, "", "settlement retry failures")
+	search := e.search(t, "settlement retry failures")
 	for len(search.Items) == 0 && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
-		search = e.search(t, "", "settlement retry failures")
+		search = e.search(t, "settlement retry failures")
 	}
-	if len(search.Items) != 1 || search.Items[0].Handle.Path != "memories/domains/settlement.md" {
+	if len(search.Items) != 1 || search.Items[0].Path != "memories/domains/settlement.md" {
 		t.Fatalf("search after refresh = %+v", search)
 	}
 }
 
-func TestReadToolsRejectUnavailableOrUnknownSource(t *testing.T) {
+func TestReadToolsRejectPathsOutsideConfiguredMemory(t *testing.T) {
 	e := newEnv(t, map[string]string{checkoutPath: memoryPage})
-	search := e.call(t, "memory_search", map[string]any{"query": "checkout", "budget_bytes": 2048, "source": "release"})
-	if !search.IsError || errorCode(t, search) != "invalid_source" {
-		t.Fatalf("release search without release = %+v, code %q", search, errorCode(t, search))
-	}
-	expand := e.call(t, "memory_expand", map[string]any{"handle": retrieval.Handle{Path: checkoutPath}, "budget_bytes": 2048, "source": "release"})
-	if !expand.IsError || errorCode(t, expand) != "invalid_source" {
-		t.Fatalf("release expand without release = %+v, code %q", expand, errorCode(t, expand))
-	}
-	list := e.call(t, "memory_proposal_list", map[string]any{"source": "release"})
-	if !list.IsError || errorCode(t, list) != "invalid_source" {
-		t.Fatalf("release proposal list without release = %+v, code %q", list, errorCode(t, list))
-	}
-	for name, arguments := range map[string]map[string]any{
-		"memory_search":        {"source": "elsewhere", "query": "checkout", "budget_bytes": 2048},
-		"memory_proposal_list": {"source": "elsewhere"},
-	} {
-		if result := e.call(t, name, arguments); !result.IsError || errorCode(t, result) != "invalid_source" {
-			t.Fatalf("%s with unknown source = %+v, code %q", name, result, errorCode(t, result))
+	for _, name := range []string{"../private.md", "proposals/fact.md", "memories/other/fact.md"} {
+		result := e.call(t, "memory_read", map[string]any{"path": name})
+		if !result.IsError {
+			t.Fatalf("read accepted %s", name)
 		}
 	}
 }
@@ -111,7 +97,7 @@ func TestMemoryProposeCommitsMarkdownToRemoteProposals(t *testing.T) {
 func TestMemoryProposeReportsApiFailuresWithoutWriting(t *testing.T) {
 	e := newEnv(t, nil)
 	before := gitOutput(t, e.m.Remote, "rev-parse", "refs/heads/proposals")
-	for failure, code := range map[string]string{"connection refused": "proposal_failed", "Forbidden (HTTP 403)": "push_denied"} {
+	for failure, code := range map[string]string{"connection refused": "operation_failed", "Forbidden (HTTP 403)": "push_denied"} {
 		t.Setenv("GPM_FAKE_API_FAIL", failure)
 		result := e.call(t, "memory_propose", map[string]any{"title": "Fact", "content": "Knowledge."})
 		response := decodeInboxResponse(t, result)
@@ -145,13 +131,14 @@ func TestProposalListIsReadOnly(t *testing.T) {
 	var listed struct {
 		Data struct {
 			Proposals []struct {
-				ID      string `json:"id"`
+				Path    string `json:"path"`
+				Blob    string `json:"blob"`
 				Content string `json:"content"`
 			} `json:"proposals"`
 		} `json:"data"`
 	}
 	decodeStructured(t, result, &listed)
-	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].ID != proposalID || listed.Data.Proposals[0].Content != "Retries stop after three failures." {
+	if len(listed.Data.Proposals) != 1 || listed.Data.Proposals[0].Path != "proposals/"+proposalID+"-retry-policy.md" || listed.Data.Proposals[0].Blob == "" || listed.Data.Proposals[0].Content != "Retries stop after three failures." {
 		t.Fatalf("listed proposals = %+v", listed.Data.Proposals)
 	}
 	if current := commitHeads(t, e.proposalsRoot()); current != head {

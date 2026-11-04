@@ -6,7 +6,7 @@ Esta análise utiliza informações disponíveis no repositório público [`iury
 
 ## Resumo executivo
 
-O `claude-bedrock` tem alta aderência às escolhas de Markdown, Git, captura explícita e curadoria assistida por agentes. Sua aderência é menor ao diferencial central do `git-push-memories`: capturar conhecimento descoberto durante sessões de programação, consolidá-lo como estado atual e recuperá-lo automaticamente em tarefas futuras.
+O `claude-bedrock` tem alta aderência às escolhas de Markdown, Git, captura explícita e curadoria assistida por agentes. Sua aderência é menor ao diferencial central do `git-push-memories`: capturar conhecimento descoberto durante sessões de programação, consolidá-lo como estado atual e recuperá-lo como contexto em tarefas futuras.
 
 A recomendação é manter o `git-push-memories` como projeto independente e avaliar o `claude-bedrock` como referência ou fonte de componentes isolados sob licença MIT, não como fork para o núcleo do produto.
 
@@ -117,7 +117,8 @@ Qualquer cópia substancial deve manter o aviso MIT e ter origem e versão regis
 3. Validar primeiro captura explícita, proposta temporária, consolidação do estado atual, revisão Git e recuperação em outra sessão.
 4. Usar corpus sintético ou projetos públicos no desenvolvimento e nos testes do projeto open source.
 5. Registrar qualquer componente MIT incorporado e preservar os avisos exigidos.
-6. Escolher uma licença para o `git-push-memories`, que ainda não possui um arquivo `LICENSE`.
+6. Distribuir o código do GPM sob a [licença Apache-2.0](../../LICENSE),
+   preservando os avisos dos componentes de terceiros incorporados.
 
 ## Fontes públicas
 

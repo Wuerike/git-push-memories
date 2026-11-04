@@ -2,7 +2,9 @@
 
 `git-push-memories` é um projeto open source para criar e manter uma memória compartilhada de domínio a partir de sessões de trabalho com agentes de programação.
 
-A ferramenta será integrada inicialmente ao Claude Code e deverá transformar conhecimento descoberto durante o trabalho em memória reutilizável por sessões futuras. Integrações com Copilot CLI e OpenCode poderão ser adicionadas posteriormente.
+A integração com Claude Code oferece as skills `/remember` e `/promote`,
+apoiadas por ferramentas MCP em Go para acessar o repositório de memória, Git
+e GitHub. As skills interpretam o conhecimento e conduzem as decisões de conteúdo.
 
 ## Problema
 
@@ -25,12 +27,15 @@ A documentação do domínio e a preservação de decisões são consequências 
 
 Um time pode trabalhar em vários repositórios de código e manter um único repositório de memória. Cada pessoa configura a ferramenta com a URL Git desse repositório.
 
-Durante uma sessão, hooks e comandos identificam propostas de memória. A captura segue um modelo híbrido:
+Durante uma sessão, `/remember` investiga conhecimento relacionado e apresenta
+uma proposta de texto livre para confirmação. A captura envia o Markdown para
+a branch `proposals` do repositório compartilhado.
 
-- o agente pode detectar conhecimento relevante automaticamente;
-- a pessoa pode indicar explicitamente algo que deve ser lembrado.
-
-As propostas passam por consolidação antes de se tornarem memória compartilhada. A revisão por pull request fará parte desse processo, junto de alguma forma de validação por agentes. A ordem, os critérios e os momentos dessas validações ainda precisam ser definidos a partir de casos de uso concretos.
+`/promote` seleciona propostas, investiga memórias relacionadas e discute um
+plano com a pessoa. Depois da aprovação, o agente edita arquivos Markdown
+comuns, apresenta o diff e pede aprovação para abrir um PR. A pessoa faz o merge;
+a conclusão limpa apenas os insumos selecionados que continuam com o mesmo
+conteúdo. As categorias de `gpm.json` são as opções de destino para o agente.
 
 ## Princípios
 
@@ -40,7 +45,9 @@ A memória deve explicar principalmente o estado atual do domínio. Ela não dev
 
 ### Repositório como memória compartilhada
 
-As memórias serão mantidas como arquivos Markdown em um repositório Git compartilhado. Armazenamento local, como SQLite, poderá apoiar indexação e busca sem exigir um backend.
+As memórias ficam em arquivos Markdown em um repositório Git compartilhado.
+A busca textual retorna caminhos, linhas e uma revisão Git para o agente
+investigar o conhecimento publicado.
 
 ### Sem backend obrigatório
 
@@ -50,17 +57,21 @@ O produto deve funcionar localmente, integrado às ferramentas de desenvolviment
 
 Sessões completas, prompts, respostas e referências para sessões não devem ser armazenados na memória.
 
-### Captura híbrida
+### Captura explícita
 
-A ferramenta combina descoberta automática com captura explicitamente solicitada pela pessoa. O objetivo é integrar a construção da memória ao trabalho sem depender apenas da disciplina manual e sem entregar todo o controle ao agente.
+A pessoa invoca `/remember` e confirma o texto antes do compartilhamento.
+O agente usa a conversa e a investigação de conhecimento existente para
+preparar uma proposta que faça sentido fora da sessão.
 
 ### Consolidação antes da publicação
 
-Uma proposta não é automaticamente uma memória válida. Antes da consolidação, será necessário considerar duplicidades, inconsistências, contradições e possíveis alterações em conhecimento existente.
+Uma proposta passa por revisão para se tornar memória. Na consolidação,
+o agente investiga duplicidades, inconsistências, contradições
+e alterações em conhecimento existente, com revisão e aprovação da pessoa.
 
 ## Documentação
 
-- [Funcionalidades](docs/features.md) — comandos, skills, tools MCP, restrições e o que falta.
+- [Funcionalidades](docs/features.md) — comandos, skills, ferramentas MCP e requisitos de operação.
 - [Fluxo de uso](docs/workflow.md) — branches, worktrees, setup, `/remember`, `/promote` e finalização.
 - [Integração com Claude Code](integrations/claude-code/README.md) — configuração e uso das skills.
 - [Glossário](CONTEXT.md) — termos do domínio.

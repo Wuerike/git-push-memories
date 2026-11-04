@@ -1,13 +1,8 @@
 # Comparação dos mecanismos de geração de memória
 
-**Data da análise:** 10 de setembro de 2026.
-
 ## Resposta executiva
 
 - **Existe diferença provável na qualidade da memória gerada**, mas não existe um vencedor único em todos os critérios. Cada projeto otimiza uma combinação diferente de cobertura, precisão, riqueza, atualização, evidência e controle de ruído.
-- **O `git-push-memories` atual é o mecanismo mais conservador da comparação.** Ele recebe um fato explícito, pesquisa somente a memória canônica, expande até três seções relacionadas, pede ao Claude que redija uma proposta autocontida e exige confirmação humana. Ele não captura sessões automaticamente, não consulta o repositório de código durante o `/remember`, não verifica se os `source_paths` sustentam o fato e ainda não transforma propostas em memória canônica.
-- **A hipótese de que o `/remember` “expande o fato com base no repo atual” não corresponde exatamente à implementação.** O fato pode se beneficiar do contexto de código que o Claude já acumulou durante a sessão, mas a skill não possui ferramentas para explorar o repositório nesse momento. `memory_expand` expande seções encontradas no repositório de memória, não código-fonte.
-- **O maior ganho potencial sobre o projeto atual está em consolidação, não necessariamente na redação inicial.** `Palinode` e `ai-memory` comparam informação nova com estado existente e mantêm mecanismos explícitos de atualização, supersessão, histórico ou contradição. O projeto atual apenas sugere `create`, `update` ou `remove` para uma curadoria futura ainda não implementada.
 - **O maior ganho de cobertura está nos sistemas com hooks.** `ai-memory`, `claude-mem`, `Palinode`, `Basic Memory` e `twiceshy` conseguem capturar sessões ou eventos sem depender de um `/remember` por fato. Isso reduz esquecimentos de captura, mas aumenta o volume de material irrelevante e a superfície para interpretações erradas do modelo.
 - **A maior garantia de correção técnica é oferecida pelo `twiceshy`, dentro de seu domínio estreito.** Uma experiência de engenharia nasce em quarentena e pode exigir reprodução executável em sandbox e julgamento adicional antes de ser servida como validada. Essa qualidade não se generaliza para memória ampla de domínio, pessoas ou decisões.
 - **A memória mais rica não é necessariamente a mais confiável.** `claude-mem`, `ai-memory` e `Palinode` dão ao modelo mais sessão, eventos, relações e memória anterior. Isso favorece contexto e recall, mas aumenta dependência do modelo, risco de ruído e custo de resolver fatos contraditórios.
@@ -45,110 +40,17 @@ A análise seguiu o código-fonte, prompts, skills, schemas e documentação pri
 - **Rastreabilidade:** capacidade de descobrir origem, transformação, modelo, revisão e histórico de uma afirmação.
 - **Sinal/ruído:** proporção entre conhecimento reutilizável e material incidental.
 
-## Revisões e atualização dos clones
+## Revisões de referência
 
-Antes da leitura foi executado `git pull --ff-only` em cada repositório de referência. Todos estavam limpos e em `main`.
+As descrições dos projetos externos usam estas revisões:
 
-- **Basic Memory:** atualizado de `a55003e7` para `3452c821d76c083823d020984d71e06904a1ff1e`.
-- **ai-memory:** atualizado de `3bd35154` para `55fcce35d2bf3e52d933f83cb651b380fd67e81b`.
-- **Palinode:** atualizado de `9832d586` para `42f726921dae5493821480e913d7c52cbb046c6d`.
-- **claude-mem:** atualizado de `be44b6c8` para `8bc631a71a487424b866756e43a6efa4574cc66b`.
-- **claude-bedrock:** já estava atualizado em `7cac16ceb6064b7fbb4ec45c3ad4be31b9d9c9f0`.
-- **agent-memory:** atualizado de `51dac9bf` para `e42f455865538a59110c6510ae8e340969feb810`.
-- **twiceshy:** já estava atualizado em `aa8f1d88b23ce26b9add249ee2f507d350aca12c`.
-- **git-push-memories:** analisado no `HEAD` local `1f26f8472204e20a14d45652a37dcb142a1bbade`. O remoto `https://github.com/Wuerike/git-push-memories.git` não publicava nenhuma branch; por isso `git pull --ff-only origin main` retornou `couldn't find remote ref main`.
-
-## git-push-memories
-
-### Gatilho e entrada
-
-O único gatilho de geração implementado é a invocação explícita de `/remember` com um fato. A skill desabilita invocação automática pelo modelo e limita cada execução a um fato. Não existem hooks de captura de prompt, tool use, compactação ou fim de sessão.
-
-Esse desenho favorece intenção humana e baixo ruído, mas possui o menor recall de captura da comparação: qualquer conhecimento que a pessoa não mandar lembrar é perdido pelo mecanismo.
-
-### Quem gera e qual contexto usa
-
-O Claude que já está trabalhando na sessão realiza toda a parte semântica:
-
-- reduz o fato a uma consulta curta;
-- interpreta os resultados de busca;
-- decide se a ação sugerida é `create`, `update`, `remove` ou cancelamento;
-- redige `title` e `knowledge`;
-- escolhe `target` e `source_paths`.
-
-O binário Go não chama outro LLM e não enriquece semanticamente o conteúdo. Ele fornece busca, validação e persistência determinísticas.
-
-O contexto adicional obtido pela skill vem exclusivamente da memória canônica. `memory_search` percorre seções folha em `memories/<categoria-configurada>/**/*.md`, compara tokens da consulta com path, heading e corpo, e devolve resultados ordenados. `memory_expand` abre uma dessas seções e confirma path, section ID e hash para evitar usar um resultado que mudou depois da busca.
-
-A skill permite somente `memory_search`, `memory_expand` e `memory_propose`. Portanto:
-
-- ela não lê código durante o `/remember`;
-- ela não executa testes para confirmar o fato;
-- ela não procura documentação do repositório de trabalho;
-- `source_paths` são referências escolhidas pelo Claude a partir do contexto que ele já possuía e são explicitamente classificadas pelo servidor como não verificadas.
-
-O fato pode, sim, ter sido descoberto após uma investigação rica no repositório atual. Nesse caso o conhecimento já está no contexto do Claude antes de `/remember`. Isso é diferente de a skill realizar uma etapa própria de expansão baseada no código.
-
-### Pipeline de geração
-
-O fluxo efetivo é:
-
-1. O usuário fornece um fato.
-2. O Claude faz uma única busca lexical com orçamento de 2.048 bytes.
-3. O Claude expande, em ordem, todos os handles retornados, no máximo três, cada um com orçamento de 4.096 bytes.
-4. O Claude classifica os candidatos encontrados.
-5. Se o fato já estiver representado, o fluxo é cancelado.
-6. Caso contrário, o Claude prepara os cinco campos fechados: `title`, `suggested_action`, `target`, `knowledge` e `source_paths`.
-7. O usuário vê exatamente esses campos e confirma ou cancela.
-8. Após confirmação, a skill chama `memory_propose` exatamente uma vez.
-9. O Intake Guard valida todo o payload antes da primeira persistência.
-10. A proposta é criada em `proposals/` e recebe um commit path-scoped diretamente em `main`.
-
-### Duplicidade, contradição e estado atual
-
-A própria skill declara que a busca serve como orientação, não como detector autoritativo de duplicidade ou contradição. Há três limitações importantes:
-
-- A busca é lexical e pontua apenas quantos termos distintos aparecem. Paráfrases, sinônimos ou conhecimento semanticamente relacionado sem vocabulário comum podem não ser encontrados.
-- Somente até três candidatos são expandidos. Uma memória relevante fora dessa janela não participa da decisão.
-- `create`, `update` e `remove` são sugestões gravadas na proposta. Nenhuma delas altera a memória canônica.
-
-Não há hoje deduplicação semântica, verificação de contradição, consumo do inbox ou consolidação para o estado atual. Duas chamadas aprovadas podem criar duas propostas equivalentes, pois cada uma recebe um ID aleatório.
-
-### Validação, evidência, privacidade e revisão
-
-O Intake Guard é uma das partes mais fortes do mecanismo. Ele exige um objeto fechado, rejeita campos desconhecidos ou duplicados, valida UTF-8, ações, tamanhos e paths relativos, e examina todos os campos antes de abrir o inbox.
-
-O scanner bloqueia padrões conhecidos de chaves privadas, autorização, tokens, senhas, credenciais AWS/GitHub/Slack/OpenAI, email, telefone, CPF, session IDs e referências a transcripts do Claude. Essa fronteira reduz bastante a chance de persistir material de sessão, embora continue sendo detecção por padrões e não classificação semântica de confidencialidade.
-
-A evidência é mais fraca que a validação de privacidade. `source_paths` não são checados quanto a existência, conteúdo, hash, linha ou entailment. Um path sintaticamente válido pode não sustentar o fato.
-
-A revisão humana acontece antes da proposta, mas é um contrato da skill, não uma prova recebida pelo servidor. Um cliente MCP diferente poderia chamar `memory_propose` diretamente. Depois da gravação, Git oferece outra superfície de revisão, porém a curadoria que promoveria o conteúdo ainda não existe.
-
-### Resultado e qualidade provável
-
-O resultado é um Markdown em `proposals/<id>-<slug>.md`, com frontmatter de ação, target e fontes, seguido do conhecimento. Ele é durável e auditável, mas ainda não é memória canônica e não aparece na busca usada pelo próprio `/remember`.
-
-Consequências prováveis:
-
-- **Cobertura baixa:** depende de lembrança e iniciativa humanas.
-- **Precisão de intenção alta:** o usuário escolhe o fato e confirma a formulação.
-- **Precisão factual média:** as fontes não são verificadas e a redação depende do Claude.
-- **Riqueza média:** há espaço para conhecimento autocontido e paths, mas não para confidence, trechos de prova, rationale separado ou relações tipadas.
-- **Consistência temporal baixa no estado atual:** a classificação ajuda o curador futuro, mas nenhuma mudança é consolidada.
-- **Rastreabilidade alta para a proposta e baixa para a prova:** arquivo e commit são exatos; a relação entre código e afirmação não é comprovada.
-- **Ruído baixo:** um fato por chamada, confirmação e ausência de captura automática.
-
-### Fontes primárias
-
-- [`integrations/claude-code/skills/remember/SKILL.md`](../../integrations/claude-code/skills/remember/SKILL.md#L10-L34)
-- [`internal/mcpserver/server.go`](../../internal/mcpserver/server.go#L51-L62)
-- [`internal/mcpserver/server.go`](../../internal/mcpserver/server.go#L87-L149)
-- [`internal/retrieval/retrieval.go`](../../internal/retrieval/retrieval.go#L47-L134)
-- [`internal/retrieval/retrieval.go`](../../internal/retrieval/retrieval.go#L136-L164)
-- [`internal/intake/guard.go`](../../internal/intake/guard.go#L21-L33)
-- [`internal/intake/guard.go`](../../internal/intake/guard.go#L56-L127)
-- [`internal/inbox/inbox.go`](../../internal/inbox/inbox.go#L90-L115)
-- [`internal/inbox/inbox.go`](../../internal/inbox/inbox.go#L180-L265)
+- **Basic Memory:** `3452c821d76c083823d020984d71e06904a1ff1e`.
+- **ai-memory:** `55fcce35d2bf3e52d933f83cb651b380fd67e81b`.
+- **Palinode:** `42f726921dae5493821480e913d7c52cbb046c6d`.
+- **claude-mem:** `8bc631a71a487424b866756e43a6efa4574cc66b`.
+- **claude-bedrock:** `7cac16ceb6064b7fbb4ec45c3ad4be31b9d9c9f0`.
+- **agent-memory:** `e42f455865538a59110c6510ae8e340969feb810`.
+- **twiceshy:** `aa8f1d88b23ce26b9add249ee2f507d350aca12c`.
 
 ## Basic Memory
 
@@ -723,8 +625,6 @@ O scanner cobre todos os campos textuais do record antes da escrita normal. A re
 
 ### Cobertura de captura
 
-O projeto atual possui a menor cobertura porque exige uma ação por fato. Isso não significa baixa qualidade do que é capturado; significa maior probabilidade de conhecimento útil nunca entrar no pipeline.
-
 `claude-mem` e `ai-memory` ficam no extremo oposto: observam eventos ao longo de toda a sessão. `Palinode` e `Basic Memory` combinam hooks mais seletivos com captura deliberada. `agent-memory` depende de o coding agent obedecer a gatilhos descritos em skill. `twiceshy` usa hooks e importadores, mas filtra para uma classe específica de experiência.
 
 ### Qualidade da formulação inicial
@@ -739,7 +639,6 @@ Mecanismos determinísticos, como o checkpoint automático do Basic Memory e o s
 
 Nenhum servidor analisado “descobre a verdade do código” automaticamente em toda geração.
 
-- O projeto atual não consulta código no `/remember`; recebe `source_paths` não verificados.
 - Basic Memory e agent-memory podem pedir ao coding agent Git, testes e arquivos, mas o writer confia no resultado.
 - ai-memory e claude-mem capturam tool calls e paths, o que fornece evidência observacional mais forte, porém não prova toda conclusão semântica.
 - Palinode aceita citações, claims e hashes, mas eles são opcionais e nem sempre verificam entailment.
@@ -749,7 +648,7 @@ Nenhum servidor analisado “descobre a verdade do código” automaticamente em
 
 Há três níveis de maturidade:
 
-- **Somente orientação ao modelo:** projeto atual, Basic Memory e claude-bedrock.
+- **Curadoria semântica guiada pelo agente:** Basic Memory e claude-bedrock.
 - **Operações e histórico, sem prova semântica completa:** agent-memory, ai-memory e Palinode.
 - **Counter-evidence e revalidação executável:** twiceshy, restrito a experience records.
 
@@ -759,7 +658,6 @@ Há três níveis de maturidade:
 
 Essa distinção muda a leitura de qualidade:
 
-- O `git-push-memories` gera somente proposta Git-tracked; o conteúdo ainda não melhora a recuperação canônica.
 - Basic Memory, claude-mem e vários caminhos de Palinode escrevem diretamente no canônico.
 - agent-memory mistura direct apply e staging conforme intent.
 - ai-memory mistura synth direto, consolidação direta e propostas de auto-improvement; estas podem ser autoaprovadas por default.
@@ -770,32 +668,8 @@ Quanto maior a separação entre candidato e canônico, menor o risco de poluir 
 
 ### Privacidade
 
-O projeto atual tem a fronteira mais simples e previsível: um payload pequeno e fechado é escaneado antes da primeira persistência, e sessões não são capturadas.
-
 Sistemas com hooks possuem uma superfície inevitavelmente maior. ai-memory usa sanitização e permissões fortes, mas spoola antes da sanitização server-side. claude-mem local limpa antes da memória, enquanto o runtime server persiste eventos brutos primeiro. Palinode e Basic Memory têm caminhos em que conteúdo de sessão ou nota não passa por um scanner geral. twiceshy possui scan amplo, mas pode enviar retrospectivas a providers externos e alguns importadores enfileiram bruto.
 
 ### Dependência do modelo
 
-O projeto atual depende muito do Claude para consulta, classificação e redação, porém pouco para persistência. O mesmo vale para agent-memory.
-
 claude-bedrock depende quase integralmente do modelo porque sua implementação principal são skills. claude-mem depende do modelo tanto para seleção quanto para representação. ai-memory e Palinode amortecem essa dependência com synth, operações, schemas, histórico e validators. twiceshy a reduz ainda mais depois da extração quando existe prova executável.
-
-## Conclusão
-
-O mecanismo atual produz **poucas propostas, intencionais, pequenas e privadas**, com boa auditabilidade Git. Isso provavelmente resulta em melhor sinal/ruído e menor risco de persistir material de sessão que os sistemas automáticos. Porém, ele fica atrás das referências em quatro capacidades que afetam diretamente a utilidade e a qualidade de longo prazo:
-
-1. **Cobertura:** não captura automaticamente decisões, descobertas e resultados esquecidos pelo usuário.
-2. **Grounding:** não abre nem verifica código, testes ou trechos apontados por `source_paths`.
-3. **Consolidação:** não transforma a proposta em uma atualização coerente do estado atual.
-4. **Representação:** não registra confidence, rationale separado, citações, relações, validade ou evidência executável.
-
-As referências sugerem que melhorar qualidade não exige copiar o sistema mais complexo inteiro. Os maiores ganhos incrementais para o projeto atual seriam:
-
-- verificar `source_paths` e permitir citações de trechos ou hashes, sem persistir transcript;
-- recuperar duplicatas e contradições semanticamente, mantendo a busca atual como fallback determinístico;
-- implementar a curadoria que consome `create`, `update` e `remove` e produz um diff canônico revisável;
-- registrar o vínculo entre proposta, evidência, revisão e memória resultante;
-- adicionar captura automática somente depois de definir uma fronteira de privacidade igualmente forte para esse novo input;
-- preservar o princípio atual de que nenhum conteúdo gerado vira memória compartilhada sem um gate explícito.
-
-Se o objetivo for **memória ampla de domínio com estado atual**, Palinode e ai-memory são as referências mecanicamente mais completas. Se o objetivo for **memória técnica verificável**, twiceshy possui o gate de qualidade mais forte. Se o objetivo for **baixo ruído, consentimento e privacidade**, o projeto atual já tem uma vantagem estrutural, mas ainda gera um artefato intermediário e incompleto, não a memória final.

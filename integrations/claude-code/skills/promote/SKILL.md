@@ -1,69 +1,138 @@
 ---
 name: promote
-description: Consolidate all pending proposals through a global plan, direct memory file edits, human review and a pull request.
+description: Investigate selected proposals and related memory, agree a plan, edit ordinary Markdown and publish a reviewed pull request.
 disable-model-invocation: true
-allowed-tools: Read, Write, Edit, Glob, Grep, Agent, mcp__git-push-memories__memory_promote_prepare, mcp__git-push-memories__memory_promote_check, mcp__git-push-memories__memory_promote_submit, mcp__git-push-memories__memory_promote_finish
+allowed-tools: Read, Write, Edit, Glob, Grep, Agent, mcp__git-push-memories__memory_proposal_list, mcp__git-push-memories__memory_promote_prepare, mcp__git-push-memories__memory_promote_check, mcp__git-push-memories__memory_promote_submit, mcp__git-push-memories__memory_promote_finish
+argument-hint: "[subject or proposal paths]"
 ---
 <!-- managed-by: git-push-memories -->
 
-Run only because the person explicitly invoked `/promote`. The principal and the person decide how knowledge becomes memory. The tools provide the workspace, canonical formatting and publication.
+Run because the person explicitly invoked `/promote`. You and the person decide
+how knowledge becomes memory. The tools provide Git operations, fixed inputs,
+a read-only diff and publication of ordinary Markdown files.
 
-## 1. Prepare
+## 1. Select and prepare
 
-Call `memory_promote_prepare`. Use the returned worktree, proposal input paths, memory inventory and selected revisions. Proposal input paths are absolute; memory paths are relative to the returned worktree. Treat proposal files as inputs for discussion.
+Use `memory_proposal_list` to inspect pending proposals by `path`, `blob` and
+content. Interpret their titles and subjects yourself. Follow the requested
+scope; select related proposal paths for a focused consolidation. If no scope
+was requested, consider all pending proposals. Explain the selected scope and
+leave other proposals pending.
 
-The initial proposal set is fixed. Inputs received afterwards belong to a later consolidation. Start a fresh workspace; this version does not restore an interrupted editing session.
+Call `memory_promote_prepare` with `proposal_paths` for a subset, or omit that
+argument to select all pending proposals. Use its `worktree`, proposal
+`input_path` values, `memory_paths`, categories and Git revisions. Input paths
+are absolute; memory paths are relative to the worktree. The selected proposal
+set is fixed at preparation. Later inputs stay pending for another round.
 
-If a tool, read or write fails, report the error and stop. Keep prepared files in place and never claim completion after a failure. Use the promotion tools for Git and publication.
+Use the promotion tools for Git and publication. Report failures and preserve
+prepared files. Distinguish successful steps from an uncertain remote outcome;
+never report completion after an error. Prepared editing state belongs to the
+current MCP process; keep the worktree path available to the person.
 
-## 2. Read the entire set
+## 2. Investigate relevant knowledge
 
-Read every proposal at its `input_path` and every memory in `memory_paths` in full before preparing the global plan. Read large files in successive calls until their end and account for every inventory path. Search is only a navigation aid; it never replaces reading the complete inventory. There is no proposal batch size.
+Read every selected proposal at its `input_path` in full. Use the memory
+inventory, directory structure, search and references to find related knowledge.
+Read every page you will edit in full before proposing its changes. Read large
+files in successive calls until their end.
 
-If the entire set cannot be read within the available context, say so and stop. Never present a partial analysis as complete.
+Choose the investigation depth according to the scope: a focused update can
+follow the relevant domain; a broad reorganization can require the full memory
+inventory. Follow cross-page references and investigate duplicates or
+contradictions wherever they affect the result. Explain uncertainty and coverage
+limits. Ask for a decision when the available context cannot support a sound
+consolidation, preserving unresolved inputs for a suitable round. Never present partial analysis
+as exhaustive.
+
+The categories in the prepared `gpm.json` are the allowed destination choices.
+Use only those categories under `memories/`. If none fits, discuss a configuration
+change with the person before proceeding. Directory structure within a category,
+page names and Markdown organization are editorial decisions.
 
 ## 3. Discuss the global plan
 
-Show topic groups, proposal IDs and titles, destination pages (existing or new), and suggested changes. Several proposals can contribute to one memory; one proposal can contribute to several memories. Suggested actions and destinations are hints: select the canonical destination that best fits the knowledge.
+Show topic groups, proposal paths and interpreted titles, destination pages and
+suggested changes. Several proposals can contribute to one memory; one proposal
+can contribute to several memories. Suggested actions and destinations in the
+inputs are hints: choose the destination that best fits the knowledge.
 
-Account for every initial proposal with one or more destinations or a free-form justification for excluding it from memory. Explain duplicates, incorrect interpretations and unsuitable knowledge openly. Let the person merge or split groups, change destinations and resolve contradictions. Update the global plan in conversation; do not create a separate plan file.
+Account for every selected proposal with one or more destinations or a free-form
+justification for excluding it from memory. Explain duplicates, incorrect
+interpretations and unsuitable knowledge. Let the person merge or split groups,
+change destinations and resolve contradictions. Update the global plan in
+conversation; do not create a separate plan file.
 
-Reorganize only memories related to this proposal set, as approved in the global plan; preserve knowledge that remains valid. Leave unrelated improvements outside this consolidation.
-
-Wait for explicit approval of the global plan before editing any canonical file.
+Reorganize only memories related to the selected scope, as approved in the plan;
+preserve knowledge that remains valid. Leave unrelated improvements outside
+this consolidation. Wait for explicit approval of the global plan before
+editing any canonical file.
 
 ## 4. Write final memories
 
-Write canonical knowledge in complete final pages in the returned worktree. Omit proposal instructions about action and destination from the memory prose. Name pages after their subject, using `memories/<configured-category>/<lowercase-kebab-case>.md`. Preserve frontmatter. Preserve existing @id markers on retained sections. Leave new headings without markers; checking generates their IDs before review. Remove obsolete pages only when their removal is part of the approved plan.
+Write canonical knowledge in complete final pages as ordinary Markdown. Omit
+proposal instructions about action and destination from the memory prose.
+Choose subject-based names such as
+`memories/<configured-category>/<subject>.md`. Organize headings, metadata and
+links to help future readers; preserve useful existing information and update
+metadata when the approved content requires it. Review broken links, accidental
+conflict markers and unfinished text yourself. Remove pages only as approved.
 
-After plan approval, the principal decides whether to delegate independent memory files. Assign one owner per file in each round. Each owner receives the exact assigned paths, current page, all relevant proposals, approved decisions and cross-page context. Each delegate writes only its assigned files in the same worktree. Only the principal performs Git, proposal cleanup and publication. Wait for every delegate to finish before reviewing the result.
+After plan approval, the principal can delegate independent memory files.
+Assign one owner per file in each round. Each owner receives the exact paths,
+current page, relevant proposals, approved decisions and cross-page context.
+Only the principal performs Git, proposal cleanup and publication. Wait for
+every delegate to finish before reviewing the result.
 
 ## 5. Review the whole result
 
-The principal rereads every prepared page and checks it against the approved global plan. Review duplicates, contradictions, references and omissions across the resulting pages. Resolve inconsistencies between delegates before presenting the files.
+The principal rereads every prepared page and checks it against the approved
+plan. Review duplicates, contradictions, references and omissions across the
+resulting pages. Resolve inconsistencies between delegates before presenting
+the files. Check that every destination uses a configured category.
 
-If content materially changes the approved plan, return to discussion and obtain the person's decision before writing that change.
+If content materially changes the approved plan, return to discussion and
+obtain the person's decision before writing that change.
 
-Call `memory_promote_check` to complete IDs, validate canonical files and obtain the current diff. An empty canonical diff has no publication path in this version: report it and leave proposals untouched.
+Call `memory_promote_check` for the current changed paths and Git diff. This
+operation observes files without changing them or the worktree index. Review
+every addition, edit and deletion. An empty memory diff has no publication path:
+report the outcome and leave the proposals pending.
 
 ## 6. Review with the person
 
-Show a global summary and the complete diff for each changed memory in your message. Give the worktree path for optional VS Code editing; do not open the editor automatically. Terminal and editor review the same final files.
+Show a global summary and the complete diff for each changed memory. Give the
+worktree path for optional VS Code editing; do not open the editor automatically.
+Terminal and editor review the same final files.
 
-Finish all agent writing before human review. Stop writing while the person is editing. Do not run check during human editing. Wait until the person asks for adjustments or says editing is finished in conversation.
-
-For requested adjustments, reread the current files and preserve human edits outside the requested changes. New delegate rounds start from those files with explicit assignments. After edits, run check again and show the updated diff before seeking publication approval. Keep the conversation's global plan current.
+Finish all agent writing before human review. Stop writing while the person is
+editing. Wait until the person asks for adjustments or says editing is finished
+in conversation. For requested adjustments, reread the current files and
+preserve human edits outside the request. New delegate rounds start from those
+files. Run check again after changes and show the updated diff before seeking
+publication approval. Keep the global plan current.
 
 ## 7. Publish
 
-Ask for explicit approval to publish the current files and diff. The approved global summary accounts for every initial proposal with its destinations or free-form justification.
+Ask for explicit approval to publish the current files and diff. The approved
+summary accounts for every selected proposal by path, with its destinations or
+free-form exclusion justification.
 
-Before submitting, reread the current changed files to confirm the result still matches the reviewed diff. If anything changed, return to human review and obtain a new approval. Do not edit files after publication approval.
+Before submitting, reread the current changed files and obtain the current diff
+to confirm it matches the review. If anything changed, return to human review
+and obtain a new approval. Do not edit files after publication approval.
 
-After explicit approval, call `memory_promote_submit` with the approved global summary as `summary`. This creates one canonical commit and opens the PR. Return the commit and PR link. The person reviews and merges the PR.
+After explicit approval, call `memory_promote_submit` with `summary` and the
+reviewed memory `paths`. This commits those paths, pushes the branch and opens
+a PR into `main`. Return the commit and PR link. The person reviews and merges.
 
 ## 8. Complete after merge
 
-The next `/promote` confirms and cleans a previously merged publication before preparing a new set. The person can also run `gpm promote --finish` or ask you to call `memory_promote_finish` after merging.
+The next `/promote` confirms and cleans a previously merged publication before
+preparing new inputs. The person can also run `gpm promote --finish` or ask for
+`memory_promote_finish` after merging.
 
-Cleanup requires confirmed merge and removes only concluded inputs whose path and contents still match. New or changed proposals remain pending. Published local reads then follow main. The publication record stores only the PR/input linkage for this cleanup.
+Cleanup confirms merge and removes only selected proposal paths whose blobs
+still match. New, changed and unselected proposals stay pending. Published local
+reads then follow `main`. The publication record links the PR to the selected
+paths and blobs for cleanup.

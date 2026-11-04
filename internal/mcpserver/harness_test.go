@@ -182,12 +182,10 @@ func (e *env) propose(t *testing.T, arguments map[string]any) inbox.Proposal {
 	return *proposal
 }
 
-func (e *env) search(t *testing.T, source, query string) *retrieval.ContextBundle {
+func (e *env) search(t *testing.T, query string) *retrieval.ContextBundle {
 	t.Helper()
-	arguments := map[string]any{"query": query, "budget_bytes": 2048}
-	if source != "" {
-		arguments["source"] = source
-	}
+	arguments := map[string]any{"query": query, "limit": 20}
+
 	result := e.ok(t, "memory_search", arguments)
 	return decodeResponse(t, result).Data
 }

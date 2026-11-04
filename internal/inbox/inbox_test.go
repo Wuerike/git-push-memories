@@ -46,7 +46,7 @@ func TestAddCommitsFreeTextProposalOnRemoteProposalsBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	listed, err := box.List(context.Background())
-	if err != nil || len(listed) != 1 || listed[0].Proposal.ID != proposal.ID || listed[0].Proposal.Content != content || listed[0].Proposal.Title != "card-transactions-from-authorizer" {
+	if err != nil || len(listed) != 1 || listed[0].Proposal.Path != proposal.Path || listed[0].Proposal.Blob == "" || listed[0].Proposal.Content != content {
 		t.Fatalf("List() = %+v, %v", listed, err)
 	}
 }
@@ -72,7 +72,7 @@ func TestTitleCannotEscapeProposalsDirectory(t *testing.T) {
 	}
 }
 
-func TestListSkipsFilesThatAreNotProposalsAndUsesFirstHeadingAsTitle(t *testing.T) {
+func TestListIncludesManualMarkdownWithPathBlobAndOriginalContent(t *testing.T) {
 	box, root, _ := newBox(t)
 	if err := os.Mkdir(filepath.Join(root, "proposals"), 0o755); err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestListSkipsFilesThatAreNotProposalsAndUsesFirstHeadingAsTitle(t *testing.
 	runGit(t, root, "add", "proposals")
 	runGit(t, root, "commit", "--quiet", "-m", "arbitrary files")
 	listed, err := box.List(context.Background())
-	if err != nil || len(listed) != 1 || listed[0].Proposal.Title != "Real title" {
+	if err != nil || len(listed) != 2 || listed[0].Proposal.Path != "proposals/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-with-heading.md" || listed[0].Proposal.Content != files[listed[0].Proposal.Path] || listed[0].Proposal.Blob == "" || listed[1].Proposal.Path != "proposals/not-a-proposal.md" {
 		t.Fatalf("List() = %+v, %v", listed, err)
 	}
 }
@@ -197,7 +197,7 @@ func TestRefreshBringsInProposalsFromOtherMachines(t *testing.T) {
 	if err := box.Refresh(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if listed, err := box.List(context.Background()); err != nil || len(listed) != 1 || listed[0].Proposal.ID != theirs.ID {
+	if listed, err := box.List(context.Background()); err != nil || len(listed) != 1 || listed[0].Proposal.Path != theirs.Path {
 		t.Fatalf("List() after Refresh = %+v, %v", listed, err)
 	}
 }

@@ -137,3 +137,30 @@ func TestConsolidationFailureStopsWithoutDeletingWork(t *testing.T) {
 		t.Fatalf("failed fetch created worktree: %v", err)
 	}
 }
+
+func TestPrepareSelectsManualProposalPathsWithoutInterpretingContent(t *testing.T) {
+	m := wt.Setup(t, nil)
+	const selected = "proposals/billing/manual note.md"
+	const other = "proposals/unrelated.md"
+	const body = "No heading or action schema.\nA billing fact.\n"
+	wt.Seed(t, m.Remote, "proposals", map[string]string{selected: body, other: "Other fact."})
+	p, err := consolidation.New(m.Config).Prepare(context.Background(), selected)
+	if err != nil || len(p.Proposals) != 1 || p.Proposals[0].Path != selected {
+		t.Fatalf("selection = %+v, %v", p, err)
+	}
+	got, err := os.ReadFile(p.Proposals[0].InputPath)
+	if err != nil || string(got) != body || p.Proposals[0].Blob != wt.Git(t, m.Remote, "rev-parse", p.ProposalsSHA+":"+selected) {
+		t.Fatalf("input = %q, %v", got, err)
+	}
+}
+
+func TestPrepareRejectsUnknownSelectedProposalWithoutCreatingWorktree(t *testing.T) {
+	m := wt.Setup(t, nil)
+	seedProposals(t, m, 1)
+	if _, err := consolidation.New(m.Config).Prepare(context.Background(), "proposals/missing.md"); err == nil {
+		t.Fatal("unknown proposal accepted")
+	}
+	if _, err := os.Stat(m.Config.Paths.Promotions); !os.IsNotExist(err) {
+		t.Fatalf("failed selection created worktree: %v", err)
+	}
+}

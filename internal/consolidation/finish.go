@@ -72,7 +72,7 @@ func (m *Manager) Finish(ctx context.Context) (Finished, error) {
 	}
 	blobs := make(map[string]string, len(entries))
 	for _, entry := range entries {
-		if entry.mode == "100644" && entry.kind == "blob" && proposalName.MatchString(entry.path) {
+		if (entry.mode == "100644" || entry.mode == "100755") && entry.kind == "blob" {
 			blobs[entry.path] = entry.blob
 		}
 	}

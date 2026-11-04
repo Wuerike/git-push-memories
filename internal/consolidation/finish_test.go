@@ -126,3 +126,27 @@ func TestFinishFailurePreservesProposalsAndWork(t *testing.T) {
 		}
 	}
 }
+
+func TestFinishPreservesUnselectedManualProposals(t *testing.T) {
+	m := wt.Setup(t, nil)
+	const selected = "proposals/billing/manual.md"
+	const unselected = "proposals/other.md"
+	wt.Seed(t, m.Remote, "proposals", map[string]string{selected: "A billing fact.", unselected: "A different fact."})
+	manager := consolidation.New(m.Config)
+	p, err := manager.Prepare(context.Background(), selected)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeMemory(t, p, "memories/domains/billing.md", "The billing fact.\n")
+	if _, err := manager.Submit(context.Background(), selected+" creates billing memory."); err != nil {
+		t.Fatal(err)
+	}
+	squashPromotion(t, m, p)
+	got, err := consolidation.New(m.Config).Finish(context.Background())
+	if err != nil || !got.Merged || !reflect.DeepEqual(got.Removed, []string{selected}) {
+		t.Fatalf("finish = %+v, %v", got, err)
+	}
+	if pending := wt.Git(t, m.Remote, "ls-tree", "-r", "--name-only", "proposals", "--", "proposals"); pending != unselected {
+		t.Fatalf("pending = %q", pending)
+	}
+}

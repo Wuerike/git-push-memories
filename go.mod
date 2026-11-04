@@ -6,7 +6,6 @@ toolchain go1.25.12
 
 require (
 	github.com/modelcontextprotocol/go-sdk v1.7.0
-	github.com/yuin/goldmark v1.7.4
 	golang.org/x/sys v0.41.0
 )
 
