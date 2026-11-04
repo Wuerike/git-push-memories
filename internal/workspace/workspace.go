@@ -1,5 +1,5 @@
 // Package workspace owns the on-disk layout of a memory repository: a bare
-// clone plus the read, proposals and release worktrees, and every Git
+// clone plus the read, proposals and promotion worktrees, and every Git
 // operation that moves them. No other package builds these paths or branch names.
 package workspace
 
@@ -23,7 +23,6 @@ import (
 const (
 	MainBranch      = "main"
 	ProposalsBranch = "proposals"
-	ReleasePrefix   = "release/"
 )
 
 // FetchTTL is how long a fetch attempt keeps the read worktree fresh.
@@ -35,7 +34,6 @@ type Paths struct {
 	Repo       string // bare clone
 	Read       string
 	Proposals  string
-	Release    string
 	Promotions string
 	Published  string
 }
@@ -68,7 +66,6 @@ func PathsFor(url string) (Paths, error) {
 		Repo:       filepath.Join(state, "repo"),
 		Read:       filepath.Join(state, "read"),
 		Proposals:  filepath.Join(state, "proposals"),
-		Release:    filepath.Join(state, "release"),
 		Promotions: filepath.Join(state, "promotions"),
 		Published:  filepath.Join(state, "promotion-published.json"),
 	}, nil
@@ -262,17 +259,6 @@ func (w *Workspace) ResolveRead(ctx context.Context, wait bool) (string, error) 
 	return w.Paths.Read, nil
 }
 
-// RemoveRelease deletes the release worktree and the given local branch, tolerating absence.
-func (w *Workspace) RemoveRelease(ctx context.Context, branch string) {
-	git := w.Repo()
-	_, _ = git.Output(ctx, "worktree", "remove", "--force", w.Paths.Release)
-	_ = os.RemoveAll(w.Paths.Release)
-	_, _ = git.Output(ctx, "worktree", "prune")
-	if branch != "" {
-		_, _ = git.Output(ctx, "branch", "-D", branch)
-	}
-}
-
 // LocalBranches lists local branch names starting with prefix.
 func (w *Workspace) LocalBranches(ctx context.Context, prefix string) ([]string, error) {
 	out, err := w.Repo().Output(ctx, "for-each-ref", "--format=%(refname:short)", "refs/heads/"+prefix)
@@ -436,45 +422,4 @@ func CheckIdentity(ctx context.Context) error {
 // Rev resolves ref to a commit in dir.
 func Rev(ctx context.Context, dir, ref string) (string, error) {
 	return Git{Dir: dir}.Output(ctx, "rev-parse", "--verify", ref+"^{commit}")
-}
-
-// ResetHard moves dir's branch and worktree to ref, discarding everything after it.
-func ResetHard(ctx context.Context, dir, ref string) error {
-	_, err := Git{Dir: dir}.Output(ctx, "reset", "--hard", ref)
-	return err
-}
-
-// DeleteRemoteBranch removes branch from the remote; a branch that is already gone is not an error.
-func (w *Workspace) DeleteRemoteBranch(ctx context.Context, branch string) error {
-	exists, err := w.RemoteBranchExists(ctx, branch)
-	if err != nil || !exists {
-		return err
-	}
-	if _, err := w.Repo().Net(ctx, "push", "origin", "--delete", "refs/heads/"+branch); err != nil {
-		return err
-	}
-	return w.Fetch(ctx)
-}
-
-// AddReleaseWorktree creates the release worktree on branch. With create, the branch is cut at start.
-func (w *Workspace) AddReleaseWorktree(ctx context.Context, branch, start string, create bool) error {
-	_, _ = w.Repo().Output(ctx, "worktree", "prune")
-	if create {
-		_, err := w.Repo().Output(ctx, "worktree", "add", "-b", branch, w.Paths.Release, start)
-		return err
-	}
-	_, err := w.Repo().Output(ctx, "worktree", "add", w.Paths.Release, branch)
-	return err
-}
-
-// ReleaseBranch returns the branch checked out in the release worktree, or "" when there is none.
-func (w *Workspace) ReleaseBranch(ctx context.Context) string {
-	if _, err := os.Stat(filepath.Join(w.Paths.Release, ".git")); err != nil {
-		return ""
-	}
-	branch, err := Git{Dir: w.Paths.Release}.Output(ctx, "symbolic-ref", "--quiet", "--short", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return branch
 }

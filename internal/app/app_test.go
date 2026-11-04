@@ -399,8 +399,8 @@ func TestMCPRunsOnStdioReadingFromTheReadWorktree(t *testing.T) {
 	if got := wt.Git(t, managed.Remote, "for-each-ref"); got != beforeRemote {
 		t.Fatalf("remote changed: before %q, after %q", beforeRemote, got)
 	}
-	if _, err := os.Stat(cfg.Paths.Release); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("reading created a release worktree: %v", err)
+	if _, err := os.Stat(cfg.Paths.Promotions); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("reading created a promotion worktree: %v", err)
 	}
 }
 

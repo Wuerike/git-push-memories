@@ -12,7 +12,6 @@ import (
 
 	"github.com/Wuerike/git-push-memories/internal/config"
 	"github.com/Wuerike/git-push-memories/internal/inbox"
-	"github.com/Wuerike/git-push-memories/internal/release"
 	"github.com/Wuerike/git-push-memories/internal/setup"
 	"github.com/Wuerike/git-push-memories/internal/workspace"
 )
@@ -190,15 +189,4 @@ func (m *Managed) Remember(t *testing.T, title string) inbox.Proposal {
 		t.Fatal(err)
 	}
 	return proposal
-}
-
-// OpenRelease opens a release over the proposals sent so far and returns its status
-// (ReleaseRoot and Marker.ReleaseBranch locate the release worktree).
-func (m *Managed) OpenRelease(t *testing.T) release.Status {
-	t.Helper()
-	status, err := release.New(m.Config).Open(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return status
 }

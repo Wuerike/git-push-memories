@@ -287,16 +287,18 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] Os dois pacotes antigos deixam de existir; a fixture workspacetest remove OpenRelease e o import antigo.
-- [ ] Esse é um único corte do componente legado porque os testes de release importam promotion e testes de promotion usam OpenRelease; não deixar commit que não compila.
-- [ ] Retirar apenas helpers, constantes e paths que ficaram sem consumidores; preservar locks/ops usados por leitura, inbox e setup.
-- [ ] Aprovação desta tarefa autoriza retirar testes exclusivos de contratos excluídos, com inventário no commit; nunca retirar teste de comportamento preservado para obter gate verde.
-- [ ] A suíte completa, vet e build passam; comparar contagens e explicar somente remoções previstas.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] Os dois pacotes antigos deixam de existir; a fixture workspacetest remove OpenRelease e o import antigo.
+- [x] Esse é um único corte do componente legado porque os testes de release importam promotion e testes de promotion usam OpenRelease; não deixar commit que não compila.
+- [x] Retirar apenas helpers, constantes e paths que ficaram sem consumidores; preservar locks/ops usados por leitura, inbox e setup.
+- [x] Aprovação desta tarefa autoriza retirar testes exclusivos de contratos excluídos, com inventário no commit; nunca retirar teste de comportamento preservado para obter gate verde.
+- [x] A suíte completa, vet e build passam; comparar contagens e explicar somente remoções previstas.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: regression/integration; go test ./... após a retirada; sem testes artificiais de ausência de arquivos. Os comportamentos suportados já têm testes nos componentes entregues.
 **Gate**: Full — go test ./...
 **Commit**: `refactor(promotion): remove legacy release engine`
+
+**Result**: Complete — Motor legado e 27 testes exclusivos retirados conforme autorização; regressões suportadas preservadas. make verify (testes, race, vet, build), gate final go test ./... e git diff --check passaram.
 
 ### T11: Atualizar o guia do fluxo de uso
 
@@ -508,9 +510,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T9 concluídas e verificadas; próxima T10. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T10 concluídas e verificadas; próxima T11. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
-**Current:** T9 concluída com gate verde; próxima T10.
+**Current:** T10 concluída com gate verde; próxima T11.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 
