@@ -194,16 +194,18 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] Antes da confirmação do merge não ocorre limpeza; gh indisponível não admite confirmação manual como substituto.
-- [ ] Depois de squash, remover somente caminhos concluídos cujo blob ainda coincide; preservar propostas novas e modificadas.
-- [ ] A branch proposals recebe só a limpeza necessária, sem lock de promoção ou merge obrigatório de main.
-- [ ] Leitura local acompanha main após a conclusão; nenhuma limpeza automática apaga worktrees de edição.
-- [ ] Testes inspecionam arquivos remotos, commit de limpeza e leitura; registrar contagem real.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] Antes da confirmação do merge não ocorre limpeza; gh indisponível não admite confirmação manual como substituto.
+- [x] Depois de squash, remover somente caminhos concluídos cujo blob ainda coincide; preservar propostas novas e modificadas.
+- [x] A branch proposals recebe só a limpeza necessária, sem lock de promoção ou merge obrigatório de main.
+- [x] Leitura local acompanha main após a conclusão; nenhuma limpeza automática apaga worktrees de edição.
+- [x] Testes inspecionam arquivos remotos, commit de limpeza e leitura; registrar contagem real.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: integration; internal/consolidation/finish_test.go com pelo menos 4 testes de PR aberto, squash merge com propostas novas/alteradas, atualização da leitura e falha de consulta.
 **Gate**: Full — go test ./...
 **Commit**: `feat(consolidation): finish merged publications`
+
+**Result**: Complete — 4 testes novos de conclusão e gate completo passaram; squash, nova proposta, proposta alterada, PR aberto e falha de confirmação cobertos.
 
 ### T7: Trocar a interface MCP de promoção
 
@@ -500,7 +502,7 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T5 concluídas e verificadas; próxima T6. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T6 concluídas e verificadas; próxima T7. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
