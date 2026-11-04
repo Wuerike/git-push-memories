@@ -3,6 +3,7 @@ package memory
 import (
 	"bytes"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -39,6 +40,22 @@ func TestPrepareDocumentPreservesFrontmatterAndHumanText(t *testing.T) {
 	unchanged, err := PrepareDocument("memories/domains/checkout.md", baseline, baseline)
 	if err != nil || !bytes.Equal(unchanged, baseline) {
 		t.Fatalf("unchanged = %q, %v", unchanged, err)
+	}
+}
+
+func TestPrepareDocumentRejectsSectionIDsRevealedByPrefixRemoval(t *testing.T) {
+	baseline := []byte("- Intro\n  # Page\n<!-- @id: page -->\n")
+	// Removing the list prefix changes the indented fence into a code block,
+	// exposing a heading whose marker was not in the original section inventory.
+	current := []byte("- Intro\n" +
+		"  # Page\n" +
+		"    ```\n" +
+		"  ## Hidden\n" +
+		"<!-- @id: hidden -->\n" +
+		"    ```\n")
+	_, err := PrepareDocument("memories/domains/page.md", baseline, current)
+	if !errors.Is(err, ErrInvalidID) || !strings.Contains(err.Error(), `unknown section ID "hidden"`) {
+		t.Fatalf("error = %v, want an unknown section ID error for hidden", err)
 	}
 }
 

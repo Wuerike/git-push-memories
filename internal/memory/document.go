@@ -70,9 +70,9 @@ func slugHeading(heading string) string {
 	return slug.String()
 }
 
-func hasDisallowedControl(value string, allowLayout bool) bool {
+func hasDisallowedControl(value string) bool {
 	for _, character := range value {
-		if allowLayout && (character == '\t' || character == '\n') {
+		if character == '\t' || character == '\n' {
 			continue
 		}
 		if unicode.IsControl(character) {
@@ -85,7 +85,7 @@ func hasDisallowedControl(value string, allowLayout bool) bool {
 func normalizePageReplacement(replacement string) ([]byte, error) {
 	normalized := strings.ReplaceAll(replacement, "\r\n", "\n")
 	if strings.TrimSpace(normalized) == "" || len(normalized) > maxRewriteBytes || !utf8.ValidString(normalized) ||
-		hasDisallowedControl(normalized, true) || strings.Contains(normalized, "\r") || hasUnresolvedMerge([]byte(normalized)) {
+		hasDisallowedControl(normalized) || strings.Contains(normalized, "\r") || hasUnresolvedMerge([]byte(normalized)) {
 		return nil, fmt.Errorf("%w: invalid page replacement", ErrInvalidSchema)
 	}
 	if !strings.HasSuffix(normalized, "\n") {
