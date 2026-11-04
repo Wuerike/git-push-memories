@@ -20,6 +20,12 @@ func TestPromotionDocumentationDescribesImplementedWorkflow(t *testing.T) {
 			"gpm promote --finish", "merge humano", "caminho e blob", "novas ou\n   alteradas são preservadas",
 			"commit global apenas", "esta versão não retoma", "diff canônico vazio",
 		}},
+		{"docs/features.md", []string{
+			"memory_promote_prepare", "memory_promote_check", "memory_promote_submit", "memory_promote_finish",
+			"gpm promote --finish", "source: main", "source: proposals", "summary", "pr_number", "input_path",
+			"commit global", "merge é humano", "Propostas novas ou alteradas", "promotion-published.json",
+			"não há avaliação estruturada de fontes", "não executam julgamento por um LLM",
+		}},
 	}
 	for _, doc := range documents {
 		t.Run(doc.path, func(t *testing.T) {

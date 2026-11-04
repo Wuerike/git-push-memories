@@ -1,117 +1,144 @@
-# Funcionalidades
+# Features
 
-Descreve o que a implementacao atual expoe ao mundo externo e o que cada acao altera, e lista o que ainda e parcial ou nao foi iniciado. O fluxo completo esta em [workflow.md](workflow.md).
+Esta referência descreve a implementação atual. O percurso de uso está em
+[workflow.md](workflow.md), e a integração em
+[Claude Code](../integrations/claude-code/README.md).
 
-## Modelo em uma tela
+## Repository model
 
-- Um **repositorio de memoria** remoto (GitHub para o `/promote`) com `gpm.json` na raiz e tres branches: `main` (memoria canonica publicada, protegida), `proposals` (main + propostas pendentes) e `release/<opened_at>` (consolidacao, vira PR para a `main`).
-- O GPM mantem um **clone bare** em `$XDG_STATE_HOME/git-push-memories/<repo-id>` e worktrees `read` (`main`), `proposals` e `release`. Nunca toca em repositorios da pessoa.
-- `memories/<categoria>/**/*.md` e a unica coisa pesquisavel; `proposals/<id>-<slug>.md` e o inbox, fora da busca.
-- Nao ha daemon, porta, banco ou hook de sessao. O MCP roda por stdio, iniciado pelo Claude Code.
+O GPM usa um repositório de memória por pessoa. A `main` contém as memórias
+publicadas; `proposals` contém propostas pendentes. Cada consolidação cria uma
+branch `promote/<UTC>-<random>` a partir da `main` obtida no fetch. Insumos de uma
+revisão fixa de propostas ficam fora do worktree editável.
 
-## 1. Instalacao e setup
+Só `memories/<categoria-configurada>/**/*.md` participa da leitura. O clone bare
+fica no estado do usuário, com worktrees separados. O MCP usa stdio; não há
+daemon, porta, banco ou hook de captura de sessão.
 
-| Acao | Efeito |
-|---|---|
-| `install.sh` / `make install` | Instala o binario `gpm` (padrao `~/.local/bin`). |
-| `gpm setup <url> [--categories a,b] [--yes]` | Idempotente. Clona (bare) a URL; remote vazio: cria `gpm.json`, `main` e `proposals` e envia; remote com `gpm.json`: valida e usa a `proposals` existente (ou a cria); remote com conteudo sem `gpm.json`: erro. Cria os worktrees `read` e `proposals`, registra `gpm mcp` no escopo `user` do Claude Code, instala `~/.claude/skills/{remember,promote}/SKILL.md` e grava `<UserConfigDir>/git-push-memories/config.json` (`repo_url`). Exige `git`, `claude` e identidade Git. URL diferente da configurada e erro. |
+## Installation and CLI
 
-`gpm.json`:
+`install.sh` e `make install` instalam `gpm`, por padrão em `~/.local/bin`.
+
+| Comando | Efeito |
+| --- | --- |
+| `gpm setup <url> [--categories a,b] [--yes]` | Prepara clone/worktrees, valida ou cria `gpm.json`, configura MCP e instala skills no escopo do usuário |
+| `gpm retrieve <query> --budget-bytes <n> [--path-prefix <p>]` | Busca textual na `main` publicada e imprime JSON |
+| `gpm promote --finish` | Confirma merge pelo GitHub, limpa propostas correspondentes e atualiza a leitura local |
+| `gpm mcp` | Serve as nove ferramentas MCP por stdio |
+| `gpm version`, `gpm help` | Informam versão e ajuda sem configuração |
+
+O setup exige `git`, `claude`, identidade Git e credenciais para o remoto. Em
+remoto vazio, exige categorias para criar `gpm.json`, `main` e `proposals`.
+Um remoto com conteúdo precisa de `gpm.json` válido na `main`. A URL configurada
+é salva em `<UserConfigDir>/git-push-memories/config.json`, no campo `repo_url`;
+URLs diferentes são rejeitadas. A instalação das skills usa `~/.claude/skills`.
+
+O arquivo de categorias tem este formato:
 
 ```json
 { "schema_version": 1, "memory_categories": ["domains", "decision"] }
 ```
 
-Categorias: lista nao vazia, sem duplicatas, lowercase kebab-case. Campos desconhecidos ou conteudo extra invalidam o arquivo.
+A lista precisa ser não vazia, sem duplicatas, com nomes lowercase kebab-case.
+Campos desconhecidos e conteúdo extra são rejeitados.
 
-## 2. CLI
+A conclusão exige o registro local `promotion-published.json` criado no envio.
+Sem publicação pendente ou com PR ainda aberto, a CLI informa a situação e sai
+com erro. Não há confirmação manual para substituir a consulta ao GitHub.
 
-| Comando | Efeito |
-|---|---|
-| `gpm setup <url>` | Ver acima. |
-| `gpm retrieve <query> --budget-bytes <n> [--path-prefix <p>]` | Busca textual na `main` publicada (atualiza o worktree `read` se o TTL de 10 min venceu); imprime JSON. |
-| `gpm promote --resume` | Retoma o release local; sem propostas pendentes, envia para revisao (push + PR). |
-| `gpm promote --abort` | Remove o marcador e a `release`; propostas intactas. Recusa se o PR ja foi mergeado. |
-| `gpm promote --finish` | Finaliza um release com PR mergeado (confirma manualmente se o `gh` nao estiver disponivel). |
-| `gpm mcp` | Servidor MCP por stdio. Ao iniciar, conclui ou desfaz uma promocao interrompida. |
-| `gpm version`, `gpm help` | Funcionam sem configuracao. |
+## Explicit Claude Code commands
 
-## 3. Comandos no Claude Code
+`/remember` pesquisa memórias e propostas, sugere ação e destino no texto livre,
+mostra o que será compartilhado e espera confirmação antes de criar a proposta
+pela API do GitHub. Captura não altera memória canônica.
 
-Ambos so rodam quando invocados pela pessoa e exigem confirmacao explicita antes de qualquer escrita.
+`/promote` lê todas as propostas e memórias da base, discute o plano global na
+conversa e espera aprovação antes de editar. O agente escreve arquivos finais,
+pode delegar memórias independentes e revisa a coerência do conjunto. A pessoa
+revê o diff atual e pode editar os mesmos arquivos. Os agentes param de escrever
+durante a revisão humana. Uma segunda aprovação autoriza um commit global
+canônico e PR para `main`; o merge é humano.
 
-| Comando | O que acontece | Efeito |
-|---|---|---|
-| `/remember <fato>` | Interpreta o fato, pesquisa a memoria e as propostas pendentes para sugerir alvo e acao (`create`, `update` ou `remove`) e avisar de propostas ja pendentes sobre o mesmo assunto, e mostra os campos exatos. A busca e orientacao, nao deteccao de duplicidade ou contradicao. Apos confirmar, chama `memory_propose`. | Um commit na `proposals` que adiciona `proposals/<id>-<slug>.md`, criado direto no remote pela API do GitHub, em uma chamada. Se falhar, nada e gravado e a pessoa repete o `/remember`. A memoria canonica nao muda. |
-| `/promote` | Abre (ou retoma) o release, agrupa **todas** as propostas por assunto/pagina, classifica cada candidato canonico, fato da pagina e proposta relacionada como `equivalent`, `contradictory`, `related` ou `unrelated` e as consolida em lotes de ate 16, com plano, diff e evidencias; ao zerar, envia para revisao. | Um commit por lote na `release` (memoria + remocao das propostas); push da branch e PR para a `main`. Merge e revisao sao humanos (squash recomendado). |
+Cada proposta tem destinos ou justificativa livre no resumo do PR. São aceitas
+relações de várias propostas para uma memória e de uma proposta para várias
+memórias. Não há códigos fechados de descarte ou operações obrigatórias por
+proposta. O agente e a pessoa decidem o significado da consolidação.
 
-Decisoes possiveis em `/promote`:
+## MCP tools
 
-| Decisao | Efeito |
-|---|---|
-| `create_page`, `create_section` | Cria pagina nova ou acrescenta secao H2 a pagina existente. |
-| `replace_section` | Troca o corpo de uma secao folha. |
-| `rewrite_page` | Reescreve a pagina inteira (IDs de headings novos gerados pelo servidor; frontmatter preservado; nunca apaga a pagina). |
-| `remove_section`, `remove_page` | Remove secao folha; pagina so se for a forma gerada com uma unica secao `Overview`. Sem cascata. |
-| `fold_proposal` | Absorve proposta extra em um `rewrite_page` ou `create_page` com pagina completa do mesmo lote. |
-| `discard_proposal` | Remove so a proposta e registra motivo fechado (`not_relevant`, `incorrect`, `sensitive`, `wrong_target`, `superseded`, `duplicate`). |
+Há cinco ferramentas de captura/leitura e quatro de promoção:
 
-Duplicidade e contradicao sao tratadas aqui, por decisao de design: a consolidacao e o unico ponto em que todas as propostas e a pagina canonica completa aparecem juntas. O agente classifica e resolve com `fold_proposal` ou `discard_proposal` (`duplicate`, `superseded`); a pessoa confirma cada lote e revisa o PR. O inbox pode conter propostas repetidas ou conflitantes sem dano, pois nada nele e memoria canonica.
+| Ferramenta | Entrada | Resultado/efeito |
+| --- | --- | --- |
+| `memory_search` | `query`, `budget_bytes`, `path_prefix` opcional, `source` opcional | Busca textual com trechos e handles expansíveis |
+| `memory_expand` | `handle`, `budget_bytes`, `source` opcional | Expande uma seção publicada dentro do orçamento |
+| `memory_page_read` | `path`, `budget_bytes`, `source` opcional | Página integral e `content_hash`, ou erro de orçamento; nunca trunca |
+| `memory_proposal_list` | `source` opcional | Categorias e propostas com ID, caminho, título e conteúdo livres |
+| `memory_propose` | `title`, `content` | Cria arquivo e commit na `proposals` remota pela API do GitHub |
+| `memory_promote_prepare` | `{}` | Fetch, worktree sobre a `main`, categorias, revisões e inventários completos |
+| `memory_promote_check` | `{}` | Completa IDs, valida arquivos atuais e retorna caminhos alterados e diff; não cria commit |
+| `memory_promote_submit` | `summary` | Cria um commit global só com memórias, envia branch e abre PR com o resumo aprovado |
+| `memory_promote_finish` | `{}` | Confirma merge, remove propostas de caminho/blob correspondentes e atualiza leitura |
 
-Nao ha como adiar uma proposta: o release so termina com `proposals/` vazia. Regras do lote: targets canonicos distintos (exceto folds), preview de uso unico, e qualquer mudanca de `HEAD` ou conteudo invalida o preview.
+As ferramentas de leitura aceitam somente `source: main` (padrão). A listagem de
+propostas aceita somente `source: proposals` (padrão). Outros seletores são
+rejeitados. Os arquivos da consolidação são lidos e editados por ferramentas
+nativas no caminho retornado, sujeito às permissões normais da sessão.
 
-## 4. Ferramentas MCP
+A preparação retorna `worktree`, `inputs_root`, `branch`, `main_sha`,
+`proposals_sha`, `categories`, `memory_paths` e `proposals`. Cada proposta tem
+`id`, `path`, `title`, `blob` e `input_path`. Caminhos de insumos são absolutos;
+caminhos de memória são relativos ao worktree. O conjunto inicial fica fixo.
+A preparação conclui uma publicação anterior mergeada antes de criar outra;
+se o PR ainda estiver aberto, informa `merge_pending`.
 
-| Tool | Le/escreve | Efeito |
-|---|---|---|
-| `memory_search`, `memory_expand`, `memory_page_read` | le | Busca, expansao por handle e pagina inteira com `content_hash`. `source`: `main` (padrao) ou `release`. |
-| `memory_proposal_list` | le | Propostas (texto livre; arquivos ilegiveis sao ignorados) e categorias. `source`: `proposals` (padrao) ou `release`. |
-| `memory_propose` | **escreve** | `title` e `content` livres; commit da proposta na `proposals` remota via API do GitHub (`gh api`), tudo ou nada. Erros: `invalid_proposal`, `gh_unavailable`, `push_denied`, `proposal_failed`. |
-| `memory_promote_open`, `memory_promote_status` | **escreve** / le | Abre (marcador enviado = lock) ou retoma o release; mostra pendentes. |
-| `memory_promote_preview`, `memory_promote_batch_preview` | le | Diff e evidencias de 1 a 16 decisoes na `release`, com token de uso unico. |
-| `memory_promote_apply`, `memory_promote_batch_apply` | **escreve** | Consome o token e cria o commit do lote na `release`. |
-| `memory_promote_submit` | **escreve** | Push da `release` e PR via `gh` (ou reaproveita/finaliza conforme o ultimo PR). |
+O envio retorna `commit`, `pr_number` e `pr_url`. O registro local conserva
+somente o vínculo entre PR, branch e caminhos/blobs de propostas para conclusão.
+A conclusão retorna `found`, `merged`, `pr_url`, `removed` e `preserved`.
+Propostas novas ou alteradas permanecem pendentes após a limpeza.
 
-## 5. Restricoes que o usuario sente
+As respostas usam `schema_version: 1`, com `data` ou `error`. Falhas de promoção
+incluem `promotion_not_prepared`, `no_proposals`, `no_changes`,
+`invalid_summary`, `invalid_memory`, `merge_pending`, `gh_unavailable`,
+`push_denied`, `network_unavailable`, `worktree_dirty` e `promotion_failed`.
+Uma falha interrompe o percurso sem declarar sucesso ou apagar arquivos
+preparados automaticamente. Não há restauração de sessão na inicialização MCP.
 
-- **Worktrees gerenciados**: o GPM so escreve nos seus worktrees (o `/remember` nao usa worktree); se um deles for alterado por fora o `/promote` falha (`wrong_branch`, `worktree_dirty`). Commits ignoram hooks, assinatura e templates da configuracao Git da pessoa.
-- **Leitura**: sempre da `main` publicada; uma mudanca pode levar ate 10 min (mais uma leitura) para aparecer, exceto apos `/promote` ou `--finish`, que atualizam na hora.
-- **Rede**: toda chamada tem timeout. Falha de rede nao perde dados no `/remember`; permissao negada e erro.
-- **Concorrencia**: locks serializam sessoes na mesma maquina; entre maquinas, o marcador `release.lock.json` enviado a `proposals` e o lock do release.
-- **Recovery**: uma promocao interrompida converge para o estado anterior ao avanco da `release` ou para o commit completo; lock de outro processo nunca e removido. Falha de recovery desabilita so o `/promote`.
-- **Privacidade**: o codigo nao filtra o conteudo da proposta (sem guard de segredos/PII). A barreira e a skill `remember` e a confirmacao humana no `/remember` e no `/promote`. Uma proposta enviada fica no historico da `proposals` mesmo se descartada depois.
-- **Duplicidade e contradicao**: a classificacao e feita pelo agente seguindo a skill, sem verificacao em codigo; a qualidade depende do agente e da revisao humana (confirmacao de cada lote e PR).
-- **Fontes**: a proposta nao carrega fonte estruturada; se a origem importa, a skill `remember` a escreve no texto.
-- **GitHub**: o `/remember` e o `/promote` exigem `gh` instalado e autenticado (com escrita no repositorio) e rede; todos os comandos levam `-R owner/repo`.
+## Constraints
 
-## 6. Parcial
+- **Revisão:** aprovação de plano, preservação de edições humanas e aprovação do
+  diff atual são conduzidas pela skill e pela pessoa. O código valida formato e
+  Git; a qualidade semântica depende dessa revisão.
+- **Formato:** somente Markdown canônico nas categorias configuradas é enviado.
+  IDs existentes permanecem; headings novos recebem IDs na conferência.
+  Arquivos auxiliares e cópias de propostas ficam fora do commit.
+- **Leitura:** usa `main`, com TTL de 10 minutos e último estado conhecido quando
+  o fetch falha. A conclusão após merge atualiza a leitura local imediatamente.
+- **Privacidade:** o código não filtra segredos ou dados pessoais do texto livre.
+  A confirmação humana decide o compartilhamento. Propostas enviadas continuam
+  no histórico Git mesmo depois da remoção do arquivo. Origem relevante pode
+  ser escrita no texto; não há avaliação estruturada de fontes.
+- **Dependências:** captura e publicação exigem GitHub, `gh` autenticado, rede e
+  escrita no repositório. Suporte distribuído: Linux `amd64` e `arm64`.
+- **Escopo:** uma promoção por vez. Não há retomada, coordenação entre promoções,
+  recuperação automática, rebase automático, reabertura de PR ou migração antiga.
+  Diff canônico vazio não publica nem limpa propostas. Não há limite fixo de
+  dezesseis; contexto insuficiente interrompe a análise integral.
 
-Existe, mas com limite conhecido.
+## Not implemented
 
-- **Suporte das fontes**: a integridade da referencia e deterministica; se a fonte sustenta o fato (`supports`, `contradicts`, `unclear`) e julgamento humano.
-- **Validacao por agentes**: o `/promote` guia o agente com preview e evidencias, mas nao ha criterios automaticos para aceitar, rejeitar ou pedir revisao.
-- **Busca**: textual, sem ranking semantico.
-- **Release sem dono**: `--resume` e `--abort` valem para qualquer pessoa.
-- **Forge**: so GitHub (via `gh`), exigido pelo `/remember` e pelo `/promote`. Nao ha modo offline.
-- **Plataformas**: so Linux (`amd64` e `arm64`).
-- **Escopo de uso**: um repositorio de memoria por pessoa; validado com um desenvolvedor.
+Busca semântica, índice vetorial, captura automática, outras integrações,
+macOS/Windows e outros forges permanecem fora da implementação. Também não há
+tratamento próprio de entrada maliciosa, edição do PR aberto ou métricas de
+qualidade do conhecimento.
 
-## 7. Nao iniciado
+## Verification
 
-- Captura automatica por hook de sessao.
-- Busca semantica, vetorial ou indice persistente (ex.: SQLite).
-- Integracoes com Copilot CLI e OpenCode.
-- Suporte a macOS, Windows e a outros forges (ex.: GitLab).
-- Adiar uma proposta: o release so termina com `proposals/` vazia.
-- Tratamento de entrada maliciosa em `proposals/`.
-- Correcao do PR aberto pelo gpm.
-- Versao minima de `git` e `gh`.
-- Metricas de relevancia, correcao e custo de manutencao.
-
-## 8. Verificacao
-
-```bash
-make verify          # go test, go test -race, go vet, go build
-make verify-offline  # idem, sem proxy de modulos
-tests/e2e/run-phase-3.sh  # E2E com binario real em remotos locais, sem rede
+```sh
+make verify              # testes, race, vet e build
+make verify-offline      # mesmas verificações sem proxy de módulos
+tests/e2e/run-phase-3.sh # binário real com Git local e GitHub simulado
 ```
+
+A verificação de race exige um compilador C para CGO. Os testes de contrato da
+skill verificam as instruções escritas; não executam julgamento por um LLM.
