@@ -125,12 +125,6 @@ pequenas para preparar, conferir, publicar e concluir.
 
 ## Current limits
 
-Não há limite de dezesseis propostas nem processamento por lotes. O limite é a
-capacidade de ler e discutir todo o conjunto no contexto disponível.
-
-Esta versão cobre preparação, revisão, publicação e conclusão após merge. Não
-inclui retomada, coordenação entre promoções, recuperação automática, rebase
-quando a `main` avança, reabertura de PR ou migração de trabalhos antigos.
-Uma falha interrompe o fluxo e informa o erro, sem apagar automaticamente os
-arquivos preparados nem declarar sucesso. Um diff canônico vazio não cria
-publicação e deixa as propostas pendentes.
+Uma falha interrompe o fluxo e informa o erro. Os arquivos preparados permanecem
+no disco para consulta. Com um diff canônico vazio, as propostas permanecem
+pendentes para uma próxima consolidação.

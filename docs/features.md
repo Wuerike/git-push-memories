@@ -12,8 +12,7 @@ branch `promote/<UTC>-<random>` a partir da `main` obtida no fetch. Insumos de u
 revisão fixa de propostas ficam fora do worktree editável.
 
 Só `memories/<categoria-configurada>/**/*.md` participa da leitura. O clone bare
-fica no estado do usuário, com worktrees separados. O MCP usa stdio; não há
-daemon, porta, banco ou hook de captura de sessão.
+fica no estado do usuário, com worktrees separados. O MCP usa stdio.
 
 ## Installation and CLI
 
@@ -44,7 +43,7 @@ Campos desconhecidos e conteúdo extra são rejeitados.
 
 A conclusão exige o registro local `promotion-published.json` criado no envio.
 Sem publicação pendente ou com PR ainda aberto, a CLI informa a situação e sai
-com erro. Não há confirmação manual para substituir a consulta ao GitHub.
+com erro.
 
 ## Explicit Claude Code commands
 
@@ -61,8 +60,7 @@ canônico e PR para `main`; o merge é humano.
 
 Cada proposta tem destinos ou justificativa livre no resumo do PR. São aceitas
 relações de várias propostas para uma memória e de uma proposta para várias
-memórias. Não há códigos fechados de descarte ou operações obrigatórias por
-proposta. O agente e a pessoa decidem o significado da consolidação.
+memórias. O agente e a pessoa decidem o significado da consolidação.
 
 ## MCP tools
 
@@ -102,7 +100,7 @@ incluem `promotion_not_prepared`, `no_proposals`, `no_changes`,
 `invalid_summary`, `invalid_memory`, `merge_pending`, `gh_unavailable`,
 `push_denied`, `network_unavailable`, `worktree_dirty` e `promotion_failed`.
 Uma falha interrompe o percurso sem declarar sucesso ou apagar arquivos
-preparados automaticamente. Não há restauração de sessão na inicialização MCP.
+preparados automaticamente.
 
 ## Constraints
 
@@ -120,17 +118,9 @@ preparados automaticamente. Não há restauração de sessão na inicialização
   ser escrita no texto; não há avaliação estruturada de fontes.
 - **Dependências:** captura e publicação exigem GitHub, `gh` autenticado, rede e
   escrita no repositório. Suporte distribuído: Linux `amd64` e `arm64`.
-- **Escopo:** uma promoção por vez. Não há retomada, coordenação entre promoções,
-  recuperação automática, rebase automático, reabertura de PR ou migração antiga.
-  Diff canônico vazio não publica nem limpa propostas. Não há limite fixo de
-  dezesseis; contexto insuficiente interrompe a análise integral.
-
-## Not implemented
-
-Busca semântica, índice vetorial, captura automática, outras integrações,
-macOS/Windows e outros forges permanecem fora da implementação. Também não há
-tratamento próprio de entrada maliciosa, edição do PR aberto ou métricas de
-qualidade do conhecimento.
+- **Escopo:** execute uma promoção por vez. A consolidação exige a leitura de
+  todas as propostas e memórias da base no contexto disponível. Com um diff
+  canônico vazio, as propostas permanecem pendentes.
 
 ## Verification
 
