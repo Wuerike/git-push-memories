@@ -263,17 +263,19 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] O skill orienta leitura de todos os insumos e memórias, apresenta agrupamentos/destinos/justificativas e espera aprovação antes da escrita.
-- [ ] Delegação atribui um responsável por memória e fornece contexto; principal revisa coerência; nenhuma rodada escreve durante edição humana.
-- [ ] Ajustes leem arquivos atuais; mudanças materiais voltam à conversa; publicação segue aprovação do resultado atual.
-- [ ] Não há plano persistente, lote de dezesseis, ledger por fato, folds, códigos fechados ou tokens.
-- [ ] allowed-tools inclui ferramentas nativas e as quatro MCP; documentar que permissões do host continuam valendo.
-- [ ] Os testes provam obrigações escritas, sem alegar executar julgamento LLM; o Verifier julga exemplos e limites.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] O skill orienta leitura de todos os insumos e memórias, apresenta agrupamentos/destinos/justificativas e espera aprovação antes da escrita.
+- [x] Delegação atribui um responsável por memória e fornece contexto; principal revisa coerência; nenhuma rodada escreve durante edição humana.
+- [x] Ajustes leem arquivos atuais; mudanças materiais voltam à conversa; publicação segue aprovação do resultado atual.
+- [x] Não há plano persistente, lote de dezesseis, ledger por fato, folds, códigos fechados ou tokens.
+- [x] allowed-tools inclui ferramentas nativas e as quatro MCP; documentar que permissões do host continuam valendo.
+- [x] Os testes provam obrigações escritas, sem alegar executar julgamento LLM; o Verifier julga exemplos e limites.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: contract; substituir tests/claudeadapter/promote_create_test.go por testes nomeados do novo contrato, pelo menos 15 testes, mais testes de instalação existentes.
 **Gate**: Full — go test ./...
 **Commit**: `refactor(promote): guide agent-led consolidation`
+
+**Result**: Complete — 15 testes nomeados do contrato do skill e gate completo passaram; skill orienta arquivos finais e dois momentos de aprovação, sem operações por proposta ou contrato antigo.
 
 ### T10: Retirar o componente antigo de promoção e release
 
@@ -506,9 +508,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T8 concluídas e verificadas; próxima T9. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T9 concluídas e verificadas; próxima T10. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
-**Current:** T8 concluída com gate verde; próxima T9.
+**Current:** T9 concluída com gate verde; próxima T10.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 

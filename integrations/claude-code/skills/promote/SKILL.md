@@ -1,37 +1,69 @@
 ---
 name: promote
-description: Open a release, consolidate every pending proposal in batches of up to sixteen (grouped by subject or page, each page planned with a fact ledger, consumed through section operations or whole-page rewrites, or discarded with a reason) after iterative diff review and confirmation, then send the release for review.
+description: Consolidate all pending proposals through a global plan, direct memory file edits, human review and a pull request.
 disable-model-invocation: true
-allowed-tools: mcp__git-push-memories__memory_promote_open, mcp__git-push-memories__memory_promote_status, mcp__git-push-memories__memory_promote_submit, mcp__git-push-memories__memory_proposal_list, mcp__git-push-memories__memory_search, mcp__git-push-memories__memory_expand, mcp__git-push-memories__memory_page_read, mcp__git-push-memories__memory_promote_preview, mcp__git-push-memories__memory_promote_apply, mcp__git-push-memories__memory_promote_batch_preview, mcp__git-push-memories__memory_promote_batch_apply
-argument-hint: "[proposal ID ...]"
+allowed-tools: Read, Write, Edit, Glob, Grep, Agent, mcp__git-push-memories__memory_promote_prepare, mcp__git-push-memories__memory_promote_check, mcp__git-push-memories__memory_promote_submit, mcp__git-push-memories__memory_promote_finish
 ---
 <!-- managed-by: git-push-memories -->
 
-Promote proposals only because the user explicitly invoked `/promote`. A release consolidates **all** pending proposals: it ends only when none is left in the release branch, and nothing can be postponed. Each proposal is consumed into canonical memory or discarded with a closed reason code. Existing pages are reorganized only while promoting a proposal of the group, never without one. Every read tool takes `source: release` in this flow, so batch N+1 sees what batch N already wrote; never omit it.
+Run only because the person explicitly invoked `/promote`. The principal and the person decide how knowledge becomes memory. The tools provide the workspace, canonical formatting and publication.
 
-1. Call `memory_promote_status`. If a release is in progress and was opened by someone else, show who and when and ask whether to continue it. Otherwise, after explicit confirmation, call `memory_promote_open`: it locks promotion for the whole team, includes every proposal sent so far, and checks out the release branch here (it resumes the release already open on this machine). If it returns `release_active`, `no_proposals`, `push_denied` or `network_unavailable`, explain it and stop. Then call `memory_proposal_list` with `source: release` exactly once. Do not treat a proposal as canonical memory.
-2. Group the pending proposals and get approval. Propose groups of proposals about the same subject or the same page, using each proposal's text (title, content, and the suggested action and target page it describes) plus one `memory_search` (with `source: release`) per group with `budget_bytes: 4096` to find the existing page. Show every group with its letter, subject, proposal IDs and titles, suggested actions read from the text, and its existing page path or "new page", for example "A: read layer team (2 proposals, new page); B: checkout timeout (1 proposal, page `memories/...`)". The user approves, merges or splits groups and chooses the order. Work in batches of at most sixteen proposals (a group larger than sixteen is split across batches), repeating steps 3 to 12 per batch until `memory_promote_status` shows no pending proposal. After the user merges or splits groups, run the per-group `memory_search` again for every new or changed group before showing the grouping again. Until the grouping is approved, read no page, expand nothing and request no preview. Cancellation or no proposals ends the flow; an unfinished release stays open and `/promote` continues it later.
-3. For each selected proposal, show its exact content and the suggested action and target page you read from its text; the server does not interpret them, so they are only suggestions. Expand the group's search handles (`source: release`), in rank order, up to three, with `budget_bytes: 4096`.
-4. For every group with an existing page, call `memory_page_read` with its path, `source: release` and `budget_bytes: 65536`. If it returns `budget_too_small`, that group uses only section operations from the expanded handles. Never rewrite from a partial page.
-5. Classify each expanded canonical candidate, page fact and related proposal as `equivalent`, `contradictory`, `related`, or `unrelated`; present this as an assisted assessment, never as a completeness guarantee. Choose `discard_proposal` only when the proposal itself should not become memory, using exactly one reason: `not_relevant`, `incorrect`, `sensitive`, `wrong_target`, `superseded`, or `duplicate`. Use `duplicate` only when identified evidence already represents the same knowledge. Do not discard valid knowledge merely because its suggested target is wrong; select the correct canonical target instead.
-6. If any candidate is classified as `contradictory`, show the conflicting candidate and ask the user to choose the resolution from only options supported by the selected proposal and identified evidence before requesting a preview. Any proposal may preserve canonical memory and be discarded. An `update`, or a `rewrite_page`, may replace identified canonical facts with a complete current state. A `create` may keep both facts only when they have distinct explicit scopes. Otherwise cancel; ambiguous or unsupported resolution ends the flow without preview.
-7. Before any preview, show the plan for each page: its current structure (headings), the desired structure, and a fact ledger table with one row per existing or proposed fact and its fate: `kept`, `merged`, `added (proposal <id>)`, or `removed (<reason>)`. A new fact may come only from a proposal of the group; on a new page every fact is `added (proposal <id>)`. Unchanged text is copied byte for byte into any replacement, so the diff shows only real changes, and every removed `-` line of the diff must have a ledger row. List corrections nobody asked for (title, structure, redundant sections) separately under "corrections to earlier promotions" and apply them only after the user explicitly confirms each one. If the user rejects the plan, revise it or cancel; request no preview until the plan stands.
-8. Choose the operations:
+## 1. Prepare
 
-   | Situation | Operation |
-   |---|---|
-   | two or more proposals on the same existing page | `rewrite_page` for one and `fold_proposal` with `fold_into` set to that proposal's ID for the others, in `memory_promote_batch_preview` |
-   | the page title, structure or grouping is wrong | `rewrite_page` |
-   | an already consolidated page and a new proposal that complements or corrects it | `rewrite_page` over the current page; consolidation is never final |
-   | a local change on a page whose structure is already good | `replace_section`, `create_section` or `remove_section` |
-   | two or more proposals and no existing page | `create_page` with a new `memories/<category>/<lowercase-kebab-case>.md` path and a complete `replacement` for one owning proposal, and `fold_proposal` with `fold_into` set to that proposal's ID for the others, in `memory_promote_batch_preview` |
-   | one proposal that creates knowledge and no existing page | `create_page` with a new `memories/<category>/<lowercase-kebab-case>.md` path and no `replacement`, unless the user wants a restructured page |
-   | a proposal that should not become memory | `discard_proposal` |
+Call `memory_promote_prepare`. Use the returned worktree, proposal input paths, memory inventory and selected revisions. Proposal input paths are absolute; memory paths are relative to the returned worktree. Treat proposal files as inputs for discussion.
 
-   Nothing in code ties an operation to the action a proposal suggests, so confirm that the operation matches the intent of the proposal text; only the human confirmation guards it. A rewrite never deletes the page. A `fold_proposal` points only to a `rewrite_page` or to a `create_page` with a `replacement` in the same batch. Section operations follow the suggested action in the text: `create_section` (concise new heading) for `create`; `replace_section` for `update` only when one expanded leaf section is the unambiguous target, with a complete replacement body that incorporates the proposal while preserving every still-valid fact; `remove_section` for `remove` of one unambiguous expanded leaf, or `remove_page` only when that leaf is the sole canonical `Overview` of a generated page and the whole page is obsolete. Use the handle's exact path, section ID, and content hash. A `rewrite_page` replacement is the complete page Markdown that keeps every still-valid fact and the `@id` markers of preserved headings, adds no `@id` marker to new headings (the server generates them), may omit the frontmatter (it is preserved), and uses the page `content_hash` from `memory_page_read`. A `create_page` replacement is the complete new page Markdown: one H1 title, then its sections, no frontmatter and no `@id` markers (the server generates every ID). Name a page after the group's subject noun with a structure that fits it (for example a team page with a members list), never after one person's sentence. The target a proposal names is only a suggestion. Do not cascade removals or repair links automatically.
-9. Require distinct target paths for all canonical decisions, except that a `rewrite_page` or a `create_page` with a `replacement` and the `fold_proposal` items that fold into it share its page. If two other decisions need the same page, turn them into one fold group or stop and ask the user to promote them in separate attempts. For one selected proposal, call `memory_promote_preview` exactly once per review round with its decision; `fold_proposal` is never sent there. For multiple proposals, call `memory_promote_batch_preview` exactly once per review round with one decision per selected proposal in the selected order. Include target path for canonical operations; `heading` only for `create_section`; `section_id`, `content_hash`, and complete `replacement` only for `replace_section`; `content_hash` and complete `replacement` for `rewrite_page`; complete `replacement` for `create_page` only when it receives folds or the user wants a restructured page; `section_id` and `content_hash` for `remove_section` or `remove_page`; only `fold_into` for `fold_proposal`; and `reason` only for `discard_proposal`. Any tool error ends the flow without apply or fallback writes.
-10. Review the preview in rounds. In the body of your own message, never relying on the tool result being visible, show the complete diff of every item inside a fenced ```diff block, item by item (page by page) before the batch summary, followed by the summarized ledger. Classify and show every canonical candidate and related proposal in the preview evidence, followed by the exact operation, the proposal text, target fields, replacement or discard reason. Lexical candidates are limited evidence. If preview evidence changes any classification or chosen resolution, say so and return to step 5. The user may ask for adjustments (title, structure, what goes in or out, excluding or adding a proposal from the step 1 list); redo the decisions and call the preview tool again in this same invocation, as many rounds as needed. An adjustment of title, structure or content returns to step 7. An adjustment that changes the proposal set, a group or a target page returns to step 2: regroup and run `memory_search` again for every new or changed group, show every newly added proposal as in step 3, call `memory_page_read` again for every affected page, and give each fold group whose owner was excluded a new owner (or turn the remaining proposal into a plain decision) before step 5. Otherwise require explicit confirmation that this exact decision and the diff of the latest round may be applied and committed.
-11. After that confirmation, call `memory_promote_apply` exactly once for one proposal or `memory_promote_batch_apply` exactly once for multiple proposals, with only the preview token of the latest round. Never use a token from an earlier round; a new preview invalidates it. Cancellation leaves the proposal unchanged; for a batch, it leaves every selected proposal unchanged, and the flow ends without any write.
-12. Return each proposal ID, canonical target and section ID when present, decision (including `fold_into` for folded proposals), reason when discarded, and commit. Explain that a consumed commit contains the exact canonical change plus proposal removal, while a discarded commit removes only the proposal and records its reason. If proposals remain pending in the release, return to step 2 for the next batch. When `memory_promote_status` shows none pending, call `memory_promote_submit`: it pushes the release branch and opens the pull request into `main`. Give the user the pull-request link and explain that a human reviews and merges it (squash is recommended) and that the next `/promote` or `gpm promote --finish` finalizes the release. Never push or open the pull request any other way.
+The initial proposal set is fixed. Inputs received afterwards belong to a later consolidation. Start a fresh workspace; this version does not restore an interrupted editing session.
 
-Never call apply without a preview from this invocation or before the user confirms its exact diff. Never edit the memory repository through another tool.
+If a tool, read or write fails, report the error and stop. Keep prepared files in place and never claim completion after a failure. Use the promotion tools for Git and publication.
+
+## 2. Read the entire set
+
+Read every proposal at its `input_path` and every memory in `memory_paths` in full before preparing the global plan. Read large files in successive calls until their end and account for every inventory path. Search is only a navigation aid; it never replaces reading the complete inventory. There is no proposal batch size.
+
+If the entire set cannot be read within the available context, say so and stop. Never present a partial analysis as complete.
+
+## 3. Discuss the global plan
+
+Show topic groups, proposal IDs and titles, destination pages (existing or new), and suggested changes. Several proposals can contribute to one memory; one proposal can contribute to several memories. Suggested actions and destinations are hints: select the canonical destination that best fits the knowledge.
+
+Account for every initial proposal with one or more destinations or a free-form justification for excluding it from memory. Explain duplicates, incorrect interpretations and unsuitable knowledge openly. Let the person merge or split groups, change destinations and resolve contradictions. Update the global plan in conversation; do not create a separate plan file.
+
+Reorganize only memories related to this proposal set, as approved in the global plan; preserve knowledge that remains valid. Leave unrelated improvements outside this consolidation.
+
+Wait for explicit approval of the global plan before editing any canonical file.
+
+## 4. Write final memories
+
+Write canonical knowledge in complete final pages in the returned worktree. Omit proposal instructions about action and destination from the memory prose. Name pages after their subject, using `memories/<configured-category>/<lowercase-kebab-case>.md`. Preserve frontmatter. Preserve existing @id markers on retained sections. Leave new headings without markers; checking generates their IDs before review. Remove obsolete pages only when their removal is part of the approved plan.
+
+After plan approval, the principal decides whether to delegate independent memory files. Assign one owner per file in each round. Each owner receives the exact assigned paths, current page, all relevant proposals, approved decisions and cross-page context. Each delegate writes only its assigned files in the same worktree. Only the principal performs Git, proposal cleanup and publication. Wait for every delegate to finish before reviewing the result.
+
+## 5. Review the whole result
+
+The principal rereads every prepared page and checks it against the approved global plan. Review duplicates, contradictions, references and omissions across the resulting pages. Resolve inconsistencies between delegates before presenting the files.
+
+If content materially changes the approved plan, return to discussion and obtain the person's decision before writing that change.
+
+Call `memory_promote_check` to complete IDs, validate canonical files and obtain the current diff. An empty canonical diff has no publication path in this version: report it and leave proposals untouched.
+
+## 6. Review with the person
+
+Show a global summary and the complete diff for each changed memory in your message. Give the worktree path for optional VS Code editing; do not open the editor automatically. Terminal and editor review the same final files.
+
+Finish all agent writing before human review. Stop writing while the person is editing. Do not run check during human editing. Wait until the person asks for adjustments or says editing is finished in conversation.
+
+For requested adjustments, reread the current files and preserve human edits outside the requested changes. New delegate rounds start from those files with explicit assignments. After edits, run check again and show the updated diff before seeking publication approval. Keep the conversation's global plan current.
+
+## 7. Publish
+
+Ask for explicit approval to publish the current files and diff. The approved global summary accounts for every initial proposal with its destinations or free-form justification.
+
+Before submitting, reread the current changed files to confirm the result still matches the reviewed diff. If anything changed, return to human review and obtain a new approval. Do not edit files after publication approval.
+
+After explicit approval, call `memory_promote_submit` with the approved global summary as `summary`. This creates one canonical commit and opens the PR. Return the commit and PR link. The person reviews and merges the PR.
+
+## 8. Complete after merge
+
+The next `/promote` confirms and cleans a previously merged publication before preparing a new set. The person can also run `gpm promote --finish` or ask you to call `memory_promote_finish` after merging.
+
+Cleanup requires confirmed merge and removes only concluded inputs whose path and contents still match. New or changed proposals remain pending. Published local reads then follow main. The publication record stores only the PR/input linkage for this cleanup.

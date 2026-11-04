@@ -158,21 +158,21 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-03 | Preparar e compreender, AC 3 | Execute | Implementing |
 | PROM-04 | Preparar e compreender, AC 4 | Execute | Implementing |
 | PROM-05 | Preparar e compreender, AC 5 | Execute | Implementing |
-| PROM-06 | Discutir o plano, AC 1 | Specify | Pending |
-| PROM-07 | Discutir o plano, AC 2 | Specify | Pending |
+| PROM-06 | Discutir o plano, AC 1 | Execute | Implementing |
+| PROM-07 | Discutir o plano, AC 2 | Execute | Implementing |
 | PROM-08 | Discutir o plano, AC 3 | Execute | Implementing |
-| PROM-09 | Discutir o plano, AC 4 | Specify | Pending |
-| PROM-10 | Discutir o plano, AC 5 | Specify | Pending |
-| PROM-11 | Discutir o plano, AC 6 | Specify | Pending |
-| PROM-12 | Preparar e revisar, AC 1 | Specify | Pending |
-| PROM-13 | Preparar e revisar, AC 2 | Specify | Pending |
-| PROM-14 | Preparar e revisar, AC 3 | Specify | Pending |
+| PROM-09 | Discutir o plano, AC 4 | Execute | Implementing |
+| PROM-10 | Discutir o plano, AC 5 | Execute | Implementing |
+| PROM-11 | Discutir o plano, AC 6 | Execute | Implementing |
+| PROM-12 | Preparar e revisar, AC 1 | Execute | Implementing |
+| PROM-13 | Preparar e revisar, AC 2 | Execute | Implementing |
+| PROM-14 | Preparar e revisar, AC 3 | Execute | Implementing |
 | PROM-15 | Preparar e revisar, AC 4 | Execute | Implementing |
 | PROM-16 | Preparar e revisar, AC 5 | Execute | Implementing |
 | PROM-17 | Preparar e revisar, AC 6 | Execute | Implementing |
-| PROM-18 | Preparar e revisar, AC 7 | Specify | Pending |
+| PROM-18 | Preparar e revisar, AC 7 | Execute | Implementing |
 | PROM-19 | Preparar e revisar, AC 8 | Execute | Implementing |
-| PROM-20 | Preparar e revisar, AC 9 | Specify | Pending |
+| PROM-20 | Preparar e revisar, AC 9 | Execute | Implementing |
 | PROM-21 | Preparar e revisar, AC 10 | Execute | Implementing |
 | PROM-22 | Publicar e concluir, AC 1 | Execute | Implementing |
 | PROM-23 | Publicar e concluir, AC 2 | Execute | Implementing |
@@ -185,7 +185,7 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-30 | Substituir contrato, AC 3 | Execute | Implementing |
 | PROM-31 | Substituir contrato, AC 4 | Specify | Pending |
 | PROM-32 | Edge Cases, AC 1 | Execute | Implementing |
-| PROM-33 | Edge Cases, AC 2 | Specify | Pending |
+| PROM-33 | Edge Cases, AC 2 | Execute | Implementing |
 | PROM-34 | Edge Cases, AC 3 | Execute | Implementing |
 
 **Coverage:** 34 critérios identificados e mapeados às 14 tarefas de `tasks.md`, com 34 checks e provas planejadas.
