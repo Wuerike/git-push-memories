@@ -310,14 +310,16 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] O guia explica o caminho feliz, insumos separados, aprovações e limpeza preservando propostas novas.
-- [ ] Remover instruções de marcador, folds, batches, recovery e retomada; não prometer cenários excluídos.
-- [ ] Um teste de contrato do documento passa junto da suíte completa.
-- [ ] Gate da tarefa passa: `go test ./...`.
+- [x] O guia explica o caminho feliz, insumos separados, aprovações e limpeza preservando propostas novas.
+- [x] Remover instruções de marcador, folds, batches, recovery e retomada; não prometer cenários excluídos.
+- [x] Um teste de contrato do documento passa junto da suíte completa.
+- [x] Gate da tarefa passa: `go test ./...`.
 
 **Tests**: contract; criar tests/claudeadapter/promotion_docs_test.go com TestPromotionDocumentationDescribesImplementedWorkflow cobrindo inicialmente este guia.
 **Gate**: Full — go test ./...
 **Commit**: `docs(workflow): describe direct file consolidation`
+
+**Result**: Complete — Guia de uso alinhado ao percurso aprovado; teste de contrato do guia e go test ./... passaram; links locais e diff conferidos.
 
 ### T12: Atualizar a referência de funcionalidades
 
@@ -510,9 +512,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T10 concluídas e verificadas; próxima T11. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T11 concluídas e verificadas; próxima T12. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
-**Current:** T10 concluída com gate verde; próxima T11.
+**Current:** T11 concluída com gate verde; próxima T12.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
 

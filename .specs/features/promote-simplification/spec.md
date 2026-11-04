@@ -183,7 +183,7 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 | PROM-28 | Substituir contrato, AC 1 | Execute | Implementing |
 | PROM-29 | Substituir contrato, AC 2 | Execute | Implementing |
 | PROM-30 | Substituir contrato, AC 3 | Execute | Implementing |
-| PROM-31 | Substituir contrato, AC 4 | Specify | Pending |
+| PROM-31 | Substituir contrato, AC 4 | Execute | Implementing |
 | PROM-32 | Edge Cases, AC 1 | Execute | Implementing |
 | PROM-33 | Edge Cases, AC 2 | Execute | Implementing |
 | PROM-34 | Edge Cases, AC 3 | Execute | Implementing |
