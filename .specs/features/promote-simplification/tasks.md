@@ -482,7 +482,7 @@ Proof: `go test ./internal/mcpserver -run '^TestConsolidationPreservesRememberAn
 Proof: `go test ./tests/claudeadapter -run '^TestPromotionDocumentationDescribesImplementedWorkflow$' -count=1`
 
 **C32** - Falha de dependência interrompe com erro e deixa o trabalho preparado, sem alegar conclusão (PROM-32, Edge Cases, AC 1).
-Proof: `go test ./internal/consolidation -run '^(TestConsolidationFailureStopsWithoutDeletingWork|TestSubmitFailureKeepsPreparedWork|TestFinishFailurePreservesProposalsAndWork)$' -count=1`
+Proof: `go test ./internal/consolidation -run '^Test.*Failure.*Work$' -count=1`
 
 **C33** - O contrato explicita contexto insuficiente e proíbe apresentar leitura parcial como completa (PROM-33, Edge Cases, AC 2).
 Proof: `go test ./tests/claudeadapter -run '^TestPromoteContractStopsOnIncompleteContext$' -count=1`
@@ -508,7 +508,7 @@ Proof: `go test ./internal/consolidation -run '^TestPrepareWithoutProposalsDoesN
 | PROM-32 | T3, T4, T5, T6, T7, T8 |
 | PROM-33 | T9 |
 
-**Coverage**: 34 critérios, 34 checks e 34 provas implementadas; validação final pendente.
+**Coverage**: 34 critérios, 34 checks e 34 provas implementadas e aprovadas; revisão independente PASS.
 
 ## Task Granularity Check
 
@@ -518,9 +518,9 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T14 concluídas com gates verdes; provas finais e Verifier pendentes. Execução sequencial pelo principal, aprovada com "aprovado".
-**Dispatched:** None.
-**Current:** T14 concluída com gate verde; executar provas em HEAD e despachar Verifier independente.
+**Settled mid-build:** T1–T14 concluídas com gates verdes; provas finais e Verifier PASS, três mutações mortas, sem achados. Execução sequencial pelo principal, aprovada com "aprovado".
+**Dispatched:** Verifier independente retornou PASS sobre HEAD 1ac27b07ab1d48faa6975e8f025175466f9dda6d; três mutações mortas e dois exemplos próprios aprovados; nenhum achado. Sem screens: feature sem capturas.
+**Current:** T1–T14 concluídas e revisão independente PASS. 34 checks e três comandos de build passaram; três mutações mortas, nenhum achado. proofs.md registra a execução final no HEAD vigente; validate_verification é o gate de fechamento. Sem achados, não há lições a registrar.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
 **Walked:** 2026-11-03 — Independent Tests percorridos em Git local e MCP/CLI reais, sem serviços remotos: preparação de 17 propostas e inventário fixo (consolidation/prepare_test.go); relações 3 propostas/2 páginas e leitura preservada (mcpserver/consolidation_test.go); páginas finais, IDs e edição humana (memory/document_test.go, consolidation/check_test.go e submit_test.go); PR aberto sem limpeza, squash humano simulado, preservação de propostas novas/alteradas e leitura atualizada (consolidation/finish_test.go); substituição do contrato antigo (MCP, CLI e quatro documentos). TestManagedWorkflowEndToEnd compila gpm, executa setup, captura, edição direta, publicação, merge simulado e conclusão em processo novo; segunda pessoa lê sem publicar. Os quatro cenários stdio exercitam criação, atualização, reorganização e combinação. Os testes da skill verificam política escrita; não executam LLM nem provam julgamento semântico automatizado, reservado ao Verifier. Sem telas/capturas nesta feature.
 
@@ -528,3 +528,5 @@ Há 14 tarefas em quatro fases. Podem ser executadas pelo principal ou, com auto
 
 Após a última tarefa: check_proofs em HEAD, Verifier independente com três mutações, fechamento dos achados e validate_verification. Não há capturas ou telas para despachar screens. Verifier é obrigatório pela skill, independentemente da escolha sobre trabalhadores de implementação.
 
+
+A prova C32 seleciona os mesmos três testes de falha com `^Test.*Failure.*Work$`. O seletor evita pipes na tabela Markdown gerada, que o gate interpretava como colunas adicionais. A seleção continua cobrindo preparação, envio e conclusão; nenhuma asserção ou teste foi reduzido. Mutações exigiram execução autorizada para o diário em `.git`; fontes restauradas integralmente.

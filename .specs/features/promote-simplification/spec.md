@@ -1,7 +1,7 @@
 # Promote Simplification Specification
 
 **Approved**: 2026-11-03 - user: "aprovado"
-**Status:** Execução aprovada e em andamento; provas finais pendentes.
+**Status:** Implementação concluída e revisão independente PASS; 34 critérios verificados e três mutações detectadas. O gate final consulta proofs.md no HEAD vigente.
 **Scope:** Large; fluxo principal entre preparação Git, skill, ferramentas de promoção e publicação GitHub.
 
 ## Problem Statement
@@ -153,40 +153,40 @@ Exceções complexas permanecem fora do escopo. Os seguintes limites evitam decl
 
 | Requirement ID | Story / criterion | Phase | Status |
 | --- | --- | --- | --- |
-| PROM-01 | Preparar e compreender, AC 1 | Execute | Implementing |
-| PROM-02 | Preparar e compreender, AC 2 | Execute | Implementing |
-| PROM-03 | Preparar e compreender, AC 3 | Execute | Implementing |
-| PROM-04 | Preparar e compreender, AC 4 | Execute | Implementing |
-| PROM-05 | Preparar e compreender, AC 5 | Execute | Implementing |
-| PROM-06 | Discutir o plano, AC 1 | Execute | Implementing |
-| PROM-07 | Discutir o plano, AC 2 | Execute | Implementing |
-| PROM-08 | Discutir o plano, AC 3 | Execute | Implementing |
-| PROM-09 | Discutir o plano, AC 4 | Execute | Implementing |
-| PROM-10 | Discutir o plano, AC 5 | Execute | Implementing |
-| PROM-11 | Discutir o plano, AC 6 | Execute | Implementing |
-| PROM-12 | Preparar e revisar, AC 1 | Execute | Implementing |
-| PROM-13 | Preparar e revisar, AC 2 | Execute | Implementing |
-| PROM-14 | Preparar e revisar, AC 3 | Execute | Implementing |
-| PROM-15 | Preparar e revisar, AC 4 | Execute | Implementing |
-| PROM-16 | Preparar e revisar, AC 5 | Execute | Implementing |
-| PROM-17 | Preparar e revisar, AC 6 | Execute | Implementing |
-| PROM-18 | Preparar e revisar, AC 7 | Execute | Implementing |
-| PROM-19 | Preparar e revisar, AC 8 | Execute | Implementing |
-| PROM-20 | Preparar e revisar, AC 9 | Execute | Implementing |
-| PROM-21 | Preparar e revisar, AC 10 | Execute | Implementing |
-| PROM-22 | Publicar e concluir, AC 1 | Execute | Implementing |
-| PROM-23 | Publicar e concluir, AC 2 | Execute | Implementing |
-| PROM-24 | Publicar e concluir, AC 3 | Execute | Implementing |
-| PROM-25 | Publicar e concluir, AC 4 | Execute | Implementing |
-| PROM-26 | Publicar e concluir, AC 5 | Execute | Implementing |
-| PROM-27 | Publicar e concluir, AC 6 | Execute | Implementing |
-| PROM-28 | Substituir contrato, AC 1 | Execute | Implementing |
-| PROM-29 | Substituir contrato, AC 2 | Execute | Implementing |
-| PROM-30 | Substituir contrato, AC 3 | Execute | Implementing |
-| PROM-31 | Substituir contrato, AC 4 | Execute | Implementing |
-| PROM-32 | Edge Cases, AC 1 | Execute | Implementing |
-| PROM-33 | Edge Cases, AC 2 | Execute | Implementing |
-| PROM-34 | Edge Cases, AC 3 | Execute | Implementing |
+| PROM-01 | Preparar e compreender, AC 1 | Verify | Verified |
+| PROM-02 | Preparar e compreender, AC 2 | Verify | Verified |
+| PROM-03 | Preparar e compreender, AC 3 | Verify | Verified |
+| PROM-04 | Preparar e compreender, AC 4 | Verify | Verified |
+| PROM-05 | Preparar e compreender, AC 5 | Verify | Verified |
+| PROM-06 | Discutir o plano, AC 1 | Verify | Verified |
+| PROM-07 | Discutir o plano, AC 2 | Verify | Verified |
+| PROM-08 | Discutir o plano, AC 3 | Verify | Verified |
+| PROM-09 | Discutir o plano, AC 4 | Verify | Verified |
+| PROM-10 | Discutir o plano, AC 5 | Verify | Verified |
+| PROM-11 | Discutir o plano, AC 6 | Verify | Verified |
+| PROM-12 | Preparar e revisar, AC 1 | Verify | Verified |
+| PROM-13 | Preparar e revisar, AC 2 | Verify | Verified |
+| PROM-14 | Preparar e revisar, AC 3 | Verify | Verified |
+| PROM-15 | Preparar e revisar, AC 4 | Verify | Verified |
+| PROM-16 | Preparar e revisar, AC 5 | Verify | Verified |
+| PROM-17 | Preparar e revisar, AC 6 | Verify | Verified |
+| PROM-18 | Preparar e revisar, AC 7 | Verify | Verified |
+| PROM-19 | Preparar e revisar, AC 8 | Verify | Verified |
+| PROM-20 | Preparar e revisar, AC 9 | Verify | Verified |
+| PROM-21 | Preparar e revisar, AC 10 | Verify | Verified |
+| PROM-22 | Publicar e concluir, AC 1 | Verify | Verified |
+| PROM-23 | Publicar e concluir, AC 2 | Verify | Verified |
+| PROM-24 | Publicar e concluir, AC 3 | Verify | Verified |
+| PROM-25 | Publicar e concluir, AC 4 | Verify | Verified |
+| PROM-26 | Publicar e concluir, AC 5 | Verify | Verified |
+| PROM-27 | Publicar e concluir, AC 6 | Verify | Verified |
+| PROM-28 | Substituir contrato, AC 1 | Verify | Verified |
+| PROM-29 | Substituir contrato, AC 2 | Verify | Verified |
+| PROM-30 | Substituir contrato, AC 3 | Verify | Verified |
+| PROM-31 | Substituir contrato, AC 4 | Verify | Verified |
+| PROM-32 | Edge Cases, AC 1 | Verify | Verified |
+| PROM-33 | Edge Cases, AC 2 | Verify | Verified |
+| PROM-34 | Edge Cases, AC 3 | Verify | Verified |
 
 **Coverage:** 34 critérios identificados e mapeados às 14 tarefas de `tasks.md`, com 34 checks e provas planejadas.
 
