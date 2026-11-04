@@ -33,6 +33,12 @@ func TestPromotionDocumentationDescribesImplementedWorkflow(t *testing.T) {
 			"Propostas novas ou alteradas", "allowed-tools", "/add-dir", "permissões do host continuam",
 			"não restringe todo o conjunto", "não restaura uma sessão",
 		}},
+		{"CONTEXT.md", []string{
+			"**Consolidation**", "**Promotion worktree**", "**Publication record**", "**Completion**",
+			"global plan in conversation", "current files and diff", "outside the worktree",
+			"only canonical changes", "paths and Git blobs", "Preserve new or changed proposals",
+			"does not resume interrupted", "gpm promote --finish", "All agent writing pauses",
+		}},
 	}
 	for _, doc := range documents {
 		t.Run(doc.path, func(t *testing.T) {

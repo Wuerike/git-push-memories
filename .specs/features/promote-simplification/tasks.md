@@ -373,14 +373,16 @@ T10 → T11 → T12 → T13 → T14
 
 **Done when**:
 
-- [ ] O glossário deixa de estabelecer como modelo atual operações removidas e diferencia comprovante de publicação de sessão retomável.
-- [ ] O teste de documentação cobre os quatro arquivos; não expandir o restante do README ou docs de pesquisa.
-- [ ] make verify passa com todos os testes, race, vet e build; registrar os totais finais.
-- [ ] Gate da tarefa passa: `make verify`.
+- [x] O glossário deixa de estabelecer como modelo atual operações removidas e diferencia comprovante de publicação de sessão retomável.
+- [x] O teste de documentação cobre os quatro arquivos; não expandir o restante do README ou docs de pesquisa.
+- [x] make verify passa com todos os testes, race, vet e build; registrar os totais finais.
+- [x] Gate da tarefa passa: `make verify`.
 
 **Tests**: contract; completar TestPromotionDocumentationDescribesImplementedWorkflow com o glossário, mantendo os três documentos anteriores.
 **Gate**: Build — make verify
 **Commit**: `docs(context): align glossary with consolidation flow`
+
+**Result**: Complete — Glossário e quatro documentos cobertos pelo contrato; 173 testes nomeados de topo disponíveis. make verify passou: suíte completa, race, vet e build. Prova C32 ampliada para incluir falhas já testadas na preparação, envio e conclusão.
 
 ## Checks
 
@@ -480,7 +482,7 @@ Proof: `go test ./internal/mcpserver -run '^TestConsolidationPreservesRememberAn
 Proof: `go test ./tests/claudeadapter -run '^TestPromotionDocumentationDescribesImplementedWorkflow$' -count=1`
 
 **C32** - Falha de dependência interrompe com erro e deixa o trabalho preparado, sem alegar conclusão (PROM-32, Edge Cases, AC 1).
-Proof: `go test ./internal/consolidation -run '^TestConsolidationFailureStopsWithoutDeletingWork$' -count=1`
+Proof: `go test ./internal/consolidation -run '^(TestConsolidationFailureStopsWithoutDeletingWork|TestSubmitFailureKeepsPreparedWork|TestFinishFailurePreservesProposalsAndWork)$' -count=1`
 
 **C33** - O contrato explicita contexto insuficiente e proíbe apresentar leitura parcial como completa (PROM-33, Edge Cases, AC 2).
 Proof: `go test ./tests/claudeadapter -run '^TestPromoteContractStopsOnIncompleteContext$' -count=1`
@@ -506,7 +508,7 @@ Proof: `go test ./internal/consolidation -run '^TestPrepareWithoutProposalsDoesN
 | PROM-32 | T3, T4, T5, T6, T7, T8 |
 | PROM-33 | T9 |
 
-**Coverage**: 34 critérios, 34 checks, 34 provas planejadas; nenhuma implementação iniciada.
+**Coverage**: 34 critérios, 34 checks e 34 provas implementadas; validação final pendente.
 
 ## Task Granularity Check
 
@@ -516,11 +518,11 @@ As dependências dos diagramas correspondem aos campos Depends on; fases apontam
 
 ## Handoff
 
-**Settled mid-build:** T1–T13 concluídas e verificadas; próxima T14. Execução sequencial pelo principal, aprovada com "aprovado".
+**Settled mid-build:** T1–T14 concluídas com gates verdes; provas finais e Verifier pendentes. Execução sequencial pelo principal, aprovada com "aprovado".
 **Dispatched:** None.
-**Current:** T13 concluída com gate verde; próxima T14.
+**Current:** T14 concluída com gate verde; executar provas em HEAD e despachar Verifier independente.
 **Environment:** `source .local/promote-env.sh`; Go 1.25.12 e Zig 0.14.1 isolados em `/tmp/promote-tools`, ambos com checksums oficiais conferidos. CGO habilitado para race. Wrapper local de Go acrescenta `-count=1` aos testes para evitar travamento observado no cache de inputs de leitores `/proc/self/fd`; build cache permanece ativo. Nenhuma configuração global alterada.
-**Walked:** Ainda não executado. Percorrer os Independent Tests da spec após implementar; registrar resultados e os limites das provas de contrato do skill.
+**Walked:** 2026-11-03 — Independent Tests percorridos em Git local e MCP/CLI reais, sem serviços remotos: preparação de 17 propostas e inventário fixo (consolidation/prepare_test.go); relações 3 propostas/2 páginas e leitura preservada (mcpserver/consolidation_test.go); páginas finais, IDs e edição humana (memory/document_test.go, consolidation/check_test.go e submit_test.go); PR aberto sem limpeza, squash humano simulado, preservação de propostas novas/alteradas e leitura atualizada (consolidation/finish_test.go); substituição do contrato antigo (MCP, CLI e quatro documentos). TestManagedWorkflowEndToEnd compila gpm, executa setup, captura, edição direta, publicação, merge simulado e conclusão em processo novo; segunda pessoa lê sem publicar. Os quatro cenários stdio exercitam criação, atualização, reorganização e combinação. Os testes da skill verificam política escrita; não executam LLM nem provam julgamento semântico automatizado, reservado ao Verifier. Sem telas/capturas nesta feature.
 
 Há 14 tarefas em quatro fases. Podem ser executadas pelo principal ou, com autorização explícita, por dois trabalhadores sequenciais: fases 1+2 (7 tarefas), depois fases 3+4 (7 tarefas). A delegação desta implementação é distinta da delegação por memória prevista no produto. Nenhum trabalhador foi despachado.
 
